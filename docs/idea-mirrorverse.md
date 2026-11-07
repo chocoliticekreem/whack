@@ -6,6 +6,9 @@ track: Marshall Wace — New Worlds (see marshall-wace-track.md)
 prior_art: https://github.com/chocoliticekreem/mirrorverse (built 2026-10-17, VAST hackathon)
 ---
 
+> **Latest thinking is in [idea-shortlist.md](idea-shortlist.md)** (the exchange of worlds /
+> reality prunes the multiverse). This doc is the engine and reuse map.
+
 # Mirrorverse: a mirror of London where you can stage events that never happened
 
 > **One-liner:** Drop a car crash on Oxford Street and watch the city react: traffic jams up,
