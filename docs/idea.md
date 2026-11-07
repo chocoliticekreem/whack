@@ -15,7 +15,7 @@ and the mechanism comes after.
 
 | Layer | What it is | Role in the pitch |
 |---|---|---|
-| **1. The worlds** (engine) | 50 parallel versions of Oxford Circus, 30 min ahead, forked from live TfL data | *The new world*: futures that don't exist yet |
+| **1. The worlds** (engine) | 50 parallel versions of Oxford Circus, **5 min ahead**, forked from live TfL data, repriced every minute | *The new world*: futures that don't exist yet |
 | **2. The market** (betting) | Every world is a stock; price = probability it happens. Each real camera frame reprices it, and wrong worlds are **delisted** | *The interaction*: judges bet, reality settles it |
 | **3. The brokers** (TOPS) | AI personas (commuter, tourist, bus driver, contrarian) bet on the futures they believe in. Reality scores their track record, and the right ones get more say | *The MW hook*: their founding idea, pointed at a city |
 
@@ -32,7 +32,7 @@ judges touch it, not the point. Points only, never real money.
 > bet with conviction, TOPS-style. Every real camera frame settles the trades, and wrong worlds
 > shatter.
 >
-> The result: **a live price for every possible next hour of a city.** London is our first
+> The result: **a live price for every possible next five minutes of a city.** London is our first
 > market. **The world is the exchange.**
 
 - **Why no problem statement is needed:** it borrows a trajectory judges already believe in
@@ -49,7 +49,7 @@ judges touch it, not the point. Points only, never real money.
 stocks**. Reality is the market."
 
 **30 s:**
-"Right now we're simulating 50 versions of Oxford Circus, 30 minutes from now. Each is a full
+"Right now we're simulating 50 versions of Oxford Circus, five minutes from now. Each is a full
 agent simulation on the real street map, seeded from live TfL cameras and buses *(technical)*.
 You see them in 3D as ghost cities over real London: where they agree it's solid, where they
 disagree it shimmers *(presentation)*. Every world is a stock, priced by how likely it is. AI
@@ -59,6 +59,12 @@ brokers who called it gain track record. It's Marshall Wace's TOPS idea, pointed
 
 **Close:** "Marshall Wace built TOPS to find out which brokers to trust. We built it to find out
 which London is real."
+
+**Horizon: 5-minute markets, repriced every minute.** The floor is how fast reality reports
+back: about one observation a minute (bus and Tube ~30 s, JamCams ~1 min, recorder polls every
+60 s). One minute is too short (counts barely move, worlds look identical, YOLO noise beats the
+signal). Five minutes lets worlds genuinely disagree, and **a judge sees 2–3 live repricings
+inside the 3-minute slot.** Sped-up replay is the backup if a feed stalls.
 
 **Mapped to MW's three criteria (the idea ties them together):**
 | Criterion | What delivers it | What the judge sees |
@@ -94,7 +100,7 @@ which London is real."
 
 **3-minute demo (open on the visual):**
 1. **0:00 presentation:** the 3D twin, shimmering. "These are the 50 Londons that could exist
-   in 30 minutes. The blur is how uncertain the city is right now."
+   in five minutes. The blur is how uncertain the city is right now."
 2. **0:20 creativity:** cut to the board. "Every one is a stock. Its price is the chance it
    happens. Buy one." A judge bets.
 3. **0:45 the moment:** a frame lands. Worlds shatter in 3D, prices jump on the board, with the

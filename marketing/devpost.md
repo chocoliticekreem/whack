@@ -37,7 +37,7 @@ and the brokers are AI agents with opinions about what happens next. Reality set
 The "new world" in the brief is the one nobody can see: the London that hasn't happened yet.
 
 ## What it does
-- **Forks London into 50 parallel worlds** around Oxford Circus, 30 minutes ahead. Each world is
+- **Forks London into 50 parallel worlds** around Oxford Circus, five minutes ahead, repriced every minute. Each world is
   an agent simulation (commuters, tourists, the lunch crowd, bus arrivals) on the real street
   map, seeded from live TfL data, with different assumptions: who sets off, rain, bus delays,
   pavement capacity.

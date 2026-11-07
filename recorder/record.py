@@ -309,7 +309,7 @@ class Recorder:
             ("bus", self.poll_bus, 60), ("tube", self.poll_tube, 60),
             ("line_status", self.poll_line_status, 60), ("road_status", self.poll_road_status, 60),
             ("disruptions", self.poll_disruptions, 300), ("bikepoint", self.poll_bikepoint, 120),
-            ("crowding", self.poll_crowding, 300), ("jamcams", self.poll_jamcams, 90),
+            ("crowding", self.poll_crowding, 300), ("jamcams", self.poll_jamcams, 60),
         ]
 
     def run_one(self, name: str, fn) -> None:
