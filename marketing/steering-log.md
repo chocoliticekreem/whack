@@ -45,6 +45,9 @@ What we learned, What's next for OverWatch.
 | 25 | ~21:40 | Settlement either fast (cheatable) or fair (about 14 min, because TfL publishes late) | "Fair, and yes" to showing the wait | Station markets settle only on readings TfL stamped after betting closed; cards say "result about HH:MM, when TfL publishes" |
 | 26 | ~21:45 | Hint lines under every card, a static clue strip | "Remove these useless literal subwordings, they bloat the screen"; "make this rotate like a stock exchange" | Hints cut; the strip became a scrolling exchange ticker |
 | 27 | ~21:50 | Light editorial chrome around a colourful dusk map | "Make the UI nicer, it's pretty bland" | Dark glass theme matching the map, series colours, tactile buttons, motion that signals live prices |
+| 28 | ~21:00 | A flat-looking 3D map | "I want the 3D part to be colourful… now it feels like a plane until I zoom in." Stay on MapLibre for performance | Dusk palette, pitch 70, deck.gl hub columns and arcs, still 60 fps (#68) |
+| 29 | ~21:05 | Markets only on the 5 fixed hubs | "If I click around Oxford Circus I bet on that area; if I click elsewhere the pin drops there and I trade there." | Click-anywhere local markets on the nearest real sensor within 400 m, settled only on that sensor; forecast only where there is none (#71) |
+| 30 | ~22:15 | Traders and earnings buried in panels, "81% of usual", payouts as totals | Traders as a dropdown, live earnings on the right, a subtle confetti win, "Bank −19%" instead of "81% of usual", "Bet 100 · win 400", fewer words, keep the ticker. The dark theme from row 27 was tried and rejected | Traders and earnings dropdowns, confetti on a win, change-vs-normal everywhere; the light look stays (#78). Win toasts then show profit so they add up with the earnings total (#80) |
 
 ## Challenges (for Devpost)
 - **Markets that were obvious.** At first 286 of 309 markets opened with a favourite above 90%.

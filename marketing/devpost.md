@@ -2,7 +2,7 @@
 title: Devpost submission draft
 event: WHACK 26 (https://warwickhack.co.uk)
 track: Marshall Wace — New Worlds
-status: draft, checked against main through #46 and the live system on Sat 7 Nov ~19:30. Add every teammate on Devpost and re-check the live link before submitting (Sun 09:00–11:00)
+status: final draft, checked against main through #81 (e59773b) and the live system on Sat 7 Nov ~23:45. Add every teammate on Devpost and re-check the live link before submitting (Sun 09:00–11:00)
 ---
 
 # Devpost submission
@@ -25,152 +25,172 @@ Team name: OverWatch.
 Members: add every teammate on Devpost.
 
 ## Tagline (≤ 200 chars)
-OverWatch: a live stock exchange on London's next five minutes. Every price comes from 50 futures, narrowed by real TfL data, traded against seven AI traders.
+OverWatch: a live stock exchange on London's next five minutes. Prices come from 50 futures reweighted by real TfL data; you trade against seven computer traders.
 
 ## Inspiration
 Prediction markets like Polymarket and Kalshi price the questions someone thought to ask. We wanted to price a
 city's next five minutes, starting with London.
 
 Marshall Wace built **TOPS** in 2002, the first alpha capture system: collect ideas from many brokers, measure who
-has been right, and trust them accordingly. We pointed the first half of that idea at a city. The brokers are AI
-traders, each reading one stream of alternative data; reality settles every bet, and each trader builds a public
-track record (kept in memory today, so a restart resets it). Weighting their picks into the price by that record is
-next.
+has been right, and trust them accordingly. We pointed the first half of that idea at a city. The brokers are computer
+traders, each reading one stream of alternative data; reality settles every bet, and each trader builds a public track
+record. Weighting their picks into the price by that record is next.
 
 The "new world" in the brief is the one nobody can see yet: the London of five minutes from now.
 
 ## What it does
-- **Lists city-wide markets on London every 5 minutes**, on the London clock. Every round has:
-  - **Hub surge:** "Which hub surges most by 19:20?" Oxford Circus, King's Cross, Piccadilly Circus, Waterloo and
-    Bank, each measured against its usual Saturday.
-  - **City Pulse:** over or under on average busyness across 20 TfL stations, with the line on a half point.
-  - **The London VIX:** higher or lower, when the engine is warm (it lists only after a 60-minute warm-up). Otherwise
-    "planes holding over Heathrow" stands in. In the rounds we watched on Saturday evening, Heathrow stood in every
-    time.
-  - **Hourly headlines:** which hub ends the hour furthest above its usual, and a "clean sheet" on whether every
-    Tube line on Good Service stays Good for the hour.
-- **Prices every market from 50 futures.** They are statistical walks fitted to today's data, starting from the
-  latest real reading. On the crowding markets a share of them (half by default, set by `SIM_WEIGHT`) is drawn from our
-  central-London agent simulation when it is running. Each new reading rules out the futures that disagree with it, up
-  to 30 of the 50 per market, and an LMSR market maker prices what's left plus the bets.
-- **Seven AI traders bet against you**, and each reads one live feed: Tube Crowd (station crowding), Camera Eye (the
-  London VIX), Line Watcher (Tube status), Rain Radar (rain), Plane Spotter (aircraft in the Heathrow holding stacks),
-  The Contrarian (where the points are going) and Simulation (the agent simulation's forecast). Each gives a reason with a real number, for example "Bank is at
-  84% of a usual Saturday, the furthest below: it catches up".
-- **Settles on real data under published rules.** Every market shows its source and rule. Betting closes 60 s before
-  settlement. Crowding markets settle on the first TfL reading our recorder polls after bets close (settling on TfL's
-  own timestamp is next). The settled reading is frozen and shown, for example "Waterloo rose most: 99% → 104% of a usual
-  Saturday". No reading in the window means void and a refund.
-- **The London VIX:** an uncertainty gauge for the area the agent simulation covers (Oxford Circus in the default
-  setup): the spread of predicted crowds across 50 simulated worlds. It needs a 60-minute warm-up before it lists.
-- **A wallet built like an exchange's:** points only, on an append-only double-entry ledger, with a daily loss limit,
-  stake confirmation, breaks, and P&L and history.
-- **Simulation that has to earn its place.** The data settles the markets. The central-London agent simulation feeds
-  part of the crowding futures and trades as the Simulation trader, so the leaderboard scores it against the
-  data-only traders. It doesn't beat "nothing changes" yet (see Accomplishments). A scenario mode, where you drop a
-  closure anywhere in central London and watch every market reprice, is in progress.
+- **Lists plain-language markets on London every 5 minutes**, on the London clock. Each card is a question, two or
+  five answer buttons and what you win ("23% chance · Bet 100 · win 410"). Every round has:
+  - **Hub surge:** "Which of these 5 areas will see its crowd grow the most by 21:10?" Oxford Circus, King's Cross,
+    Piccadilly Circus, Waterloo and Bank, each against its usual Saturday.
+  - **City Pulse:** "Will London's Tube get busier or quieter by 21:10?" Average busyness across 20 TfL stations; the
+    line sits at the half point nearest the futures' median, so it opens near 50/50.
+  - **The London VIX:** "Will London get more unpredictable or calmer?" An uncertainty gauge for Oxford Circus: the
+    spread of predicted crowds across 50 simulated worlds. When it's down, "planes holding over Heathrow" stands in.
+  - **Hourly headlines:** which area ends the hour furthest above its usual, and whether every Tube line keeps running
+    smoothly.
+- **Click anywhere on the map to trade that spot.** If a real sensor is within 400 m (20 TfL stations and about 13
+  JamCams with fresh people counts), a local market opens for the round, settled only on that sensor. Elsewhere you
+  get a forecast and no bet.
+- **Asks "what if?"** Click a street or station, close it or add a crowd, and our central-London agent simulation runs
+  on copies of the city and shows how the odds would move.
+- **Seven computer traders bet against you**, each reading one live feed: Tube Crowd (station crowding), Camera Eye
+  (the London VIX), Line Watcher (Tube status), Rain Radar (rain), Plane Spotter (Heathrow holding stacks), The
+  Contrarian (where the points are going) and Simulation (the agent simulation's forecast). Each gives a reason with
+  a real number ("Bank is at 93% of a usual Saturday, the furthest below: it catches up") and keeps a public record.
+- **Settles on real data under published rules.** Every market shows its source and rule. Station markets settle on
+  the first reading **TfL stamped after betting closed**, so nobody polling faster can see the answer; TfL publishes
+  late, so the card says "result about 22:00, when TfL publishes". The VIX and Heathrow settle within a minute. The
+  settled reading is frozen and shown; no reading means void and a refund.
+- **Feels like a trading app:** a scrolling exchange ticker ("Waterloo +5% · Tube 6/11 · Bakerloo severe delays"),
+  busyness as change vs normal ("Bank −7%"), a live earnings dropdown, a traders dropdown with sparklines, and a short
+  burst of confetti showing your profit when you win.
+- **A wallet built like a brokerage account:** points only, on an append-only double-entry ledger, with a daily loss
+  limit, stake confirmation and breaks, plus a portfolio page with your equity curve, every bet, P&L by series, your
+  record against each computer trader and the raw ledger.
 
 ## How we built it
 - **Live data:** our own recorder polls the TfL Unified API (station crowding and typical-day profiles, Tube line
   status, road status, disruptions, the citywide bus snapshot, 796 bike docks, 83 JamCams). It also polls Open-Meteo
   rain, aircraft over Heathrow from adsb.lol, Elexon grid demand, GDELT news, Wikipedia attention and London football
-  fixtures. YOLO counts people on the 13 market cameras. A bash supervisor (`scripts/run-data.sh`) restarts anything
-  that stalls, and a health server reports every feed's age.
-- **Futures and pricing (`services/city`):** 50 futures per market. Crowding markets use a log random walk with
-  step sizes fitted to today's real changes. The VIX and Heathrow markets bootstrap today's own moves. Clean sheet
-  uses a per-line break hazard. On the crowding markets, part of the 50 (half by default) is
-  drawn from the central-London simulation's forecast when it's running. Each observation prunes the futures that
-  disagree, particle-filter style, up to 30 of the 50 per market; after that a market's futures stop narrowing (in a
-  replay of Saturday evening, 67 of 83 markets reached that cap). Prices come from LMSR (b = 1200) on top of the
-  futures' probabilities. Lines are set per series: City Pulse at the reading at open plus the median 5-minute move;
-  the VIX and Heathrow at the current value; the hourly hub market widens its fit until the favourite opens at 70% or
-  less; the clean sheet holds its opening probability to 30–70%. A bracket market whose favourite is still over 85%
-  isn't listed.
-- **Agent simulation (`services/multiverse`):** persona groups on the real OpenStreetMap street graph around Oxford
-  Circus, with Dijkstra routing and pavement capacity. It runs 50 worlds with **common random numbers**, so a
-  difference between two worlds comes from their assumptions, not noise. Worlds are weighted against each camera
-  count, bus reading, rain, crowding and bike reading, and resampled. The London VIX is the price-weighted spread of
-  predicted people at the 5-minute horizon.
-- **Market integrity, following Kalshi's rules where we can** (no official-timestamp settlement or surveillance yet):
-  - a source and rule on every market;
-  - betting closes before settle;
-  - settlement on a fixed window, then a grace period, then void and refund;
-  - a frozen settlement snapshot;
-  - halts on a stale feed or a 3σ jump;
-  - a position cap (25% of bankroll);
-  - markets close the moment the outcome is decided;
+  fixtures. YOLO counts people on the 13 market cameras. A bash supervisor restarts anything that stalls, and a health
+  server reports every feed's age.
+- **Futures and pricing (`services/city`):** 50 futures per market, each starting from the latest real reading at
+  TfL's own timestamp. City Pulse walks follow TfL's usual-Saturday curve. The hub race uses a relative
+  mean-reversion model: each hub follows its usual-day slope, is pulled toward the five-hub average (rate fitted on
+  12:00–17:00) and takes correlated shocks. The VIX and Heathrow bootstrap today's own moves; clean sheet uses a
+  per-line break hazard. Each reading reweights the futures by likelihood and rules out the worst, up to 30 of 50.
+  An LMSR market maker (b = 1200, 5% fee) prices the result plus the bets.
+- **Agent simulations (`services/multiverse`):** persona groups on the real OpenStreetMap street graph, with Dijkstra
+  routing and pavement capacity, 50 worlds with **common random numbers**, so a difference between two worlds comes
+  from their assumptions, not noise. One covers Oxford Circus and produces the London VIX. A central-London one
+  (1,017 streets) takes live events by general rules (no hardcoded venues or lines) and powers scenario mode. It
+  doesn't beat persistence, so it stays out of the price and trades as the Simulation trader instead.
+- **Market integrity, following Kalshi's rules where we can:**
+  - a source and rule on every market; betting closes before settle; a frozen settlement snapshot with TfL's own
+    measurement time;
+  - settlement on TfL's post-close timestamp; a value measured before the close voids;
+  - courtsiding defences: each bet fills a few seconds after you place it (45 s on the single-event clean sheet and on
+    local markets), any big feed change pauses the market and cancels pending bets, and stakes are capped at 10% or 25%
+    of your points;
+  - halts on a stale feed or a 3σ jump; markets close the moment the outcome is decided;
   - a payout never exceeds the market maker's shares, and bets under 1.05x are refused;
-  - a house exposure cap.
-- **Wallet:** an append-only double-entry SQLite ledger with server-issued player tokens, idempotent bets and
-  exactly-once settlement. 129 city, 127 simulation and 16 recorder tests, including a randomised 1000-bet invariant
-  test.
-- **Front end:** Next.js 16 on Vercel and a MapLibre map with OpenFreeMap vector tiles, styled after RAISE, with
-  Kalshi × PostHog market cards. The backend runs on our laptop behind a Cloudflare tunnel.
+  - a house exposure cap that counts the computer traders' stakes.
+- **Testing:** 205 city, 132 simulation and 16 recorder tests, including a randomised 1000-bet ledger invariant and an
+  8-thread hammer. Then we traded it live: seven bot strategies (random, favourite, longshot, signal, copycat, Kelly
+  and a last-second reader) placed 327 bets over 75 minutes on a scratch ledger. 0 voids, 0 fills after close, and
+  120 of 120 wallet reconciliations exact. The bugs it found (restarts, pending bets, a confirm bypass) are fixed with
+  regression tests.
+- **Front end:** Next.js 16 on Vercel; a MapLibre map with OpenFreeMap vector tiles and deck.gl layers (a dusk palette,
+  glowing hub columns, arcs between hubs) at 60 fps. The backend runs on our laptop behind Cloudflare tunnels.
 - **Reuse (disclosed, approved by the organisers):** the London twin, the live-feed plumbing, YOLO counting and the
   base forecast engine come from our earlier project Mirrorverse (built 17 Oct 2026). New at WHACK: the recorder,
-  the multiverse engine and London VIX, the city markets, the AI traders, the integrity rules, the wallet and the
-  OverWatch UI.
+  both agent simulations and the London VIX, the city and local markets, pricing, the computer traders, the integrity
+  rules, the wallet and portfolio, scenario mode and the OverWatch UI.
 
 ## Challenges we ran into
-- **Our first questions were already decided or pure dice.** "Which station is busiest" went to Piccadilly Circus 63
-  times out of 66. Rain was 0.0 mm all day. Bus and single-camera counts were noise. We measured candidate questions
-  on Saturday's recorded data and kept the ones where reading the data gives an edge. For example, the hub furthest
-  below its usual Saturday surged most 35% of the time, against 20% by luck.
-- **One-sided markets.** Early fits priced the hourly hub market at 89% when it really came in 56% of the time, and
-  the clean sheet at 85% against a real 43%. We now widen the hourly hub fit until its favourite opens at 70% or
-  less and hold the clean sheet to 30–70% at open. In a 15:00–18:30 replay the favourite opened at 30–70% in
-  68–86% of markets, depending on the series.
-- **Frozen YOLO counts.** The recorder asked a 2-worker YOLO server about all 83 cameras, so a full pass took hours
-  and every count went stale. We now count only the 13 cameras the markets read.
-- **The forecast lost to "nothing changes".** On real Oxford Circus counts the simulation was off by 5.49 people
-  per camera against 1.54 for persistence. Anchoring forecasts to the last real count and adding rain, crowding and
-  bike likelihoods brought it to a tie (latest run: 2.06 vs 2.04).
-- **Our own trader beat the house.** A judge-prep replay of Saturday found that copying Tube Crowd's rule (back the
-  usual-Saturday curve) beat our market maker: on City Pulse it won 21 of 23 bets, +48% per point staked, on data
-  the rule hadn't been tuned on. The market maker doesn't price the usual-Saturday slope yet. Adding it to the
-  futures' drift is in progress; until then the leaderboard shows it openly.
-- **The three.js twin was too heavy** for a city-wide view. We switched to MapLibre with vector tiles, and the first
-  map frame now lands in about 410 ms.
-- **Review and a red team found real holes:** anyone could claim any player id, and a price near certainty could
-  pay more than it should. We fixed both with server-issued tokens, an odds floor and tests.
+We built with a small team and many parallel AI coding agents. The agents wrote code fast; the hard part was
+direction. The owner redirected the build 30 times in one day (logged in `marketing/steering-log.md`). Five that
+changed the product:
+- **"I have no idea what anything means."** Our first screen was a 2D exchange board full of jargon. We rebuilt it as
+  a game with one question at a time. Six hours later the owner looked at our market cards and said: "I don't
+  understand even a bit of it. Any person should be able to understand how to trade." The cards became a plain
+  question, big answer buttons with the chance and the payout, and details behind a tap. We cold-read each version
+  until fresh readers could say how to bet from a screenshot.
+- **"I'd only feel the urge to bet if I was there in person."** Our first questions were about one camera or one bus
+  stop: decided or pure noise at 5 minutes. We measured candidate questions on Saturday's recorded data and kept the
+  ones where reading the data gives an edge: for example, the hub furthest below its usual Saturday surged most 35% of
+  the time, against 20% by luck.
+- **"If someone on the train sees it stop before the API does, can they trade on that?"** Yes, they could. We added a
+  bet delay, a pause whenever the feed changes and tighter caps on the one single-event market. A head start of up to
+  44 seconds now gains nothing (it gained 305 points before).
+- **Fast or fair settlement.** TfL publishes its crowding numbers several minutes after it stamps them (our poller sees a row a median 7 minutes after its stamp). Settling fast
+  meant settling on a number someone could already see. The owner chose fair, and to show the wait: station cards say
+  "result about HH:MM, when TfL publishes".
+- **"What do the twin and the simulation add besides looking cool?"** An honest answer was "nothing measurable yet":
+  our central-London simulation loses to "nothing changes". So we took it out of the prices, let it trade as one more
+  trader, and gave it the job data can't do: what-ifs. The first what-if was a settings form; the owner said "this
+  makes no sense", so it became click a street, pick an action, see the odds move.
+
+The technical challenges:
+- **Our own trader beat the house.** A replay found that copying Tube Crowd's rule (back TfL's usual-Saturday curve)
+  beat our market maker by 32–48% per bet. We put that curve into the futures and rebuilt the hub race model. Out of
+  sample, copying Tube Crowd now makes about +13% on City Pulse (and loses on the hub race), with a confidence interval
+  too wide to call it fixed.
+- **The forecast lost to "nothing changes".** On real Oxford Circus counts the simulation was first off by 5.49 people
+  per camera against 1.54 for persistence. Anchoring every world to the last real count and adding rain, crowding and
+  bike likelihoods brought it to a tie.
+- **The event layer made forecasts worse** because a weekend planned closure read as every line shut at Bank and
+  Waterloo. Working out which lines serve a station from the whole day fixed it.
+- **Frozen counts, frozen prices.** YOLO was asked to count 83 cameras on 2 workers, so counts were hours old; we count
+  only the 13 the markets read. Prices also stopped moving once 30 of 50 futures were ruled out; weighting the
+  survivors cut the stalled markets from 96 to 42.
+- **Review and a red team found real holes:** anyone could claim any player id, and a price near certainty could pay
+  more than the market maker's shares. Both fixed, with tests that fail on the old code.
 
 ## Accomplishments that we're proud of
-- It runs live on real London data: rounds list, AI traders bet with real reasons, and markets settle on real TfL
-  and adsb.lol readings.
-- In a 15:00–18:30 replay of Saturday: 42 rounds and 0 voids. Over the whole day, 308 of 309 markets of the earlier
-  lineup settled on a real reading.
-- At 18:00 a final whistle led Tube Crowd to back King's Cross, which won at 132% of its usual Saturday.
-- A money path that holds up: append-only double-entry ledger, exactly-once settlement, and 129 city tests including a
-  randomised 1000-bet invariant test and an 8-thread hammer test.
-- We report accuracy honestly. On the latest 30 real minutes of Oxford Circus (48 camera counts) the people forecast
-  ties persistence (MAE 2.06 vs 2.04, 79% of readings inside the 80% range), and persistence still wins on bus delay
-  (0.34 vs 0.04 min). Our central-London simulation loses to persistence by 15% on station busyness (MAE 4.14 vs
-  3.61, 919 readings over seven 60-minute windows, 12:36–19:36 UTC).
+- It runs live on real London data at overwatchcapital.vercel.app/multiverse: rounds list, computer traders bet with
+  real reasons, and markets settle on real TfL, adsb.lol and simulation readings.
+- A full-day replay of Saturday (91 rounds, 273 markets) settled every market on a real reading: 0 voids.
+- A money path that held up under live bot trading: 120 of 120 wallet reconciliations exact, 0 fills after close,
+  46 of 46 bets on halted markets refused.
+- We report accuracy honestly. On the latest 30 real minutes of Oxford Circus (48 camera counts), the people forecast
+  ties persistence: MAE 1.37 vs 1.35, with 79% of readings inside the 80% range; persistence wins on bus delay. Out of
+  sample (17:00–21:30), the hub race's opening price beats a uniform guess (Brier 0.755 vs 0.800, n=51, t = 1.7); the
+  other series don't, significantly.
+- Anyone can play: in cold-read tests, fresh readers given only a screenshot could say how to bet ("tap an answer,
+  choose your points, then confirm"), at desktop and phone widths.
 
 ## What we learned
-- A good market question is one you can only win by reading the data. Local questions, where anyone standing there
-  knows the answer, kill the urge to bet.
-- Uncertainty is the product. A market whose favourite opens over 85% isn't worth listing.
-- Measure against the naive baseline before claiming anything. Ours was "nothing changes", and it was hard to beat.
-- List only outcomes that emerge from many people's behaviour, never one person's decision. Clean sheet is the
-  exception: a line failure is one event that TfL staff see before the feed does. Today the market closes the moment
-  a reading shows a break, bets fill 45 s after you place them, the market pauses whenever any line's status changes, and stakes are capped at 10% of bankroll (#61). A head start shorter than the delay gains nothing; longer leads are bounded by the cap. Points only.
+- **Measure before you claim.** Our naive baseline, "nothing changes", was hard to beat, and a quant will ask. The
+  honest number is more defensible than a flattering one.
+- **The leaderboard is the product.** When our own Tube Crowd trader beat the house, that was the system working: it
+  told us which data the market maker was ignoring. That's the TOPS idea.
+- **A good market question is one you can only win by reading the data.** Local questions, where anyone standing there
+  knows the answer, kill the urge to bet; obvious ones (a favourite over 85%) aren't worth listing.
+- **Information is good; riskless information isn't.** List outcomes that emerge from many people's behaviour. Clean
+  sheet is the exception, a single event TfL staff see first, so it gets a 45-second bet delay, a pause on any line
+  change, a 10% cap and a 5-minute betting window. Points only.
+- **Fair beats fast.** Waiting 14 minutes for a number nobody could have seen is better than settling on one somebody
+  could.
+- **Agents give speed; direction stays human.** Every turn in our steering log was a person looking at what had been
+  built and saying what was wrong.
 
 ## What's next
-- **Make the simulation earn its place:** the central-London simulation and the Simulation trader are live, and its
-  P&L against the data-only traders shows whether a model of the city beats raw data. Next: make it beat
-  persistence, and add a scenario mode where councils, TfL and event organisers can stress-test interventions.
-- **Prizes:** sponsored prizes with free entry, paid for by venues and brands.
-- **A real-money exchange where licensed:** peer-to-peer event contracts with exchange fees and no house risk.
-  Today's house-banked LMSR is bookmaking, not an exchange; an order book is on the roadmap. The ledger is
-  real-money grade; the order book, payments, ID checks, anti-money-laundering checks and licensing are the work
-  left.
-- **Hedging and data:** businesses hedge footfall, weather and disruption risk; index insurance pays out
-  automatically; the London VIX and our live probabilities become an alternative-data feed.
+- **The second half of TOPS:** weight each trader's picks into the price by its track record, so the market learns
+  which data to trust.
+- **Close the remaining leaks:** fading the Heathrow holding stack still beats the house out of sample, and the Tube
+  Crowd copycat may too.
+- **Make the simulation earn a place in the price:** beat persistence on held-out days, then blend it back in.
+- **A real exchange:** a Kalshi-style order book with AI market makers and no house (designed in
+  `docs/exchange-design.md`, not built). The ledger is real-money grade; the order book, payments, ID checks,
+  anti-money-laundering checks and licensing are the work left.
+- **Prizes, hedging and data:** sponsored free-entry prizes; footfall and disruption cover for businesses; the London
+  VIX and live probabilities as an alternative-data feed.
 - Then more cities. The engine needs a street graph and live public feeds.
 
 ## Built with
-python · typescript · next.js · react · maplibre-gl · openfreemap · openstreetmap · tfl-unified-api · yolo ·
+python · typescript · next.js · react · maplibre-gl · deck.gl · openfreemap · openstreetmap · tfl-unified-api · yolo ·
 open-meteo · adsb.lol · sqlite · vercel · cloudflare-tunnel
 
 ## Links
@@ -180,8 +200,9 @@ open-meteo · adsb.lol · sqlite · vercel · cloudflare-tunnel
 
 ## Media checklist (files in `marketing/assets/`)
 - [ ] Cover image / thumbnail (3:2): the OverWatch map with this round's markets
-- [ ] Screenshot: a market card with the AI traders' bets and reasons
-- [ ] Screenshot: a settled round with the frozen reading
-- [ ] Screenshot: the wallet panel (P&L and history)
-- [ ] Architecture diagram: feeds → recorder → 50 futures → pruning → LMSR → settlement → ledger
+- [ ] Screenshot: plain market cards ("Bet 100 · win 400") and the ticker
+- [ ] Screenshot: a station card with "result about HH:MM, when TfL publishes"
+- [ ] Screenshot: scenario mode ("What if Regent Street closes")
+- [ ] Screenshot: the earnings dropdown and the portfolio page
+- [ ] Architecture diagram: feeds → recorder → 50 futures → reweighting → LMSR → settlement → ledger
 - [ ] Demo video (≤ 2–3 min), as a backup to the live demo

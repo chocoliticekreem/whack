@@ -2,16 +2,19 @@
 
 Our build for **WHACK 26** (Warwick, 7–8 Nov 2026) on the **Marshall Wace "New Worlds"** track.
 
-**Status (Sat 7 Nov, evening):** OverWatch is live at **https://overwatchcapital.vercel.app/multiverse**
-(Vercel front end; the markets backend runs on our laptop behind a Cloudflare tunnel). Merged through #46. Details in
-[docs/build.md](docs/build.md) §0.
+**Status (Sat 7 Nov, ~23:50):** OverWatch is live at **https://overwatchcapital.vercel.app/multiverse**
+(Vercel front end; the backend runs on our laptop behind Cloudflare tunnels). Merged through #81, no open PRs. Details
+in [docs/build.md](docs/build.md) §0.
 
 **What it is:**
 - OverWatch is a live exchange on London's next five minutes. You play for points only; there is no real money.
-- Every 5 minutes it lists city-wide markets (which hub surges, City Pulse over/under, the London VIX). Each one is
-  priced from 50 futures: statistical walks fitted to today's data, with a share (half by default, `SIM_WEIGHT`) drawn
-  from the central-London agent simulation when it's running. Real TfL data narrows them and settles the market.
-- You trade against seven AI traders, and each of them reads one live data feed.
+- Every 5 minutes it lists plain-language city markets (which hub's crowd grows most, whether the Tube gets busier or
+  quieter, whether the London VIX rises). Each is priced from 50 futures fitted to today's data and TfL's usual
+  Saturday, reweighted by every reading. The central-London simulation stays out of the price (`SIM_WEIGHT=0`) until
+  it beats persistence. Station markets settle on the first reading TfL stamped after betting closed.
+- Click anywhere on the map to trade the nearest real sensor, or use "What if…" to see how the odds would move if a
+  street closed.
+- You trade against seven computer traders, and each of them reads one live data feed.
 
 ## Quick start
 ```sh
@@ -31,6 +34,7 @@ Vercel's `CITY_URL` to the tunnel URL.
 | [docs/build.md](docs/build.md) | What's shipped (by PR), what's in progress, ranked gaps, how to run it |
 | [services/city/README.md](services/city/README.md) | The markets backend: series, pricing, integrity rules, wallet, endpoints |
 | [docs/questions.md](docs/questions.md) | Why each market question was chosen, measured on Saturday's data |
+| [docs/judge-prep.md](docs/judge-prep.md) | The hardest questions a Marshall Wace panel will ask, true answers, current numbers, the demo script |
 | [docs/market-structure.md](docs/market-structure.md) | How the market works today: the LMSR house, how prices form, the AI traders, the points economy, integrity, and the economy simulation |
 | [docs/exchange-design.md](docs/exchange-design.md) | Where it goes: a Kalshi-style order book with no house, where one player trades against thousands of AI market makers, hedge funds and retail |
 | [docs/business.md](docs/business.md) | Fairness principle, market integrity, the path from game to exchange |
@@ -40,6 +44,8 @@ Vercel's `CITY_URL` to the tunnel URL.
 | [docs/design.md](docs/design.md) | An early 2D UI language (retro terminal). Superseded on `/multiverse` by the Kalshi × PostHog style (#38) |
 | [docs/all-tracks-gpt.md](docs/all-tracks-gpt.md), [docs/all-tracks-gemini.md](docs/all-tracks-gemini.md) | James's AI-generated ideas for all four tracks (raw; takeaways in idea.md §3b) |
 | [marketing/devpost.md](marketing/devpost.md) | The Devpost submission draft |
+| [marketing/steering-log.md](marketing/steering-log.md) | Every human decision that redirected the build |
+| [analysis/live_trading/README.md](analysis/live_trading/README.md) | The live bot trading pressure test and what it found |
 
 ## Key times
 - **Sat 22:00:** doors lock (no re-entry without Discord).
