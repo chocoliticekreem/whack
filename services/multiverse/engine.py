@@ -18,6 +18,11 @@ import brokers
 import worlds
 
 DEFAULT_N = 50
+DEFAULT_HORIZON = 5
+VIX_SCALE = 100.0
+# A VIX point counts as a spike when it jumps by this much over the previous one, relative and absolute.
+VIX_SPIKE_REL = 0.2
+VIX_SPIKE_ABS = 2.0
 DELIST_FRACTION = 0.1
 # Counts compared on the sqrt scale: Poisson noise gives sd 0.5 there; model error adds MODEL_SD.
 POISSON_SD = 0.5
@@ -133,6 +138,44 @@ def kernel_sds(ws: list[dict], horizon: int) -> dict[str, float]:
     return out
 
 
+def london_vix(entries: list[tuple[float, dict[str, list[float]]]], index: int) -> float:
+    """London VIX: per zone, the price-weighted coefficient of variation of predicted people at `index`,
+    averaged over zones weighted by their predicted volume, x VIX_SCALE (so sum of sds / sum of means).
+    Identical worlds give 0; the more the priced worlds disagree about the horizon, the higher it reads."""
+    if not entries:
+        return 0.0
+    num = den = 0.0
+    for zid in entries[0][1]:
+        vals = [(p, s[zid][min(index, len(s[zid]) - 1)]) for p, s in entries if s.get(zid)]
+        mass = sum(p for p, _ in vals)
+        if mass <= 0:
+            continue
+        mean = sum(p * v for p, v in vals) / mass
+        if mean <= 0:
+            continue
+        cv = math.sqrt(sum(p * (v - mean) ** 2 for p, v in vals) / mass) / mean
+        num += mean * cv
+        den += mean
+    return round(VIX_SCALE * num / den, 2) if den else 0.0
+
+
+ALL_CAMS = "all cameras"
+ALL_NEW = "new worlds"
+# A group (all cameras, all of this frame's new worlds) is named as the driver only when it moves the VIX
+# this many times more than any single source; otherwise the single camera, feed or broker is the better
+# answer to "what moved it".
+GROUP_DOMINANCE = 2.0
+
+
+def pick_driver(effects: dict[str, float]) -> str:
+    singles = {k: v for k, v in effects.items() if k not in (ALL_CAMS, ALL_NEW)}
+    if not singles:
+        return "no change"
+    best = max(singles, key=lambda k: abs(singles[k]))
+    groups = [g for g in (ALL_CAMS, ALL_NEW) if abs(effects.get(g, 0.0)) > GROUP_DOMINANCE * abs(singles[best])]
+    return max(groups, key=lambda g: abs(effects[g])) if groups else best
+
+
 def reseed(seed: dict, ts_ms: int, readings: dict[str, float]) -> dict:
     """A new epoch: the latest camera counts become the starting state on the same street graph."""
     s = copy.deepcopy(seed)
@@ -150,7 +193,7 @@ def reseed(seed: dict, ts_ms: int, readings: dict[str, float]) -> dict:
 
 
 class Multiverse:
-    def __init__(self, seed: dict, n: int = DEFAULT_N, horizon: int = 30, crn_seed: int = 47,
+    def __init__(self, seed: dict, n: int = DEFAULT_N, horizon: int = DEFAULT_HORIZON, crn_seed: int = 47,
                  rng_seed: int = 7, brokerage: brokers.Brokerage | None = None) -> None:
         self.seed, self.n, self.horizon, self.crn_seed = seed, n, horizon, crn_seed
         self.rng = random.Random(rng_seed)
@@ -166,6 +209,9 @@ class Multiverse:
         self.placed_events: list[dict] = []
         self.epoch_obs: list[tuple[int, dict[str, float], float | None]] = []
         self.before: list[dict] = []
+        self.origin_ms = seed["at"]
+        self.feeds: dict[str, Any] = {}
+        self.vix_history: list[dict] = []
 
     def new_world(self, assumptions: dict, parent: dict | None, price: float, born: int) -> dict:
         t0 = time.perf_counter()
@@ -182,16 +228,16 @@ class Multiverse:
 
     def spawn(self) -> None:
         t0 = time.perf_counter()
-        self.worlds, self.observations, self.epoch_obs = [], [], []
+        self.worlds, self.observations, self.epoch_obs, self.vix_history = [], [], [], []
         if self.brokerage:
             self.spawn_brokered()
-            self.spawn_ms = round((time.perf_counter() - t0) * 1000)
-            return
-        for _ in range(self.n):
-            rng = random.Random(self.rng.random())
-            a = worlds.sample_assumptions(rng, self.horizon, self.zone_ids)
-            self.worlds.append(self.new_world(a, None, 1.0 / self.n, 0))
+        else:
+            for _ in range(self.n):
+                rng = random.Random(self.rng.random())
+                a = worlds.sample_assumptions(rng, self.horizon, self.zone_ids)
+                self.worlds.append(self.new_world(a, None, 1.0 / self.n, 0))
         self.spawn_ms = round((time.perf_counter() - t0) * 1000)
+        self.mark_vix(0, self.seed["at"], 0, "spawn", 0.0)
 
     def spawn_brokered(self) -> None:
         """The market maker's slice is drawn from the prior; every broker gets its floor of slots or more."""
@@ -216,18 +262,67 @@ class Multiverse:
         bus_seen = [o["busDelayMin"] for o in self.observations if o.get("busDelayMin") is not None]
         if bus_delay is not None:
             bus_seen.append(bus_delay)
-        return brokers.build_context(self.seed, self.horizon, minute, readings, bus_delay, self.placed_events,
-                                     bus_seen, self.market_view(minute) if self.worlds else None)
+        return brokers.build_context(self.seed, self.horizon, minute, readings, bus_delay, bus_seen, self.feeds)
 
-    def market_view(self, minute: int) -> dict:
-        """Price-weighted means of the assumptions: what the market currently believes."""
+    def vix_of(self, ws: list[dict], prices: list[float] | None = None) -> float:
+        prices = [w["price"] for w in ws] if prices is None else prices
+        return london_vix([(p, w["run"]["zones"]) for p, w in zip(prices, ws)], self.horizon)
+
+    def mark_vix(self, obs_index: int, ts_ms: int, minute: int, driver: str, driver_delta: float) -> dict:
+        vix = self.vix_of(self.live())
+        prev = self.vix_history[-1]["vix"] if self.vix_history else vix
+        delta = round(vix - prev, 2)
+        entry = {"obs": obs_index, "ts": ts_ms, "minute": minute, "t": round((ts_ms - self.origin_ms) / 60_000, 1),
+                 "vix": vix, "delta": delta, "driver": driver, "driverDelta": round(driver_delta, 2),
+                 "spike": delta >= VIX_SPIKE_ABS and delta >= VIX_SPIKE_REL * max(prev, 1e-9)}
+        self.vix_history.append(entry)
+        return entry
+
+    def source_label(self, src: str) -> str:
+        return "bus feed" if src == "bus" else f"cam {self.cam_names.get(src, src)}"
+
+    def broker_label(self, bid: str) -> str:
+        b = self.brokerage.book.get(bid) if self.brokerage else None
+        return f"{b['feed']} broker" if b else str(bid)
+
+    def drivers_from_evidence(self, live: list[dict], prior: list[float], parts: list[list[dict]],
+                              vix_before: float) -> dict[str, float]:
+        """VIX change from each evidence source alone: reweight the pre-frame market by that source's likelihood."""
+        out = {}
+        for src in {p["cam"] for ps in parts for p in ps}:
+            lw = [(math.log(pr) if pr > 0 else -math.inf) + sum(p["ll"] for p in ps if p["cam"] == src)
+                  for pr, ps in zip(prior, parts)]
+            out[self.source_label(src)] = self.vix_of(live, normalise(lw)) - vix_before
+        lw = [(math.log(pr) if pr > 0 else -math.inf) + sum(p["ll"] for p in ps if p["cam"] != "bus")
+              for pr, ps in zip(prior, parts)]
+        out[ALL_CAMS] = self.vix_of(live, normalise(lw)) - vix_before
+        return out
+
+    def drivers_from_brokers(self, obs_index: int, vix_after: float) -> dict[str, float]:
+        """VIX change from each owner's newborn worlds (a broker, or the market maker's refills): the market
+        with and without them."""
         live = self.live()
-        total = sum(w["price"] for w in live) or 1.0
-        view = {k: round(sum(w["price"] * float(w["assumptions"][k]) for w in live) / total, 2)
-                for k in brokers.IDEA_KEYS}
-        rain = sum(w["price"] for w in live if w["assumptions"].get("rainAtMin") is not None)
-        view["rainChance"] = round(rain / total, 2)
-        return view
+        out = {}
+        for bid in {w.get("broker") for w in live if w["bornAtObs"] == obs_index}:
+            rest = [w for w in live if not (w["bornAtObs"] == obs_index and w.get("broker") == bid)]
+            if rest:
+                label = self.broker_label(bid) if bid else "market maker refills"
+                out[label] = vix_after - self.vix_of(rest, normalise([w["logWeight"] for w in rest]))
+        old = [w for w in live if w["bornAtObs"] != obs_index]
+        if old and len(old) < len(live):
+            out[ALL_NEW] = vix_after - self.vix_of(old, normalise([w["logWeight"] for w in old]))
+        return out
+
+    def advance(self, frame: dict) -> dict:
+        """Observe one frame; past the horizon, first roll into a new epoch seeded at the last observed frame."""
+        ts = frame["ts"]
+        if ts > self.seed["at"] + self.horizon * 60_000:
+            last = next((o for o in reversed(self.observations) if o.get("readings") and o["ts"] > self.seed["at"]), None)
+            base = (last["ts"], last["readings"]) if last and ts - last["ts"] <= self.horizon * 60_000 else (ts, frame["readings"])
+            self.roll(reseed(self.seed, *base))
+        if frame.get("feeds") is not None:
+            self.feeds = frame["feeds"]
+        return self.observe(ts, frame["readings"], frame.get("busDelayMin"))
 
     def live(self) -> list[dict]:
         return [w for w in self.worlds if w["status"] == "live"]
@@ -273,11 +368,16 @@ class Multiverse:
             return obs
         self.epoch_obs.append((minute, {c: readings[c] for c in compared}, bus_delay))
         self.before = [{"price": w["price"], "assumptions": w["assumptions"]} for w in live]
+        prior = [w["price"] for w in live]
+        vix_before = self.vix_of(live, prior)
+        all_parts = []
         for w in live:
             ll, parts = self.world_loglik(w, minute, readings, bus_delay)
+            all_parts.append(parts)
             w["logWeight"] += ll
             worst = min(parts, key=lambda p: p["ll"]) if parts else None
             w["trail"].append({"obs": obs_index, "minute": minute, "ll": round(ll, 3), "worst": worst})
+        effects = self.drivers_from_evidence(live, prior, all_parts, vix_before)
         self.reprice(live)
         if self.brokerage:
             self.brokerage.score(live)
@@ -303,6 +403,9 @@ class Multiverse:
         for w in self.worlds:
             if w["status"] == "live" or w.get("delistedAtObs") == obs_index:
                 w["history"].append(round(w["price"], 5))
+        effects |= self.drivers_from_brokers(obs_index, self.vix_of(self.live()))
+        driver = pick_driver(effects)
+        self.mark_vix(obs_index, ts_ms, minute, driver, effects.get(driver, 0.0))
         obs = {"index": obs_index, "ts": ts_ms, "minute": minute, "compared": len(compared),
                "busDelayMin": bus_delay, "delisted": delisted, "spawned": spawned,
                "readings": {c: readings[c] for c in compared}}
@@ -410,7 +513,10 @@ class Multiverse:
             live = self.live()
             self.reprice(live)
             heavy = max(live, key=lambda w: w["price"])
-            spare = [w for w in live if w["protectedUntilObs"] < obs_index and w["bornAtObs"] < obs_index]
+            per = _group([(w.get("broker"), None) for w in live])
+            # A broker's last world is never recycled, so every broker stays on the board.
+            spare = [w for w in live if w["protectedUntilObs"] < obs_index and w["bornAtObs"] < obs_index
+                     and (w.get("broker") is None or per[w.get("broker")] > 1)]
             if heavy["price"] <= HEAVY or not spare:
                 break
             cheap = min(spare, key=lambda w: w["price"])
@@ -494,15 +600,27 @@ class Multiverse:
             parent["logWeight"] = math.log(parent["price"]) if parent["price"] > 0 else -math.inf
             self.worlds.append(child)
             forked.append(child["id"])
+        self.mark_vix(len(self.observations), self.observations[-1]["ts"] if self.observations else self.seed["at"],
+                      self.now_minute(), f"placed {kind}", 0.0)
+        self.vix_history[-1]["driverDelta"] = self.vix_history[-1]["delta"]
         return forked
 
     def roll(self, new_seed: dict) -> None:
-        """Past the horizon: re-run every live world from the new epoch, keeping prices and lineage."""
+        """Past the horizon: re-run every live world from the new epoch, keeping prices and lineage.
+
+        Timed assumptions (rain onset, incidents, events) move earlier by the time elapsed, so a world that
+        said "rain from +3" five minutes ago now says it is raining from the start."""
+        elapsed = (new_seed["at"] - self.seed["at"]) / 60_000
         self.seed = new_seed
         self.epoch_obs = []
         for w in self.live():
+            w["assumptions"] = worlds.shift_assumptions(w["assumptions"], elapsed)
+            w["labels"] = worlds.describe(w["assumptions"], self.zone_names)
             w["run"] = worlds.run_world(new_seed, w["assumptions"], self.horizon, self.crn_seed)
+        self.placed_events = [dict(e, atMin=max(0.0, e["atMin"] - elapsed)) for e in self.placed_events]
         self.epochs += 1
+        self.mark_vix(len(self.observations), new_seed["at"], 0, "new window", 0.0)
+        self.vix_history[-1]["driverDelta"] = self.vix_history[-1]["delta"]
 
     def consensus(self, minute: int) -> list[dict]:
         live = self.live()
@@ -551,7 +669,8 @@ class Multiverse:
                 "effectiveWorlds": round(ess, 1), "spawnMs": self.spawn_ms,
                 "observations": self.observations[-20:], "board": self.board(),
                 "consensusNow": self.consensus(minute), "consensusHorizon": self.consensus(self.horizon),
-                "camsNow": self.cam_consensus(minute),
+                "camsNow": self.cam_consensus(minute), "epochs": self.epochs,
+                "vix": self.vix_history[-1] if self.vix_history else None, "vix_history": self.vix_history[-60:],
                 "brokers": self.brokerage.leaderboard(live) if self.brokerage else None,
                 "zones": [{"id": z["id"], "name": z["name"], "x": z["x"], "z": z["z"], "kind": z["kind"]}
                           for z in self.seed["zones"]]}

@@ -128,13 +128,16 @@ class ReplayTest(unittest.TestCase):
 
     def test_frames_parse_recorder_format(self) -> None:
         frames = feeds.load_frames(fixture.RAW_DIR)
-        self.assertEqual(len(frames), 6)
+        self.assertEqual(len(frames), fixture.FRAMES)
+        self.assertEqual({(b["ts"] - a["ts"]) // 1000 for a, b in zip(frames, frames[1:])}, {60})
+        self.assertIsNotNone(frames[0]["feeds"]["weather"])
+        self.assertIsNotNone(frames[1]["feeds"]["bikes"]["bikesTaken"])
         self.assertEqual(len(frames[0]["readings"]), len(fixture.CAMS))
         self.assertIsNotNone(frames[0]["busDelayMin"])
 
 
 TRUTH_BROKER = {"id": "B-TRUTH", "persona": "Insider", "archetype": "resident", "voice": "knows", "conviction": 0.9,
-                "lean": {k: fixture.TRUE_ASSUMPTIONS[k] for k in (*brokers.IDEA_KEYS, "rainAtMin")}}
+                "lean": {k: fixture.TRUE_ASSUMPTIONS[k] for k in brokers.IDEA_KEYS}}
 
 
 def idea_json(bid: str, **over: object) -> dict:
@@ -267,14 +270,17 @@ class BrokerTest(unittest.TestCase):
     def test_track_record_rises_for_the_true_idea(self) -> None:
         seed = fixture.build_seed()
         roster = brokers.ROSTER[:5] + [TRUTH_BROKER]
-        mv = engine.Multiverse(seed, n=24, horizon=30, brokerage=brokers.Brokerage(seed, 30, roster))
-        mv.spawn()
-        for frame in feeds.load_frames(fixture.RAW_DIR)[:4]:
-            mv.observe(frame["ts"], frame["readings"], frame["busDelayMin"])
-        board = mv.brokerage.leaderboard(mv.live())
-        self.assertEqual(board[0]["id"], "B-TRUTH")
-        self.assertGreater(board[0]["trackRecord"], 0.0)
-        self.assertEqual(max(board, key=lambda b: b["slots"])["id"], "B-TRUTH")
+        frames = feeds.load_frames(fixture.RAW_DIR)[:fixture.HORIZON]
+        for rng_seed in (1, 2, 3):
+            mv = engine.Multiverse(seed, n=24, horizon=fixture.HORIZON, rng_seed=rng_seed,
+                                   brokerage=brokers.Brokerage(seed, fixture.HORIZON, roster))
+            mv.spawn()
+            for frame in frames:
+                mv.advance(frame)
+            board = mv.brokerage.leaderboard(mv.live())
+            self.assertEqual(board[0]["id"], "B-TRUTH", f"rng seed {rng_seed}")
+            self.assertGreater(board[0]["trackRecord"], 0.0)
+            self.assertEqual(max(board, key=lambda b: b["slots"])["id"], "B-TRUTH")
 
     def test_placed_event_survives_next_observation(self) -> None:
         app = App()
@@ -312,6 +318,140 @@ class BrokerTest(unittest.TestCase):
         self.assertFalse(app.brokers()["enabled"])
         with self.assertRaises(ValueError):
             app.spawn({"brokers": "maybe"})
+
+
+class VixTest(unittest.TestCase):
+    @staticmethod
+    def market(spread: float) -> list[tuple[float, dict[str, list[float]]]]:
+        return [(0.25, {"a": [10.0, 100.0 + spread * d], "b": [5.0, 50.0 - spread * d]}) for d in (-1.5, -0.5, 0.5, 1.5)]
+
+    def test_identical_worlds_read_zero(self) -> None:
+        self.assertAlmostEqual(engine.london_vix(self.market(0.0), 1), 0.0, places=6)
+        self.assertEqual(engine.london_vix([], 1), 0.0)
+
+    def test_more_spread_reads_higher(self) -> None:
+        vix = [engine.london_vix(self.market(s), 1) for s in (1.0, 5.0, 20.0)]
+        self.assertGreater(vix[0], 0.0)
+        self.assertLess(vix[0], vix[1])
+        self.assertLess(vix[1], vix[2])
+
+    def test_price_concentrating_on_one_world_calms_it(self) -> None:
+        spread = self.market(10.0)
+        sure = [(0.97 if i == 0 else 0.01, z) for i, (_, z) in enumerate(spread)]
+        self.assertLess(engine.london_vix(sure, 1), engine.london_vix(spread, 1))
+
+    def test_state_and_endpoint_carry_history_with_drivers(self) -> None:
+        app = App()
+        app.spawn({"n": 12})
+        for _ in range(fixture.HORIZON + 2):
+            out = app.observe({"next": True})
+        self.assertEqual(out["horizonMin"], fixture.HORIZON)
+        hist = out["vix_history"]
+        self.assertEqual(out["vix"], hist[-1])
+        self.assertEqual(hist[0]["driver"], "spawn")
+        self.assertIn("new window", [h["driver"] for h in hist])
+        self.assertTrue(all(isinstance(h["vix"], float) and h["driver"] for h in hist))
+        scored = [h for h in hist if h["driver"] not in ("spawn", "new window")]
+        self.assertTrue(any(h["driver"].startswith(("cam ", "bus feed")) or h["driver"].endswith("broker")
+                            for h in scored))
+        self.assertEqual(app.vix()["vix_history"], app.mv.vix_history)
+
+
+class RollTest(unittest.TestCase):
+    def test_roll_shifts_timed_assumptions(self) -> None:
+        a = dict(fixture.TRUE_ASSUMPTIONS, rainAtMin=3.0, incident={"zoneId": "z", "atMin": 7.0},
+                 events=[{"kind": "event", "zoneId": "z", "atMin": 4.0}])
+        b = worlds.shift_assumptions(a, 5)
+        self.assertEqual(b["rainAtMin"], 0.0)
+        self.assertEqual(b["incident"]["atMin"], 2.0)
+        self.assertEqual(b["events"][0]["atMin"], 0.0)
+        self.assertEqual(a["incident"]["atMin"], 7.0)
+
+    def test_replay_rolls_into_a_new_epoch_and_keeps_n(self) -> None:
+        app = App()
+        app.spawn({"n": 12, "brokers": "off"})
+        minutes = []
+        for _ in range(fixture.FRAMES):
+            out = app.observe({"next": True})
+            minutes.append(out["minute"])
+            self.assertEqual(out["live"], 12)
+            self.assertAlmostEqual(sum(w["price"] for w in out["board"] if w["status"] == "live"), 1.0, places=9)
+        self.assertEqual(app.mv.epochs, 1)
+        self.assertEqual(minutes, [1, 2, 3, 4, 5, 1, 2, 3, 4, 5])
+        old = [w for w in app.mv.live() if w["bornAtObs"] <= fixture.HORIZON]
+        self.assertTrue(all(w["assumptions"]["rainAtMin"] in (None, 0.0) for w in old),
+                        "rain onsets from the first window have started by the second")
+
+
+class FeedTest(unittest.TestCase):
+    def test_summaries_read_recorder_payload_shapes(self) -> None:
+        frames = feeds.load_frames(fixture.RAW_DIR)
+        first, later = frames[0]["feeds"], frames[-1]["feeds"]
+        self.assertEqual(set(first), set(feeds.ALT_FEEDS))
+        self.assertIsNotNone(first["weather"]["rainInMin"], "the forecast leads the rain")
+        self.assertEqual(first["weather"]["precipNowMm"], 0.0)
+        self.assertGreater(later["weather"]["precipNowMm"], 0.0)
+        self.assertGreater(first["bikes"]["bikesTaken"], 0)
+        self.assertAlmostEqual(first["tube"]["vsTypical"], fixture.TRUE_ASSUMPTIONS["touristFactor"], delta=0.25)
+        self.assertIsNotNone(first["aviation"]["holdingTotal"])
+        self.assertIsNotNone(first["grid"]["demandMw"])
+        self.assertIsNotNone(first["news"]["eventsNearOxfordCircus"])
+        self.assertIsNotNone(first["attention"]["viewsVsMean"])
+
+    def test_missing_root_or_stale_data_gives_none(self) -> None:
+        self.assertEqual(feeds.feeds_at(None, 0), {k: None for k in feeds.ALT_FEEDS})
+        far_future = feeds.parse_ts("2030-01-01T00:00:00Z")
+        self.assertEqual(feeds.feeds_at(fixture.RAW_DIR, far_future), {k: None for k in feeds.ALT_FEEDS})
+
+
+class FeedBrokerTest(unittest.TestCase):
+    def ctx(self) -> dict:
+        frame = feeds.load_frames(fixture.RAW_DIR)[0]
+        seed = fixture.build_seed()
+        return brokers.build_context(seed, fixture.HORIZON, 1, frame["readings"], frame["busDelayMin"],
+                                     [frame["busDelayMin"]], frame["feeds"])
+
+    def test_every_broker_reads_one_feed_and_views_only_its_knobs(self) -> None:
+        ctx = self.ctx()
+        self.assertEqual({b["feed"] for b in brokers.ROSTER}, set(brokers.FEED_KNOBS))
+        for b in brokers.ROSTER:
+            idea = brokers.rules_idea(b, ctx)
+            viewed = {k for k in (*brokers.IDEA_KEYS, "rainAtMin") if idea[k] is not None}
+            self.assertTrue(viewed <= set(brokers.FEED_KNOBS[b["feed"]]), b["id"])
+            self.assertTrue(viewed, f"{b['id']} has data in the fixture and should hold a view")
+        rain = brokers.rules_idea(next(b for b in brokers.ROSTER if b["feed"] == "weather"), ctx)
+        self.assertLessEqual(rain["rainAtMin"], fixture.TRUE_ASSUMPTIONS["rainAtMin"])
+        self.assertGreaterEqual(rain["rainAtMin"], 0.0)
+
+    def test_no_feed_no_view(self) -> None:
+        ctx = dict(self.ctx(), feeds={})
+        idea = brokers.rules_idea(brokers.ROSTER[0], ctx)
+        self.assertTrue(all(idea[k] is None for k in (*brokers.IDEA_KEYS, "rainAtMin")))
+        self.assertEqual(idea["conviction"], 0.0)
+
+    def test_llm_sees_only_each_brokers_own_feed_and_off_knob_views_are_dropped(self) -> None:
+        seen: list[dict] = []
+        roster = brokers.ROSTER
+
+        def caller(system: str, user: str, schema: dict) -> tuple[str, dict]:
+            msg = json.loads(user)
+            seen.append(msg)
+            return json.dumps({"ideas": [idea_json(b["id"]) for b in msg["brokers"]]}), {}
+        ctx = self.ctx()
+        bk = brokers.Brokerage(fixture.build_seed(), fixture.HORIZON, caller=caller)
+        bk.refresh(ctx, 1)
+        for msg in seen:
+            self.assertEqual(set(msg), {"clock", "minute", "horizonMin", "brokers"})
+            for row in msg["brokers"]:
+                feed = next(b["feed"] for b in roster if b["id"] == row["id"])
+                self.assertEqual(row["latest"], ctx["feeds"][feed])
+        for b in roster:
+            idea = bk.book[b["id"]]["idea"]
+            for k in (*brokers.IDEA_KEYS, "rainAtMin"):
+                if k not in brokers.FEED_KNOBS[b["feed"]]:
+                    self.assertIsNone(idea[k], f"{b['id']} {k}")
+        board = bk.leaderboard()
+        self.assertTrue(all(row["feed"] and row["knobs"] for row in board))
 
 
 if __name__ == "__main__":

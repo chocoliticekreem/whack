@@ -1,0 +1,11 @@
+{"ts": "2026-11-07T15:00:00Z", "source": "crowding", "payload": [{"naptan": "940GZZLUOXC", "name": "Oxford Circus", "dataAvailable": true, "percentageOfBaseline": 0.9162, "timeUtc": "2026-11-07T15:00:00.000Z"}]}
+{"ts": "2026-11-07T15:01:00Z", "source": "crowding", "payload": [{"naptan": "940GZZLUOXC", "name": "Oxford Circus", "dataAvailable": true, "percentageOfBaseline": 0.9207, "timeUtc": "2026-11-07T15:01:00.000Z"}]}
+{"ts": "2026-11-07T15:02:00Z", "source": "crowding", "payload": [{"naptan": "940GZZLUOXC", "name": "Oxford Circus", "dataAvailable": true, "percentageOfBaseline": 0.8859, "timeUtc": "2026-11-07T15:02:00.000Z"}]}
+{"ts": "2026-11-07T15:03:00Z", "source": "crowding", "payload": [{"naptan": "940GZZLUOXC", "name": "Oxford Circus", "dataAvailable": true, "percentageOfBaseline": 0.9514, "timeUtc": "2026-11-07T15:03:00.000Z"}]}
+{"ts": "2026-11-07T15:04:00Z", "source": "crowding", "payload": [{"naptan": "940GZZLUOXC", "name": "Oxford Circus", "dataAvailable": true, "percentageOfBaseline": 0.8892, "timeUtc": "2026-11-07T15:04:00.000Z"}]}
+{"ts": "2026-11-07T15:05:00Z", "source": "crowding", "payload": [{"naptan": "940GZZLUOXC", "name": "Oxford Circus", "dataAvailable": true, "percentageOfBaseline": 0.886, "timeUtc": "2026-11-07T15:05:00.000Z"}]}
+{"ts": "2026-11-07T15:06:00Z", "source": "crowding", "payload": [{"naptan": "940GZZLUOXC", "name": "Oxford Circus", "dataAvailable": true, "percentageOfBaseline": 0.8867, "timeUtc": "2026-11-07T15:06:00.000Z"}]}
+{"ts": "2026-11-07T15:07:00Z", "source": "crowding", "payload": [{"naptan": "940GZZLUOXC", "name": "Oxford Circus", "dataAvailable": true, "percentageOfBaseline": 0.8946, "timeUtc": "2026-11-07T15:07:00.000Z"}]}
+{"ts": "2026-11-07T15:08:00Z", "source": "crowding", "payload": [{"naptan": "940GZZLUOXC", "name": "Oxford Circus", "dataAvailable": true, "percentageOfBaseline": 0.8907, "timeUtc": "2026-11-07T15:08:00.000Z"}]}
+{"ts": "2026-11-07T15:09:00Z", "source": "crowding", "payload": [{"naptan": "940GZZLUOXC", "name": "Oxford Circus", "dataAvailable": true, "percentageOfBaseline": 0.9317, "timeUtc": "2026-11-07T15:09:00.000Z"}]}
+{"ts": "2026-11-07T15:10:00Z", "source": "crowding", "payload": [{"naptan": "940GZZLUOXC", "name": "Oxford Circus", "dataAvailable": true, "percentageOfBaseline": 0.9133, "timeUtc": "2026-11-07T15:10:00.000Z"}]}

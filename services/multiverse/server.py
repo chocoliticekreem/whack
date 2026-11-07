@@ -1,14 +1,15 @@
 """Multiverse HTTP API (stdlib) on :8049.
 
-POST /spawn      {n=50, horizonMin=30, mode="replay"|"live", crnSeed=47, rngSeed=7, brokers="on"|"off"}
+POST /spawn      {n=50, horizonMin=5, mode="replay"|"live", crnSeed=47, rngSeed=7, brokers="on"|"off"}
 POST /observe    {next: true} (replay: consume the next recorded frame)
                  | {ts, readings: {camId: people}, busDelayMin?} (push a frame)
                  | {} in live mode (poll the twin's /api/around/counts now)
-GET  /state      exchange board, consensus, implied volatility, recent observations
+GET  /state      exchange board, consensus, implied volatility, recent observations, vix, vix_history
+GET  /vix        the London VIX now, its history and what moved it
 POST /intervene  {kind, zoneId, atMin, note?, prior=0.5}: fork every live world
 GET  /replay     ?from=<ms>&to=<ms>: the recorded frames available (timestamps + camera counts)
 GET  /geometry   street segments, zones and cameras of the current seed (for the map)
-GET  /brokers    persona-broker leaderboard (track record, idea, conviction, rationale, P&L) + Haiku calls
+GET  /brokers    data-source broker leaderboard (track record, idea, conviction, rationale, P&L) + Haiku calls
 """
 from __future__ import annotations
 
@@ -54,7 +55,7 @@ class App:
 
     def spawn(self, body: dict) -> dict:
         n = max(2, min(int(body.get("n") or engine.DEFAULT_N), MAX_N))
-        horizon = max(5, min(int(body.get("horizonMin") or 30), 120))
+        horizon = max(1, min(int(body.get("horizonMin") or engine.DEFAULT_HORIZON), 120))
         mode = body.get("mode") or "replay"
         if mode not in ("replay", "live"):
             raise ValueError("mode must be replay or live")
@@ -75,6 +76,7 @@ class App:
         self.mode, self.cursor = mode, 0
         mv = engine.Multiverse(seed, n=n, horizon=horizon, crn_seed=int(body.get("crnSeed") or 47),
                                rng_seed=int(body.get("rngSeed") or 7), brokerage=brokerage)
+        mv.feeds = feeds.feeds_at(self.raw_root if mode == "replay" else feeds.alt_root(), seed["at"])
         mv.spawn()
         self.mv = mv
         return self.state()
@@ -103,11 +105,10 @@ class App:
         elif self.mode == "live":
             frame = feeds.live_frame(TWIN_URL, list(mv.cam_names))
             frame["ts"] = frame["ts"] or mv.seed["at"]
+            frame["feeds"] = feeds.feeds_at(feeds.alt_root(), frame["ts"])
         else:
             raise ValueError("replay mode: send {next: true} or {ts, readings}")
-        if frame["ts"] > mv.seed["at"] + mv.horizon * 60_000:
-            mv.roll(engine.reseed(mv.seed, frame["ts"], frame["readings"]))
-        obs = mv.observe(frame["ts"], frame["readings"], frame.get("busDelayMin"))
+        obs = mv.advance(frame)
         return {"observation": obs, "remaining": len(self.frames) - self.cursor, **self.state()}
 
     def intervene(self, body: dict) -> dict:
@@ -130,6 +131,11 @@ class App:
         frames = feeds.load_frames(root, start, end)
         return {"root": str(root), "frames": [{"ts": f["ts"], "cams": len(f["readings"]), "busDelayMin": f["busDelayMin"]}
                                               for f in frames]}
+
+    def vix(self) -> dict:
+        mv = self.need()
+        return {"vix": mv.vix_history[-1] if mv.vix_history else None, "vix_history": mv.vix_history,
+                "horizonMin": mv.horizon}
 
     def brokers(self) -> dict:
         mv = self.need()
@@ -183,7 +189,7 @@ class Handler(BaseHTTPRequestHandler):
         path, q = url.path.rstrip("/"), urllib.parse.parse_qs(url.query)
         routes = {"/health": lambda: {"ok": True, "spawned": APP.mv is not None, "mode": APP.mode},
                   "/state": APP.state, "/replay": lambda: APP.replay(q), "/geometry": APP.geometry,
-                  "/brokers": APP.brokers}
+                  "/brokers": APP.brokers, "/vix": APP.vix}
         if path in routes:
             self.handle_any(routes[path])
         else:

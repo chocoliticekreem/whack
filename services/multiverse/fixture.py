@@ -2,8 +2,14 @@
 
 The street grid is synthetic (80 m blocks); the anchors and camera names are real Oxford Circus
 places placed at their real offsets from the origin. Observations come from a hidden "true" world
-(TRUE_ASSUMPTIONS) plus Poisson noise, written as recorder NDJSON so replay can prove that pruning
-converges on the world that produced the data.
+(TRUE_ASSUMPTIONS) plus Poisson noise, one frame a minute for FRAMES minutes, written as recorder NDJSON
+so replay can prove that pruning converges on the world that produced the data. The truth is rolled
+into a new five-minute epoch exactly as the engine does (re-seeded from the last frame's counts).
+
+Alternative-data feeds are written in the recorder's own payload shapes, generated from the truth plus
+noise. Informative: rain_now (its 15-min forecast shows the rain ~3 min before it starts), bikepoint (docks
+empty at a rate set by movingShare), crowding (Oxford Circus vs typical = touristFactor). Pure noise:
+aircraft, grid, news, wiki_views. So the eval can check the market finds which data has alpha.
 
     python3 services/multiverse/fixture.py   # regenerates services/multiverse/fixtures/
 """
@@ -15,6 +21,7 @@ import random
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import engine
 import worlds
 from worlds import seedmod
 
@@ -25,8 +32,9 @@ SEED_PATH = FIXTURE_DIR / "seed.json"
 RAW_DIR = FIXTURE_DIR / "raw"
 SOURCE = "jamcam_counts"
 START = datetime(2026, 11, 7, 15, 0, tzinfo=timezone.utc)
-HORIZON = 30
-OBS_EVERY_MIN = 5
+HORIZON = 5
+OBS_EVERY_MIN = 1
+FRAMES = 10
 CRN_SEED = 47
 BLOCK_M = 80
 HALF = 6
@@ -57,7 +65,7 @@ CAMS = [
 ]
 BUS_STOPS = [("Oxford Circus Stn (OE)", 40, 8, ["7", "98", "390"]), ("Regent St (RB)", 8, 120, ["88", "453"])]
 TRUE_ASSUMPTIONS = {"movingShare": 0.78, "touristFactor": 1.5, "capacityScale": 0.8, "alightPerBus": 10,
-                    "busDelayMin": 4.0, "walkPace": 0.95, "rainAtMin": 12.0, "incident": None, "events": []}
+                    "busDelayMin": 4.0, "walkPace": 0.95, "rainAtMin": 3.0, "incident": None, "events": []}
 
 
 def kind_for(fixed: int, axis: str) -> str:
@@ -99,23 +107,100 @@ def build_seed(at: datetime = START) -> dict:
             "interventions": [], "assumptions": ["Synthetic 80 m street grid; anchors are real Oxford Circus places."]}
 
 
+ALT_NOISE_SEED = 77
+# Synthetic bike stations within 800 m of Oxford Circus.
+BIKE_STATIONS = [(f"BikePoints_9{i:02d}", 51.5152 + 0.002 * math.cos(i), -0.1418 + 0.003 * math.sin(i)) for i in range(8)]
+BIKES_START = 30
+TYPICAL_CROWDING = 0.6
+RAIN_FORECAST_SD_MIN = 0.7
+
+
+def write(source: str, ts: datetime, payload: object, written: list[Path]) -> None:
+    path = RAW_DIR / source / ts.strftime("%Y-%m-%d") / f"{ts.strftime('%H')}.ndjson"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a" if path in written else "w") as f:
+        f.write(json.dumps({"ts": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "source": source, "payload": payload}) + "\n")
+    if path not in written:
+        written.append(path)
+
+
+def alt_payloads(minute: int, ts: datetime, rng: random.Random, bikes: dict[str, int]) -> dict[str, object]:
+    t = TRUE_ASSUMPTIONS
+    onset = START + timedelta(minutes=t["rainAtMin"])
+    raining = ts >= onset
+    seen_onset = onset + timedelta(minutes=rng.gauss(0, RAIN_FORECAST_SD_MIN))
+    steps = [{"time": (seen_onset - timedelta(minutes=15)).strftime("%Y-%m-%dT%H:%M"), "precipitation": 0.0, "rain": 0.0},
+             {"time": seen_onset.strftime("%Y-%m-%dT%H:%M"), "precipitation": 0.8, "rain": 0.8}]
+    rain = {"current": {"time": ts.strftime("%Y-%m-%dT%H:%M"), "precipitation": 0.6 if raining else 0.0,
+                        "rain": 0.6 if raining else 0.0, "cloud_cover": 95, "weather_code": 61 if raining else 3},
+            "minutely_15": steps}
+    taken = max(0, round(rng.gauss(BIKES_PER_MIN_TRUE * t["movingShare"], 1.5)))
+    for _ in range(taken):
+        sid = rng.choice(list(bikes))
+        bikes[sid] = max(0, bikes[sid] - 1)
+    bikepoint = [{"id": sid, "lat": lat, "lon": lon, "NbBikes": str(bikes[sid]), "NbEBikes": "0",
+                  "NbEmptyDocks": str(BIKES_START + 10 - bikes[sid]), "modified": ts.strftime("%Y-%m-%dT%H:%M:%SZ")}
+                 for sid, lat, lon in BIKE_STATIONS]
+    crowding = [{"naptan": "940GZZLUOXC", "name": "Oxford Circus", "dataAvailable": True,
+                 "percentageOfBaseline": round(TYPICAL_CROWDING * t["touristFactor"] * (1 + rng.gauss(0, 0.05)), 4),
+                 "timeUtc": ts.strftime("%Y-%m-%dT%H:%M:%S.000Z")}]
+    holding = {k: max(0, round(rng.gauss(3, 2))) for k in ("BNN", "LAM", "BIG", "OCK")}
+    aircraft = {"summary": {"count": 120, "airborne": 70, "ground": 50, "below_8000ft": max(0, round(rng.gauss(30, 6))),
+                            "holding": holding, "holding_total": sum(holding.values())}, "aircraft": []}
+    demand = round(rng.gauss(30_000, 3_000))
+    grid = {"fuelinst": {"startTime": ts.strftime("%Y-%m-%dT%H:%M:00Z"), "total_mw": demand},
+            "demand": {"startTime": ts.strftime("%Y-%m-%dT%H:%M:00Z"), "demand": demand}}
+    news = {"file": f"{ts.strftime('%Y%m%d%H%M%S')}.export.CSV.zip", "scanned": 1000,
+            "events": [{"GLOBALEVENTID": str(minute * 100 + i), "EventCode": rng.choice(["010", "014", "141", "190"]),
+                        "NumMentions": rng.randint(1, 20), "AvgTone": round(rng.gauss(-2, 3), 2)}
+                       for i in range(rng.randint(0, 6))]}
+    day = START.date()
+    wiki = [{"title": title, "views": {(day - timedelta(days=d)).isoformat(): max(1, round(rng.gauss(300, 90)))
+                                      for d in range(1, 15)}} for title in ("Oxford Street", "Oxford Circus", "Regent Street")]
+    return {"rain_now": rain, "bikepoint": bikepoint, "crowding": crowding, "aircraft": aircraft, "grid": grid,
+            "news": news, "wiki_views": wiki}
+
+
+BIKES_PER_MIN_TRUE = 20.0
+
+
+def profile_payload() -> dict:
+    day = START.strftime("%a").upper()
+    bands = [{"timeBand": f"{h:02d}:{m:02d}-x", "percentageOfBaseLine": TYPICAL_CROWDING} for h in range(24) for m in (0, 15, 30, 45)]
+    return {"name": "Oxford Circus", "naptan": "940GZZLUOXC", "daysOfWeek": [{"dayOfWeek": day, "timeBands": bands}]}
+
+
 def write_observations(seed: dict) -> list[Path]:
-    truth = worlds.run_world(seed, TRUE_ASSUMPTIONS, HORIZON, CRN_SEED)
+    """FRAMES one-minute frames from the true world, rolled into a new epoch every HORIZON minutes."""
     rng = random.Random(2026)
-    written = []
-    for minute in range(OBS_EVERY_MIN, HORIZON + 1, OBS_EVERY_MIN):
+    alt_rng = random.Random(ALT_NOISE_SEED)
+    written: list[Path] = []
+    for path in RAW_DIR.glob("*/*/*.ndjson"):
+        path.unlink()
+    write("crowding_profile", START - timedelta(minutes=5), profile_payload(), written)
+    bikes = {sid: BIKES_START for sid, _, _ in BIKE_STATIONS}
+    for source, payload in alt_payloads(0, START, alt_rng, bikes).items():
+        write(source, START, payload, written)
+    epoch_seed, truth, epoch_start = seed, TRUE_ASSUMPTIONS, START
+    run = worlds.run_world(epoch_seed, truth, HORIZON, CRN_SEED)
+    last: tuple[datetime, dict] | None = None
+    for minute in range(OBS_EVERY_MIN, FRAMES + 1, OBS_EVERY_MIN):
         ts = START + timedelta(minutes=minute)
-        readings = [{"camId": cid, "people": poisson(rng, series[minute]), "vehicles": 4,
-                     "at": int(ts.timestamp() * 1000)} for cid, series in truth["cams"].items()]
+        if ts > epoch_start + timedelta(minutes=HORIZON) and last:
+            elapsed = (last[0] - epoch_start).total_seconds() / 60
+            epoch_seed = engine.reseed(epoch_seed, int(last[0].timestamp() * 1000), last[1])
+            truth = worlds.shift_assumptions(truth, elapsed)
+            epoch_start = last[0]
+            run = worlds.run_world(epoch_seed, truth, HORIZON, CRN_SEED)
+        m = round((ts - epoch_start).total_seconds() / 60)
+        counts = {cid: poisson(rng, series[m]) for cid, series in run["cams"].items()}
+        readings = [{"camId": cid, "people": c, "vehicles": 4, "at": int(ts.timestamp() * 1000)} for cid, c in counts.items()]
         bus = {"meanDelayMin": round(TRUE_ASSUMPTIONS["busDelayMin"] + rng.gauss(0, 0.8), 1), "buses": 12}
-        for source, payload in ((SOURCE, {"readings": readings}), ("bus_delay", bus)):
-            path = RAW_DIR / source / ts.strftime("%Y-%m-%d") / f"{ts.strftime('%H')}.ndjson"
-            path.parent.mkdir(parents=True, exist_ok=True)
-            mode = "a" if path in written else "w"
-            with path.open(mode) as f:
-                f.write(json.dumps({"ts": ts.strftime("%Y-%m-%dT%H:%M:%SZ"), "source": source, "payload": payload}) + "\n")
-            if path not in written:
-                written.append(path)
+        write(SOURCE, ts, {"readings": readings}, written)
+        write("bus_delay", ts, bus, written)
+        for source, payload in alt_payloads(minute, ts, alt_rng, bikes).items():
+            write(source, ts, payload, written)
+        last = (ts, {cid: float(c) for cid, c in counts.items()})
     return written
 
 

@@ -1,0 +1,11 @@
+{"ts": "2026-11-07T15:00:00Z", "source": "grid", "payload": {"fuelinst": {"startTime": "2026-11-07T15:00:00Z", "total_mw": 30442}, "demand": {"startTime": "2026-11-07T15:00:00Z", "demand": 30442}}}
+{"ts": "2026-11-07T15:01:00Z", "source": "grid", "payload": {"fuelinst": {"startTime": "2026-11-07T15:01:00Z", "total_mw": 30900}, "demand": {"startTime": "2026-11-07T15:01:00Z", "demand": 30900}}}
+{"ts": "2026-11-07T15:02:00Z", "source": "grid", "payload": {"fuelinst": {"startTime": "2026-11-07T15:02:00Z", "total_mw": 29588}, "demand": {"startTime": "2026-11-07T15:02:00Z", "demand": 29588}}}
+{"ts": "2026-11-07T15:03:00Z", "source": "grid", "payload": {"fuelinst": {"startTime": "2026-11-07T15:03:00Z", "total_mw": 27869}, "demand": {"startTime": "2026-11-07T15:03:00Z", "demand": 27869}}}
+{"ts": "2026-11-07T15:04:00Z", "source": "grid", "payload": {"fuelinst": {"startTime": "2026-11-07T15:04:00Z", "total_mw": 33964}, "demand": {"startTime": "2026-11-07T15:04:00Z", "demand": 33964}}}
+{"ts": "2026-11-07T15:05:00Z", "source": "grid", "payload": {"fuelinst": {"startTime": "2026-11-07T15:05:00Z", "total_mw": 22541}, "demand": {"startTime": "2026-11-07T15:05:00Z", "demand": 22541}}}
+{"ts": "2026-11-07T15:06:00Z", "source": "grid", "payload": {"fuelinst": {"startTime": "2026-11-07T15:06:00Z", "total_mw": 28117}, "demand": {"startTime": "2026-11-07T15:06:00Z", "demand": 28117}}}
+{"ts": "2026-11-07T15:07:00Z", "source": "grid", "payload": {"fuelinst": {"startTime": "2026-11-07T15:07:00Z", "total_mw": 29246}, "demand": {"startTime": "2026-11-07T15:07:00Z", "demand": 29246}}}
+{"ts": "2026-11-07T15:08:00Z", "source": "grid", "payload": {"fuelinst": {"startTime": "2026-11-07T15:08:00Z", "total_mw": 28649}, "demand": {"startTime": "2026-11-07T15:08:00Z", "demand": 28649}}}
+{"ts": "2026-11-07T15:09:00Z", "source": "grid", "payload": {"fuelinst": {"startTime": "2026-11-07T15:09:00Z", "total_mw": 26475}, "demand": {"startTime": "2026-11-07T15:09:00Z", "demand": 26475}}}
+{"ts": "2026-11-07T15:10:00Z", "source": "grid", "payload": {"fuelinst": {"startTime": "2026-11-07T15:10:00Z", "total_mw": 28833}, "demand": {"startTime": "2026-11-07T15:10:00Z", "demand": 28833}}}

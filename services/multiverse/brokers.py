@@ -1,19 +1,20 @@
-"""Persona brokers: the TOPS clone. MiroFish simulates opinions; here reality marks every agent to market.
+"""Data-source brokers: the TOPS clone, where each broker reads ONE alternative-data stream.
 
-Each broker (a persona from the Predict groups) submits a trade idea per observation: values for the
-assumptions it has a view on (null = no view), a conviction and a one-line rationale in its own voice.
-An idea spawns worlds built on a world drawn from the market's posterior, with only the viewed
-dimensions nudged toward the idea (by its conviction), so a broker never drags the market on a
-dimension it has no opinion about. After each observation a broker scores the log of its worlds'
-posterior price mass over the mass it held before (its log-score against the market), capped; a
-decayed sum is its track record. Slots: a market-maker slice (a plain particle filter, no broker) plus
-a tempered softmax of track records mixed with uniform, with a floor per broker, so one decisive frame
-cannot freeze the leaderboard and a broker that turns right climbs back within a couple of frames.
+Each broker is tied to one feed (Heathrow holding stacks, 15-min rain, the grid, GDELT news, bike docks,
+Tube crowding, Wikipedia attention, the bus feed, the street cameras) and sees only that feed's latest
+summary plus the clock. Per observation it submits a trade idea: values for the knobs its feed can
+plausibly inform (FEED_KNOBS; everything else is forced to null), a conviction and a one-line rationale.
+An idea spawns worlds built on a world drawn from the market's posterior, with only the viewed knobs
+nudged toward the idea (by its conviction). After each observation a broker scores the log of its
+worlds' posterior price mass over the mass it held before (its log-score against the market), capped;
+a decayed sum is its track record. Slots: a market-maker slice (a plain particle filter, no broker)
+plus a tempered softmax of track records mixed with uniform, with a floor per broker. The leaderboard
+is therefore a live ranking of which data has alpha on the city.
 
 Ideas come from Claude Haiku 4.5, BATCH brokers per request with the requests for a frame sent
 concurrently (strict JSON schema, validated and repaired per broker). Without ANTHROPIC_API_KEY, or for
-any broker whose idea fails validation, a deterministic rules broker answers instead, so everything runs
-offline.
+any broker whose idea fails validation, a deterministic rules broker reads the same feed with a simple
+heuristic, so everything runs offline.
 """
 from __future__ import annotations
 
@@ -44,7 +45,7 @@ EVENT_KINDS = ("closure", "incident", "event", "weather")
 DRY = -1.0
 BASE_SPREAD = 0.1
 MIN_SPREAD = 0.02
-DECAY = 0.5
+DECAY = 0.8
 SCORE_CAP = 2.0
 TEMPERATURE = 1.5
 UNIFORM_MIX = 0.2
@@ -57,36 +58,48 @@ RATIONALE_MAX = 240
 # Rules weather nerd: a cloudy sky turns to rain about this many minutes into the horizon.
 RAIN_FROM_CLOUD_MIN = 12.0
 
+# Which knobs each feed can plausibly inform (README has the reasoning).
+FEED_KNOBS: dict[str, tuple[str, ...]] = {
+    "aviation": ("touristFactor",),
+    "weather": ("rainAtMin",),
+    "grid": ("movingShare",),
+    "news": ("capacityScale",),
+    "bikes": ("movingShare",),
+    "tube": ("touristFactor",),
+    "attention": ("touristFactor",),
+    "bus": ("busDelayMin",),
+    "cameras": ("capacityScale",),
+    "contrarian": ("movingShare", "touristFactor"),
+}
+# Rules heuristics: holding aircraft above this count bring tourists; demand above this MW means a busy city.
+HOLDING_NORMAL = 8
+TOURIST_PER_HOLDING = 0.04
+DEMAND_NORMAL_MW = 30_000.0
+DEMAND_PER_SHARE_MW = 20_000.0
+# Bikes leaving the Oxford Circus docks per minute if every local set off (calibrated to the fixture).
+BIKES_PER_MIN_ALL = 20.0
+
 ROSTER: list[dict[str, Any]] = [
-    {"id": "B-COMMUTER", "persona": "Office commuter", "archetype": "commuter",
-     "voice": "terse, clock-watching, hates crowds", "conviction": 0.55,
-     "lean": {"movingShare": 0.82, "touristFactor": 0.8}},
-    {"id": "B-TOURIST", "persona": "Tourist on a weekend break", "archetype": "tourist",
-     "voice": "excited, everything is busy and wonderful", "conviction": 0.6,
-     "lean": {"touristFactor": 1.6, "movingShare": 0.6, "capacityScale": 0.9}},
-    {"id": "B-LUNCH", "persona": "Lunch-crowd office worker", "archetype": "office_lunch",
-     "voice": "practical, thinks in queues and sandwich shops", "conviction": 0.45,
-     "lean": {"movingShare": 0.7, "capacityScale": 0.95}},
-    {"id": "B-RIDER", "persona": "Delivery rider", "archetype": "delivery_rider",
-     "voice": "street-smart, watches kerbs and traffic", "conviction": 0.5,
-     "lean": {"capacityScale": 0.7, "movingShare": 0.75}, "busFromFeed": 1.0},
-    {"id": "B-RESIDENT", "persona": "Local resident", "archetype": "resident",
-     "voice": "weary, has seen every Saturday rush", "conviction": 0.4,
-     "lean": {"movingShare": 0.5, "touristFactor": 1.2, "capacityScale": 1.1}},
-    {"id": "B-BUS", "persona": "Bus driver on the 7", "archetype": "transit_arrival",
-     "voice": "dry, reads the road through a windscreen", "conviction": 0.75, "lean": {}, "busFromFeed": 0.0},
-    {"id": "B-EVENT", "persona": "Event-goer heading to the Palladium", "archetype": "event_goer",
-     "voice": "buzzing, thinks the show is the centre of the world", "conviction": 0.5,
-     "lean": {"touristFactor": 1.3}, "event": {"kind": "event", "zone": "London Palladium", "atMin": 20}},
-    {"id": "B-SHOP", "persona": "Shop worker on Oxford Street", "archetype": "resident",
-     "voice": "sees footfall through the till", "conviction": 0.55,
-     "lean": {"touristFactor": 1.4, "capacityScale": 0.85, "movingShare": 0.72}},
-    {"id": "B-CONTRA", "persona": "Contrarian", "archetype": "resident",
-     "voice": "smug, bets against whatever the cameras just showed", "conviction": 0.35,
-     "lean": {}, "contrarian": True},
-    {"id": "B-WEATHER", "persona": "Weather nerd", "archetype": "commuter",
-     "voice": "nerdy, quotes cloud types and radar", "conviction": 0.7,
-     "lean": {"movingShare": 0.75}, "rainFromSky": True},
+    {"id": "B-AIR", "feed": "aviation", "persona": "Heathrow plane spotter", "archetype": "tourist",
+     "voice": "counts holding stacks like sheep", "conviction": 0.4},
+    {"id": "B-RAIN", "feed": "weather", "persona": "Radar watcher", "archetype": "commuter",
+     "voice": "nerdy, quotes millimetres and radar steps", "conviction": 0.7},
+    {"id": "B-GRID", "feed": "grid", "persona": "Grid engineer", "archetype": "resident",
+     "voice": "dry, thinks in megawatts", "conviction": 0.4},
+    {"id": "B-NEWS", "feed": "news", "persona": "Newsroom stringer", "archetype": "resident",
+     "voice": "breathless, every headline is a crowd", "conviction": 0.35},
+    {"id": "B-BIKES", "feed": "bikes", "persona": "Bike dock watcher", "archetype": "cyclist",
+     "voice": "counts empty docks, knows who left", "conviction": 0.6},
+    {"id": "B-TUBE", "feed": "tube", "persona": "Tube supervisor", "archetype": "transit_arrival",
+     "voice": "calm, reads the gateline", "conviction": 0.6},
+    {"id": "B-WIKI", "feed": "attention", "persona": "Wikipedia editor", "archetype": "resident",
+     "voice": "pedantic, trusts pageviews", "conviction": 0.35},
+    {"id": "B-BUS", "feed": "bus", "persona": "Bus driver on the 7", "archetype": "transit_arrival",
+     "voice": "dry, reads the road through a windscreen", "conviction": 0.75},
+    {"id": "B-CAMS", "feed": "cameras", "persona": "CCTV operator", "archetype": "resident",
+     "voice": "flat, has seen every Saturday on a screen", "conviction": 0.45},
+    {"id": "B-CONTRA", "feed": "contrarian", "persona": "Contrarian", "archetype": "resident",
+     "voice": "smug, bets against whatever the cameras just showed", "conviction": 0.35},
 ]
 
 ROOT = Path(__file__).resolve().parent.parent.parent
@@ -133,8 +146,9 @@ def clamp(v: float, lo: float, hi: float) -> float:
 
 
 def build_context(seed: dict, horizon: int, minute: int, readings: dict[str, float] | None,
-                  bus_delay: float | None, events: list[dict], bus_seen: list[float] | None = None,
-                  market: dict | None = None) -> dict:
+                  bus_delay: float | None, bus_seen: list[float] | None = None,
+                  alt: dict[str, Any] | None = None) -> dict:
+    """The clock plus the latest summary of every feed; each broker is later shown only its own feed."""
     t = seed.get("time") or {}
     cams = []
     for c in seed.get("cams", []):
@@ -144,51 +158,83 @@ def build_context(seed: dict, horizon: int, minute: int, readings: dict[str, flo
         cams.append(row)
     seen = [r for r in cams if "seenNow" in r and r["seedPeople"]]
     ratio = (sum(r["seenNow"] for r in seen) / sum(r["seedPeople"] for r in seen)) if seen else None
+    camera = {"crowdVsSeed": round(ratio, 2) if ratio is not None else None,
+              "cams": [r for r in cams if "seenNow" in r][:8]} if seen else None
+    bus = ({"observedDelayMin": bus_delay, "meanDelayMin": round(sum(bus_seen) / len(bus_seen), 2), "reads": len(bus_seen)}
+           if bus_seen else None)
+    feeds = {name: (alt or {}).get(name) for name in ("aviation", "weather", "grid", "news", "bikes", "tube", "attention")}
+    feeds |= {"bus": bus, "cameras": camera, "contrarian": camera}
     return {"area": seed.get("area"), "clock": f"{t.get('weekday', '?')} {t.get('iso', '')[11:16]} London",
-            "daypart": t.get("daypart"), "weekend": t.get("isWeekend"), "minute": minute, "horizonMin": horizon,
-            "weather": seed.get("weather") or {}, "busDelayMinObserved": bus_delay,
-            "busDelayMinMean": round(sum(bus_seen) / len(bus_seen), 2) if bus_seen else None,
-            "busReads": len(bus_seen or []), "market": market,
-            "crowdVsSeed": round(ratio, 2) if ratio is not None else None, "cams": cams,
-            "disruptions": [d.get("name") or d.get("description") or str(d) for d in (seed.get("disruptions") or [])][:5],
-            "placedEvents": events[-5:],
-            "zones": [{"id": z["id"], "name": z["name"]} for z in seed.get("zones", [])]}
+            "minute": minute, "horizonMin": horizon, "feeds": feeds}
+
+
+def feed_of(broker: dict, ctx: dict) -> dict | None:
+    return (ctx.get("feeds") or {}).get(broker.get("feed", "insider"))
 
 
 # ---------------------------------------------------------------- rules broker
 
 
-def rules_idea(broker: dict, ctx: dict, zone_ids_by_name: dict[str, str]) -> dict:
-    """Views only where the persona has a reason; everything else is null and comes from the market."""
-    weather = ctx.get("weather") or {}
-    kind = str(weather.get("kind", "")).lower()
-    raining = (weather.get("precipitationMm") or 0) > 0.2 or kind in ("rain", "drizzle", "showers")
-    idea: dict[str, Any] = {k: None for k in IDEA_KEYS} | {"rainAtMin": 0.0 if raining else None}
-    idea |= dict(broker.get("lean") or {})
-    if "busFromFeed" in broker:
-        seen = ctx.get("busDelayMinMean")
-        idea["busDelayMin"] = (seen if seen is not None else 3.0) + broker["busFromFeed"]
-        idea["busDelayMin"] = round(clamp(idea["busDelayMin"], *worlds.RANGES["busDelayMin"]), 2)
-    if broker.get("rainFromSky") and not raining and kind in ("cloudy", "overcast"):
-        idea["rainAtMin"] = RAIN_FROM_CLOUD_MIN
-    if broker.get("contrarian"):
-        busy = (ctx.get("crowdVsSeed") or 1.0) > 1.05
-        idea |= {"movingShare": 0.4, "touristFactor": 0.7} if busy else {"movingShare": 0.85, "touristFactor": 1.4}
-    idea["event"] = None
-    ev = broker.get("event")
-    if ev and ev.get("zone") in zone_ids_by_name:
-        idea["event"] = {"kind": ev["kind"], "zoneId": zone_ids_by_name[ev["zone"]], "atMin": float(ev["atMin"])}
-    idea["conviction"] = float(broker.get("conviction", 0.5))
-    idea["rationale"] = rules_rationale(broker, idea)
+def rules_views(broker: dict, f: dict, horizon: int) -> dict[str, Any]:
+    """One simple heuristic per feed; {} = the feed gives no reason for a view."""
+    feed = broker["feed"]
+    if feed == "aviation" and f.get("holdingTotal") is not None:
+        return {"touristFactor": 1.0 + TOURIST_PER_HOLDING * (f["holdingTotal"] - HOLDING_NORMAL)}
+    if feed == "weather":
+        if (f.get("precipNowMm") or 0) >= 0.1:
+            return {"rainAtMin": 0.0}
+        if f.get("rainInMin") is not None:
+            return {"rainAtMin": min(float(f["rainInMin"]), float(horizon))} if f["rainInMin"] <= horizon else {"rainAtMin": DRY}
+        return {"rainAtMin": DRY}
+    if feed == "grid" and f.get("demandMw"):
+        return {"movingShare": 0.6 + (f["demandMw"] - DEMAND_NORMAL_MW) / DEMAND_PER_SHARE_MW}
+    if feed == "news" and f.get("eventsNearOxfordCircus") is not None:
+        tense = f["eventsNearOxfordCircus"] >= 3 and (f.get("avgTone") or 0) < -2
+        return {"capacityScale": 0.8 if tense else 1.05}
+    if feed == "bikes" and f.get("bikesTaken") is not None and f.get("minutes"):
+        return {"movingShare": f["bikesTaken"] / f["minutes"] / BIKES_PER_MIN_ALL}
+    if feed == "tube" and f.get("vsTypical"):
+        return {"touristFactor": f["vsTypical"]}
+    if feed == "attention" and f.get("viewsVsMean"):
+        return {"touristFactor": f["viewsVsMean"]}
+    if feed == "bus" and f.get("meanDelayMin") is not None:
+        return {"busDelayMin": f["meanDelayMin"]}
+    if feed == "cameras" and f.get("crowdVsSeed"):
+        return {"capacityScale": 1.25 - 0.35 * f["crowdVsSeed"]}
+    if feed == "contrarian" and f.get("crowdVsSeed"):
+        busy = f["crowdVsSeed"] > 1.05
+        return {"movingShare": 0.4, "touristFactor": 0.7} if busy else {"movingShare": 0.85, "touristFactor": 1.4}
+    return {}
+
+
+def rules_idea(broker: dict, ctx: dict, zone_ids_by_name: dict[str, str] | None = None) -> dict:
+    """Views only on the broker's own knobs, from its own feed; everything else is null."""
+    horizon = int(ctx.get("horizonMin") or 5)
+    if broker.get("lean"):
+        f: dict | None = {"insider": True}
+        views = dict(broker["lean"])
+    else:
+        f = feed_of(broker, ctx)
+        views = rules_views(broker, f, horizon) if f else {}
+    idea: dict[str, Any] = {k: None for k in IDEA_KEYS} | {"rainAtMin": None, "event": None}
+    for k, v in views.items():
+        if k == "rainAtMin":
+            idea[k] = v if v < 0 else round(clamp(v, 0.0, float(horizon)), 1)
+        else:
+            idea[k] = round(clamp(float(v), *worlds.RANGES[k]), 3)
+    idea["conviction"] = float(broker.get("conviction", 0.5)) if views else 0.0
+    idea["rationale"] = rules_rationale(broker, idea, f)
     return idea
 
 
-def rules_rationale(broker: dict, idea: dict) -> str:
+def rules_rationale(broker: dict, idea: dict, f: dict | None) -> str:
+    if not f:
+        return f"No {broker['feed']} data, no view."
     bits = []
     if idea.get("movingShare") is not None:
         bits.append(f"{idea['movingShare'] * 100:.0f}% set off")
     if idea.get("touristFactor") is not None:
-        bits.append(f"tourists x{idea['touristFactor']:.1f}")
+        bits.append(f"tourists x{idea['touristFactor']:.2f}")
     if idea.get("capacityScale") is not None:
         bits.append(f"pavements x{idea['capacityScale']:.2f}")
     if idea.get("busDelayMin") is not None:
@@ -196,9 +242,8 @@ def rules_rationale(broker: dict, idea: dict) -> str:
     rain = idea.get("rainAtMin")
     if rain is not None:
         bits.append("stays dry" if rain < 0 else f"rain from +{rain:.0f} min")
-    if idea.get("event"):
-        bits.append(f"{idea['event']['kind']} at +{idea['event']['atMin']:.0f} min")
-    return f"{broker['persona']} (rules): " + (", ".join(bits) or "no view, follows the market") + "."
+    head = ", ".join(f"{k} {v}" for k, v in list(f.items())[:2] if not isinstance(v, (list, dict)))
+    return f"{head}: " + (", ".join(bits) or "no view") + "."
 
 
 # ---------------------------------------------------------------- Haiku broker
@@ -221,52 +266,31 @@ def response_schema(roster: list[dict], zone_ids: list[str]) -> dict:
             "properties": {"ideas": {"type": "array", "items": item}}}
 
 
-def standing(broker: dict) -> list[str]:
-    """The knobs a persona has lived experience of (from its rules definition)."""
-    knobs = list(broker.get("lean") or {})
-    if "busFromFeed" in broker:
-        knobs.append("busDelayMin")
-    if broker.get("rainFromSky"):
-        knobs.append("rainAtMin")
-    if broker.get("contrarian"):
-        knobs += ["movingShare", "touristFactor"]
-    if broker.get("event"):
-        knobs.append("event")
-    return list(dict.fromkeys(knobs)) or ["any one knob the context gives it a reason to bet on"]
-
-
 def system_prompt(roster: list[dict], horizon: int) -> str:
     r = worlds.RANGES
-    people = "\n".join(f"- {b['id']}: {b['persona']}. Voice: {b['voice']}. Knows about: {', '.join(standing(b))}."
-                       for b in roster)
+    people = "\n".join(f"- {b['id']}: {b['persona']}. Voice: {b['voice']}. Reads ONLY the {b['feed']} feed. "
+                       f"May set: {', '.join(FEED_KNOBS[b['feed']])}." for b in roster)
     return (
-        "You voice the brokers on an exchange of parallel Londons. Each broker is a real person on the street "
-        f"who bets on how the next {horizon} minutes around the area will go. Every bet spawns simulated "
+        "You voice the brokers on an exchange of parallel Londons around Oxford Circus. Each broker reads one "
+        f"alternative-data feed and bets on how the next {horizon} minutes will go. Every bet spawns simulated "
         "worlds; street cameras and the TfL bus feed then price those worlds, and brokers whose bets match "
-        "reality get more worlds next round. A bet only moves the dimensions the broker has a view on; "
-        "everything else follows the market, so a confident wrong view costs that broker, and null costs "
-        "nothing.\n\n"
+        "reality get more worlds next round. A bet only moves the knobs the broker may set; a confident wrong "
+        "view costs that broker, and null costs nothing.\n\n"
         f"Brokers:\n{people}\n\n"
-        "The user message is the live context as JSON: clock, weather, cams (seedPeople = count when the "
-        "horizon started, seenNow = latest count), crowdVsSeed (seen / seed across cams), busDelayMinObserved "
-        "(latest feed read) and busDelayMinMean (mean of busReads reads so far), market (what the market "
-        "currently believes: means of each dimension and rainChance), placedEvents, zones.\n\n"
-        "Return exactly one idea per broker, every broker once. Give numbers for the knobs a broker knows "
-        "about and null (\"no view\") for the rest. Fields:\n"
+        "The user message is JSON: clock, minute, horizonMin, and per broker its feed name and `latest` (that "
+        "feed's newest summary, or null when nothing recent was recorded). A broker knows ONLY its own `latest`; "
+        "never use another broker's numbers.\n\n"
+        "Return exactly one idea per broker. Numbers only for the knobs that broker may set, null for every "
+        "other knob, and all null with conviction 0 when its latest is null or says nothing. Fields:\n"
         f"- movingShare: share of people in the area who set off within the horizon ({r['movingShare'][0]}-{r['movingShare'][1]})\n"
         f"- touristFactor: tourist multiplier vs a normal day ({r['touristFactor'][0]}-{r['touristFactor'][1]})\n"
         f"- capacityScale: usable pavement vs normal ({r['capacityScale'][0]}-{r['capacityScale'][1]}; lower = more cramped)\n"
         f"- busDelayMin: how late buses run, minutes ({r['busDelayMin'][0]}-{r['busDelayMin'][1]})\n"
-        f"- rainAtMin: minute from the start of the horizon (0-{horizon}) when rain starts; -1 = it stays dry; "
-        "null = no view. The weather in the context is the report from when the horizon started; the "
-        "market's rainChance and sudden swings in camera counts are evidence it has changed since\n"
-        "- event: null, unless the broker knows about events: then {kind: closure|incident|event|weather, "
-        "zoneId: one of the zone ids, atMin}\n"
-        "- conviction: 0-1, how sure this broker is\n"
-        "- rationale: one first-person sentence, at most 20 words, in the broker's own voice, quoting at least "
-        "one number from the context (a camera count, the crowd ratio, the bus delay or the market's view)\n\n"
-        "Brokers disagree where their lived experience differs and may bet against the market when the "
-        "context gives them a reason. Do not give every broker the same numbers."
+        f"- rainAtMin: minute from now (0-{horizon}) when rain starts; 0 = raining now; -1 = stays dry\n"
+        "- event: always null\n"
+        "- conviction: 0-1, how much this feed really says about the knob\n"
+        "- rationale: one first-person sentence, at most 16 words, in the broker's voice, quoting one number "
+        "from its own feed\n"
     )
 
 
@@ -365,6 +389,18 @@ def validate_batch(text: str, roster: list[dict], horizon: int, zone_ids: list[s
     return out, errors
 
 
+def own_knobs_only(idea: dict, feed: str) -> dict:
+    """A broker may only hold views its feed can inform; anything else becomes 'no view'."""
+    if feed not in FEED_KNOBS:
+        return idea
+    allowed = set(FEED_KNOBS[feed])
+    out = dict(idea, event=None)
+    for k in (*IDEA_KEYS, "rainAtMin"):
+        if k not in allowed:
+            out[k] = None
+    return out
+
+
 # ---------------------------------------------------------------- worlds from ideas
 
 
@@ -428,12 +464,14 @@ class Brokerage:
     def __init__(self, seed: dict, horizon: int, roster: list[dict] | None = None,
                  caller: Callable[[str, str, dict], tuple[str, dict]] | None = None) -> None:
         self.roster = roster or ROSTER
+        self.feeds = {b["id"]: b.get("feed", "insider") for b in self.roster}
         self.horizon = horizon
         self.zone_ids = [z["id"] for z in seed["zones"]]
         self.zone_ids_by_name = {z["name"]: z["id"] for z in seed["zones"]}
         self.caller = caller or (haiku_call if api_key() else None)
         self.book: dict[str, dict[str, Any]] = {
             b["id"]: {"id": b["id"], "persona": b["persona"], "archetype": b["archetype"], "trackRecord": 0.0,
+                      "feed": b.get("feed", "insider"), "knobs": list(FEED_KNOBS.get(b.get("feed", "insider"), IDEA_KEYS)),
                       "weight": 1.0 / len(self.roster), "slots": 0, "priorMass": 0.0, "mass": 0.0,
                       "idea": None, "source": None, "pnl": [], "cumulative": 0.0}
             for b in self.roster}
@@ -444,14 +482,19 @@ class Brokerage:
     def llm_enabled(self) -> bool:
         return self.caller is not None
 
+    def user_message(self, chunk: list[dict], ctx: dict) -> str:
+        """Clock plus, for each broker in the chunk, only its own feed's latest summary."""
+        return json.dumps({"clock": ctx.get("clock"), "minute": ctx.get("minute"), "horizonMin": ctx.get("horizonMin"),
+                           "brokers": [{"id": b["id"], "feed": b["feed"], "latest": feed_of(b, ctx)} for b in chunk]},
+                          separators=(",", ":"))
+
     def refresh(self, ctx: dict, obs_index: int) -> dict[str, dict]:
         """New ideas for every broker: concurrent batched Haiku calls, rules for whatever is missing or invalid."""
         ideas: dict[str, dict] = {}
         if self.caller is not None:
-            user = json.dumps(ctx, separators=(",", ":"))
             chunks = [self.roster[i:i + BATCH] for i in range(0, len(self.roster), BATCH)]
             with ThreadPoolExecutor(max_workers=len(chunks)) as pool:
-                records = list(pool.map(lambda chunk: self.ask(chunk, user, obs_index), chunks))
+                records = list(pool.map(lambda chunk: self.ask(chunk, self.user_message(chunk, ctx), obs_index), chunks))
             for record, got in records:
                 ideas |= got
                 self.calls.append(record)
@@ -470,6 +513,7 @@ class Brokerage:
             text, usage = self.caller(system_prompt(chunk, self.horizon), user, response_schema(chunk, self.zone_ids))
             record |= usage
             ideas, errors = validate_batch(text, chunk, self.horizon, self.zone_ids)
+            ideas = {bid: own_knobs_only(idea, self.feeds[bid]) for bid, idea in ideas.items()}
             record["errors"] = errors[:10]
         except Exception as exc:
             record["errors"] = [f"{type(exc).__name__}: {exc}"[:300]]
@@ -516,7 +560,8 @@ class Brokerage:
         rows = []
         for e in sorted(self.book.values(), key=lambda e: (-e["trackRecord"], e["id"])):
             idea = e["idea"] or {}
-            rows.append({"id": e["id"], "persona": e["persona"], "archetype": e["archetype"],
+            rows.append({"id": e["id"], "persona": e["persona"], "archetype": e["archetype"], "feed": e["feed"],
+                         "knobs": e["knobs"],
                          "trackRecord": e["trackRecord"], "weight": round(e["weight"], 4), "slots": e["slots"],
                          "liveWorlds": counts.get(e["id"], 0), "mass": round(e["mass"], 4),
                          "conviction": idea.get("conviction"), "rationale": idea.get("rationale"),

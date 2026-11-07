@@ -75,6 +75,18 @@ def jitter_assumptions(parent: dict[str, Any], rng: random.Random, horizon: int,
     return child
 
 
+def shift_assumptions(a: dict[str, Any], minutes: float) -> dict[str, Any]:
+    """Move timed assumptions `minutes` earlier for a new epoch; anything already started starts at 0."""
+    out = copy.deepcopy(a)
+    if out.get("rainAtMin") is not None:
+        out["rainAtMin"] = round(max(0.0, out["rainAtMin"] - minutes), 1)
+    if out.get("incident"):
+        out["incident"]["atMin"] = round(max(0.0, out["incident"]["atMin"] - minutes), 1)
+    for ev in out.get("events", []):
+        ev["atMin"] = round(max(0.0, float(ev.get("atMin", 0)) - minutes), 1)
+    return out
+
+
 def describe(a: dict[str, Any], zone_names: dict[str, str]) -> list[str]:
     out = [LABELS[k](a[k]) for k in RANGES]
     if a.get("rainAtMin") is not None:

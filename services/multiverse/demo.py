@@ -2,8 +2,8 @@
 
     python3 services/multiverse/demo.py [observations=3] [n=50] [--brokers]
 
---brokers spawns with persona brokers (Haiku when ANTHROPIC_API_KEY is set, rules otherwise) and
-prints the broker leaderboard after each frame.
+--brokers spawns with data-source brokers (Haiku when ANTHROPIC_API_KEY is set, rules otherwise) and
+prints the broker leaderboard after each frame. Every frame prints the London VIX and what moved it.
 """
 from __future__ import annotations
 
@@ -16,6 +16,10 @@ from server import App
 def show(state: dict, top: int = 6) -> None:
     print(f"  live {state['live']}  delisted {state['delisted']}  effective worlds {state['effectiveWorlds']}"
           f"  minute +{state['minute']}")
+    v = state.get("vix")
+    if v:
+        print(f"  LONDON VIX {v['vix']:5.1f} ({v['delta']:+.1f}{' SPIKE' if v['spike'] else ''})  moved most by: "
+              f"{v['driver']} ({v['driverDelta']:+.1f})")
     for row in state["board"][:top]:
         spark = " ".join(f"{p:.3f}" for p in row["history"][-4:])
         print(f"   {row['id']:<6} {row['price']:.3f}  [{spark}]  {', '.join(row['labels'][:3])}")
@@ -32,10 +36,10 @@ def show_brokers(app: App) -> None:
               + (f", errors {call['errors'][:2]}" if call.get("errors") else ""))
     if not latest:
         print("  brokers via rules (no ANTHROPIC_API_KEY)")
-    print(f"   {'broker':<11} {'persona':<36} {'track':>7} {'weight':>6} {'slots':>5} {'conv':>5}  pnl")
+    print(f"   {'broker':<11} {'data source':<11} {'persona':<24} {'track':>7} {'weight':>6} {'slots':>5} {'conv':>5}  pnl")
     for b in info["brokers"]:
         pnl = " ".join(f"{p:+.2f}" for p in b["pnl"][-4:])
-        print(f"   {b['id']:<11} {b['persona'][:36]:<36} {b['trackRecord']:>+7.2f} {b['weight']:>6.2f} "
+        print(f"   {b['id']:<11} {b['feed']:<11} {b['persona'][:24]:<24} {b['trackRecord']:>+7.2f} {b['weight']:>6.2f} "
               f"{b['slots']:>5} {b['conviction'] or 0:>5.2f}  [{pnl}]")
     for b in info["brokers"][:3]:
         print(f"     \"{b['rationale']}\" ({b['id']}, {b['source']})")
@@ -65,6 +69,7 @@ def main() -> None:
         show(out)
         if with_brokers:
             show_brokers(app)
+    print("\nLondon VIX history: " + " ".join(f"{h['vix']:.1f}" for h in out["vix_history"]))
     print("\nconsensus at horizon (zone: mean +/- sd, implied vol):")
     for z in sorted(out["consensusHorizon"], key=lambda z: -z["iv"])[:5]:
         print(f"   {z['name']:<30} {z['mean']:>6} +/- {z['sd']:<5} iv {z['iv']}")
