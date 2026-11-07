@@ -137,7 +137,8 @@ export function City() {
   // Wallet hook: the server ledger owns the balance; wallet.points mirrors it outside the demo mock.
   const [walletOpen, setWalletOpen] = useState(false);
   const mirrorCash = useCallback((cash: number) => setWallet((w) => (w.points === cash ? w : { ...w, points: cash })), []);
-  const dropToken = useCallback(() => setWallet((w) => (w.token ? { ...w, token: null } : w)), []);
+  // Why: a reply to a request sent with the old token can land after a new player is saved; only that old token is dropped.
+  const dropToken = useCallback((stale: string | null) => setWallet((w) => (w.token && w.token === stale ? { ...w, token: null } : w)), []);
   const { wallet: server, refresh: refreshWallet } = useServerWallet(wallet.player, wallet.token, !mock && !!wallet.token, mirrorCash, dropToken);
   const [askStake, stakeDialog] = useStakeConfirm();
 
@@ -344,7 +345,7 @@ export function City() {
           r = await call<BetResponse>(mock, "bet", { ...body, confirm_token: r.data.confirmToken }, w.token);
         }
         if (r.status === 401) {
-          dropToken();
+          dropToken(w.token);
           setBetError("Your player was not recognised. A new one is being set up.");
           return;
         }
