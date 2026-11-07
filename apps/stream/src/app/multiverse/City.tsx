@@ -1,6 +1,6 @@
 "use client";
 
-import { Flame, Trophy, WalletIcon, X } from "lucide-react";
+import { CircleHelp, Flame, MoreHorizontal, Trophy, WalletIcon, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CityMapGL, flyToHotspots, type Pop } from "./CityMapGL";
 import {
@@ -17,10 +17,12 @@ import {
 import type { BetResponse, CitySignals, Hotspot, LeaderRow, Market, MarketsResponse, SettleResponse, Trader } from "./city-types";
 import { CityStrip } from "./Clues";
 import { HowItWorks } from "./HowItWorks";
+import { Confetti, useDismiss } from "./Live";
 import { LocalMarket } from "./LocalMarket";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
+import { EarningsMenu, TradersMenu } from "./Menus";
 import { cancelNote, usePendingFills, type Fill } from "./pending-bets";
-import { plainSettle, plainWatches, recordText } from "./plain";
+import { plainTitle, recordText } from "./plain";
 import { Scenario, type WhatIfOdds } from "./Scenario";
 import { WalletPanel, createPlayer, setNickname, useServerWallet, useStakeConfirm } from "./Wallet";
 
@@ -114,6 +116,12 @@ export function City() {
   const [offline, setOffline] = useState(false);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [traders, setTraders] = useState<Trader[]>([]);
+  const [traderHist, setTraderHist] = useState<Record<string, number[]>>({});
+  const [win, setWin] = useState<{ key: number } | null>(null);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreBtn = useRef<HTMLButtonElement>(null);
+  const moreMenu = useRef<HTMLDivElement>(null);
+  useDismiss(moreOpen, () => setMoreOpen(false), [moreBtn, moreMenu]);
   const [feed, setFeed] = useState<MarketsResponse | null>(null);
   const [signals, setSignals] = useState<CitySignals | null>(null);
   const [results, setResults] = useState<Record<string, Settled & { at: number }>>({});
@@ -202,7 +210,17 @@ export function City() {
         ]);
         if (!live) return;
         if (h.ok) setHotspots(h.data.hotspots);
-        if (t.ok) setTraders(t.data.traders);
+        if (t.ok) {
+          setTraders(t.data.traders);
+          setTraderHist((h) => {
+            const next: Record<string, number[]> = {};
+            for (const x of t.data.traders) {
+              const prev = h[x.id] ?? [];
+              next[x.id] = prev[prev.length - 1] === x.points ? prev : [...prev, x.points].slice(-40);
+            }
+            return next;
+          });
+        }
       } catch {
         // pollMarkets flips to the mock if the engine is down; static lists reload with it.
       }
@@ -252,8 +270,12 @@ export function City() {
           key,
           good: won,
           text: isVoid ? `Refunded ${fmtPts(bet.stake)}` : won ? `+${fmtPts(bet.payout)}` : `−${fmtPts(bet.stake)}`,
-          sub: plainSettle(m, res, isVoid ? "void" : won ? "won" : "lost", fmtPts(isVoid || !won ? bet.stake : bet.payout)),
+          sub: plainTitle(m),
         });
+        if (won) {
+          setWin({ key });
+          window.setTimeout(() => setWin((x) => (x?.key === key ? null : x)), 1400);
+        }
         window.setTimeout(() => setToast((t) => (t?.key === key ? null : t)), 4500);
         if (winHub) setPop({ key, hotspot: winHub, text: won ? `+${fmtPts(bet.payout)}` : `−${fmtPts(bet.stake)}`, good: won });
         return next;
@@ -464,6 +486,12 @@ export function City() {
   }, [feed]);
 
   const hasStrip = !!(signals?.hubs?.hubs.length || signals?.lines || signals?.football);
+  // Why: saved bets outlive the tab; only markets in this visit's book count towards the session.
+  const localPnl = Object.values(wallet.bets).reduce(
+    (s, b) => s + (!book.markets[b.market] ? 0 : b.done === "won" ? b.payout - b.stake : b.done === "lost" ? -b.stake : 0),
+    0,
+  );
+  const sessionPnl = server?.pnl.session ?? localPnl;
 
   const tipTrader = tip ? traderMap.get(tip.trader) : null;
   const tipRect = tip?.el.getBoundingClientRect();
@@ -487,7 +515,7 @@ export function City() {
             <span className="tl-mark" aria-hidden />
             OverWatch
           </span>
-          <span className="tl-live" data-live={liveMode || undefined}>
+          <span className="tl-live" data-live={liveMode || undefined} aria-label={liveMode ? "Live" : "Replay"}>
             <span className="tl-live-dot" />
             {liveMode ? "Live" : "Replay"}
             <span className="tl-clock">
@@ -498,12 +526,24 @@ export function City() {
         </div>
         <div className="tl-wallet tl-num" aria-label="Your points">
           <span className="tl-pts">
-            <b className="tl-data">{fmtPts(wallet.points)}</b> pts
+            <b className="tl-data">{fmtPts(wallet.points)}</b>
+            <span className="tl-pts-unit"> pts</span>
           </span>
           <span className="tl-streak" data-hot={wallet.streak > 0 || undefined} aria-label={`Win streak ${wallet.streak}`}>
             <Flame size={14} strokeWidth={2.5} />
             <span className="tl-data">{wallet.streak}</span>
           </span>
+          <EarningsMenu
+            pnl={sessionPnl}
+            bets={wallet.bets}
+            markets={book.markets}
+            results={results}
+            now={now}
+            player={wallet.player}
+            token={wallet.token}
+            live={!mock && !!wallet.token}
+            pulse={win?.key ?? 0}
+          />
           {broke && mock && (
             <button type="button" className="tl-refill" onClick={() => setWallet((w) => ({ ...w, points: START_POINTS, streak: 0 }))}>
               Refill
@@ -517,7 +557,7 @@ export function City() {
           </button>
           <button
             type="button"
-            className="tl-health"
+            className="tl-health tl-wide"
             data-h={health}
             aria-label={`Data health: ${health}`}
             aria-expanded={healthOpen}
@@ -529,14 +569,71 @@ export function City() {
             <span className="tl-health-dot" />
             <span className="tl-desk">Data</span>
           </button>
-          <button type="button" className="wl-open" onClick={() => setWalletOpen(true)}>
+          <TradersMenu traders={traders} hist={traderHist} lastWhy={lastWhy} onTip={setTip} onBoard={() => setBoardOpen(true)} />
+          <button type="button" className="wl-open tl-wide" onClick={() => setWalletOpen(true)}>
             <WalletIcon size={16} />
             <span className="tl-desk">Wallet</span>
           </button>
-          <button type="button" className="tl-board-btn" onClick={() => setBoardOpen(true)}>
+          <button type="button" className="tl-board-btn tl-wide" onClick={() => setBoardOpen(true)}>
             <Trophy size={16} />
             <span className="tl-desk">Leaderboard</span>
           </button>
+          <button
+            ref={moreBtn}
+            type="button"
+            className="tl-board-btn tl-more"
+            aria-label="More"
+            aria-expanded={moreOpen}
+            onClick={() => setMoreOpen((o) => !o)}
+          >
+            <MoreHorizontal size={16} />
+          </button>
+          {moreOpen && (
+            <div ref={moreMenu} className="tl-pop tl-more-menu" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMoreOpen(false);
+                  setWalletOpen(true);
+                }}
+              >
+                <WalletIcon size={16} /> Wallet
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMoreOpen(false);
+                  setBoardOpen(true);
+                }}
+              >
+                <Trophy size={16} /> Leaderboard
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setMoreOpen(false);
+                  setHealthOpen(true);
+                }}
+              >
+                <span className="tl-health-dot" data-h={health} /> Data feeds
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={(e) => {
+                  setMoreOpen(false);
+                  // Why: the guide's dialog lives in HowItWorks; on a phone its header button is folded into this menu.
+                  e.currentTarget.closest(".tl-bar")?.querySelector<HTMLButtonElement>(".tl-how-btn")?.click();
+                }}
+              >
+                <CircleHelp size={16} /> How it works
+              </button>
+            </div>
+          )}
         </div>
         {healthOpen && (
           <div className="tl-pop tl-health-list" onClick={(e) => e.stopPropagation()}>
@@ -554,39 +651,6 @@ export function City() {
       </header>
 
       <CityStrip signals={signals} />
-
-      <aside className="tl-ai">
-        <div className="tl-ai-head">
-          <b>{traders.length || 6} computer traders.</b> Each one watches one live London data feed and bets against you.
-        </div>
-        <div className="tl-ai-list">
-          {traders.map((t) => (
-            <button
-              key={t.id}
-              type="button"
-              className="tl-trader"
-              onMouseEnter={(e) => setTip({ trader: t.id, why: lastWhy.get(t.id), el: e.currentTarget })}
-              onMouseLeave={() => setTip(null)}
-              onClick={(e) => {
-                e.stopPropagation();
-                setTip({ trader: t.id, why: lastWhy.get(t.id), el: e.currentTarget });
-              }}
-            >
-              <Badge id={t.id} name={t.name} />
-              <span className="tl-trader-text">
-                <b>{t.name}</b>
-                <span className="tl-muted">{plainWatches(t.id, t.watches)}</span>
-              </span>
-              <span className="tl-rec">
-                <span>{recordText(t.record.won, t.record.lost)}</span>
-                <span>
-                  <span className="tl-data">{fmtPts(t.points)}</span> pts
-                </span>
-              </span>
-            </button>
-          ))}
-        </div>
-      </aside>
 
       <section className="tl-markets" aria-live="polite">
         <div className="tl-intro">
@@ -696,11 +760,12 @@ export function City() {
       {stakeDialog}
 
       {toast && (
-        <div key={toast.key} className="tl-toast" data-good={toast.good || undefined}>
+        <div key={toast.key} className="tl-toast" role="status" data-good={toast.good || undefined} data-bad={toast.text.startsWith("−") || undefined}>
           <span className="tl-toast-big tl-num">{toast.text}</span>
           <span className="tl-toast-sub">{toast.sub}</span>
         </div>
       )}
+      {win && <Confetti key={`confetti-${win.key}`} from=".ow-earn-btn" />}
 
       {askName && (
         <div className="tl-modal-bg" onClick={() => setAskName(false)}>

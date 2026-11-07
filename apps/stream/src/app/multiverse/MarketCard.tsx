@@ -7,6 +7,7 @@ import { countdown, fmtPts, londonClock, type MyBet, type Settled } from "./city
 import type { Market, Trader } from "./city-types";
 import { MarketClues, usualGhost } from "./Clues";
 import { FuturesFan } from "./FuturesFan";
+import { Tick } from "./Live";
 import { WhatIfLine, type WhatIfOdds } from "./Scenario";
 import { pausedText, plainLabel, plainResult, plainTitle, resultEta } from "./plain";
 
@@ -403,10 +404,13 @@ export function MarketCard({
                 </span>
                 <span className="tl-opt-meta">
                   <span className="tl-opt-pct">
-                    <span className="tl-data">{Math.round(o.prob * 100)}%</span> chance
+                    <Tick value={Math.round(o.prob * 100)} className="tl-opt-big tl-data">
+                      {Math.round(o.prob * 100)}%
+                    </Tick>{" "}
+                    chance
                   </span>
                   <span className="tl-opt-pay">
-                    Bet <span className="tl-data">{REF_STAKE}</span> pts, get <span className="tl-data">{fmtPts(REF_STAKE * o.odds)}</span> back
+                    Bet <span className="tl-data">{REF_STAKE}</span> · win <b className="tl-data">{fmtPts(REF_STAKE * o.odds)}</b>
                   </span>
                 </span>
               </button>
@@ -434,10 +438,10 @@ export function MarketCard({
             </button>
           </div>
           <button type="button" className="tl-confirm" data-side={draftedSide} disabled={stakeN <= 0} onClick={onConfirm}>
-            Bet {fmtPts(stakeN)} on {plainLabel(m, drafted.id)}
-            <span className="tl-confirm-win">
-              get <span className="tl-data">{fmtPts(stakeN * drafted.odds)}</span> back if right
+            <span>
+              Bet <span className="tl-data">{fmtPts(stakeN)}</span> · win <span className="tl-data">{fmtPts(stakeN * drafted.odds)}</span>
             </span>
+            <span className="tl-confirm-win">on {plainLabel(m, drafted.id)}</span>
           </button>
           {m.integrity && m.integrity.delayS > 0 && (
             <span className="tl-muted tl-stake-note">
