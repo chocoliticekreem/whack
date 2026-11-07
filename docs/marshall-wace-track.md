@@ -49,8 +49,8 @@ sources:
 | Event | MW challenge | Prize | Note |
 |---|---|---|---|
 | DurHack 2024 | "Funniest Hack" and "Chain of events" | Amazon vouchers | Chain of events was judged on "biggest reduction in emissions and most creative approach" |
-| DurHack 2025 | **"Bridging Worlds"**, 1 winner | iPads + MW stash | **Same template as today.** "Make a project that explores the idea of a Bridging Worlds. Interpret the theme however you think best…" |
-| IC Hack 26 | Title sponsor | — | Talks and workshops |
+| DurHack 2025 | **"Bridging Worlds"**, 1 winner (ORION) | iPads + MW stash | **Same template as today.** "Make a project that explores the idea of a Bridging Worlds. Interpret the theme however you think best…" |
+| IC Hack 26 | Title sponsor; **"Emergent Behaviour"** prize | iPad + Apple Pencil | Won by Digital Twin, a multi-agent crowd simulation |
 | WHACK 26 | **"New Worlds"** | iPad (from the slide) | The slide footer says "accurate as at October 2025", so it is the DurHack 2025 deck with a new theme |
 
 **The DurHack 2025 brief listed example directions.** Read these as what MW find interesting:
@@ -58,15 +58,10 @@ sources:
 > - Interface between systems that operate independently
 > - Design a system for human-AI collaboration
 
-There were 24 entries in that category, and the winner isn't public (the Devpost gallery doesn't
-flag per-prize winners). The **crowded interpretations** were:
-- 4 near-identical "meet in the middle" apps that answered a co-sponsor's (QRT) prompt.
-- Generic "bridge" apps: skill swapping, web3 health data, sign-language translation.
-- Novelty hardware such as smart tongs.
-
-The **standouts** were the creative/data hybrids: Echo (an AI soundscape generated from a book's
-text), Niche Machine (predicts the next viral TikTok song from TikTok + Last.fm history), Clap
-Collider (music made by dancing), and an AI courtroom in Ace Attorney style.
+**The winner was [ORION](https://devpost.com/software/orion-efom8k):** a 3D crystal orb that
+predicts by comparing your data with "similar" data it knows ("some comparisons may get quite
+wild!"). The full winner tables and the patterns behind them are in
+[past-winners.md](past-winners.md).
 
 Takeaways:
 - They reward **creativity and a memorable idea** over enterprise polish.

@@ -22,6 +22,11 @@ prior_art: https://github.com/chocoliticekreem/mirrorverse (built 2026-10-17, VA
   It also hits last year's MW prompt, "map data between domains to uncover new insights":
   traffic → transit → crowds → emergency response.
 
+**Closest prior winner:** MW's IC Hack 26 "Emergent Behaviour" prize went to
+[Digital Twin](https://devpost.com/software/eventtwin), a multi-agent simulation of an event's
+crowd. That validates the direction, so we must clearly go further: a real city, live data,
+several systems, a visible cascade. See [past-winners.md](past-winners.md).
+
 ## How it scores on MW's 3 criteria
 | Criterion | What makes it land |
 |---|---|
