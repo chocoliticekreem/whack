@@ -56,7 +56,10 @@ class Exchange:
         self.order: list[str] = []
         self.rounds: dict[int, dict] = {}
         self.rejected = 0
-        self.record = {t["id"]: {"won": 0, "lost": 0, "points": DEFAULT_BANKROLL} for t in traders.TRADERS}
+        self.record = {t["id"]: {"won": 0, "lost": 0, "points": DEFAULT_BANKROLL, "why": ""} for t in traders.TRADERS}
+        for tid, rec in traders.load_records(self.ledger).items():
+            if tid in self.record:
+                self.record[tid] = rec
         self.restored: list[tuple[mk.Restored, list[str]]] = []
         self.stats = {s: {"real": 0, "void": 0} for s in mk.SERIES}
         self.open_favourites: dict[str, list[float]] = {s: [] for s in mk.SERIES}
@@ -143,7 +146,7 @@ class Exchange:
                 continue
             m = series.build(f"{sid}-{local_time(at, '%H%M')}", self.store, self.spots, now, at)
             if m is None:
-                rnd["skipped"][sid] = "no fresh reading"
+                rnd["skipped"][sid] = (series.why_none and series.why_none(self.store, now)) or "no fresh reading"
                 continue
             fav = max(m.open_model.values())
             reason = series.skip(m) if series.skip else None
@@ -276,11 +279,16 @@ class Exchange:
                 self.sat_out[tid] = (m.settles_at, traders.sit_out(tid, self.store, now, round_markets))
                 continue
             option, why = pick
+            stake = traders.stake_for(self.record[tid]["points"])
+            if not stake:
+                self.sat_out[tid] = (m.settles_at, f"Sitting out: {self.record[tid]['points']} points left, so a 10% "
+                                                   f"stake is under the {traders.MIN_STAKE}-point minimum")
+                continue
             cap_pct = self.integrity.cap(m.sub)
             cap = cap_pct * max(0, self.record[tid]["points"])
             held = sum(b["stake"] for b in m.ai_bets if b["trader"] == tid)
-            held += self.integrity.ai_pending(tid, m.id) * traders.STAKE
-            if held + traders.STAKE > cap:
+            held += self.integrity.ai_pending(tid, m.id) * stake
+            if held + stake > cap:
                 self.sat_out[tid] = (m.settles_at, f"Sitting out: position cap {cap:g} points per market "
                                                    f"({cap_pct:.0%} of its {self.record[tid]['points']} points)")
                 continue
@@ -290,12 +298,15 @@ class Exchange:
                 self.ai_fill(m, tid, option, why)
 
     def ai_fill(self, m: mk.Market, tid: str, option: str, why: str) -> None:
+        stake = traders.stake_for(self.record[tid]["points"])
+        if not stake:
+            return
         try:
-            shares, odds = self.quote(m, option, traders.STAKE)
+            shares, odds = self.quote(m, option, stake)
         except WalletError:
             return
         m.book.commit(option, shares)
-        m.ai_bets.append({"trader": tid, "option": option, "why": why, "stake": traders.STAKE, "odds": odds})
+        m.ai_bets.append({"trader": tid, "option": option, "why": why, "stake": stake, "odds": odds})
 
     # ------------------------------------------------------------ settlement
 
@@ -317,10 +328,14 @@ class Exchange:
             won = b["option"] == winner
             rec["won" if won else "lost"] += 1
             rec["points"] += round((b["stake"] * b["odds"] if won else 0) - b["stake"])
+            rec["why"] = b["why"]
             results.append({"trader": b["trader"], "won": won})
         m.result = {"settled": True, "winner": winner, "reading": reading, "aiResults": results,
                     "futuresRuledOut": m.futures.ruled_out, "settlement": snap, "void": winner is None}
         m.settled_at = now
+        touched = {r["trader"] for r in results if r["won"] is not None}
+        if touched:
+            traders.save_records(self.ledger, now, {tid: self.record[tid] for tid in sorted(touched)})
         self.stats[m.sub]["void" if winner is None else "real"] += 1
         if winner is not None and m.close_prices:
             for key, probs in (("price", m.close_prices), ("model", m.close_model)):
@@ -390,7 +405,8 @@ class Exchange:
             why = (bets[-1]["why"] if bets else said if at == round_for(now)
                    else traders.sit_out(t["id"], self.store, now, current))
             rows.append({k: t[k] for k in ("id", "name", "emoji", "watches", "style")} |
-                        {"record": {"won": rec["won"], "lost": rec["lost"]}, "points": rec["points"], "why": why})
+                        {"record": {"won": rec["won"], "lost": rec["lost"]}, "points": rec["points"], "why": why,
+                         "lastWhy": rec["why"]})
         return {"traders": rows}
 
     def round_json(self, now: int | None = None) -> dict:

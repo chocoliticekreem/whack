@@ -34,7 +34,7 @@ FEED_LABEL = {"crowding": "TfL Crowding API", "jamcams": "TfL JamCam + YOLO peop
               "vix": "OverWatch multiverse London VIX"}
 BUSY_WIDTHS = (0.5, 1, 2, 4, 5, 10)
 PUBLISH_MS = 5 * MIN_MS
-CROWD_WAIT_MS = STALE_S["crowding"] * 1000
+CROWD_WAIT_MS = 20 * MIN_MS
 CROWD_TOL_MS = 150_000
 OXFORD = "oxford-circus"
 HUB_ORDER = "Oxford Circus, King's Cross, Piccadilly Circus, Waterloo, Bank"
@@ -44,6 +44,7 @@ READING_MAX_AGE_MS = 2 * MIN_MS
 SETTLE_LAG_MS = 30_000
 GRACE_MS = 3 * MIN_MS
 VIX_WARMUP_MS = 60 * MIN_MS
+VIX_MAX_AGE_MS = STALE_S["vix"] * 1000
 MIN_DELTAS = 10
 ROUND_MS = 5 * MIN_MS
 HOUR_MS = 60 * MIN_MS
@@ -51,6 +52,8 @@ HEADLINE_CAP = 0.70
 HEADLINE_FLOOR = 0.30
 LINE_GAP_MS = 90_000
 CLEAN_MAX_GAP_MS = 5 * MIN_MS
+HUB_REVERSION = 0.01
+CLEAN_CLOSE_BEFORE_MS = 55 * MIN_MS
 
 
 def seed_of(market_id: str) -> int:
@@ -78,6 +81,7 @@ class Series:
         Without it, a final answer found while bets are open still closes the market, which then settles at
         settlesAt.
     enabled=False keeps a series registered (buildable, settleable, testable) but out of the default lineup.
+    why_none(store, now) -> why build returned None, for /round (default "no fresh reading").
     """
 
     id: str
@@ -89,6 +93,7 @@ class Series:
     due: Callable | None = None
     settles_early: bool = False
     enabled: bool = True
+    why_none: Callable | None = None
 
 
 SERIES: dict[str, Series] = {}
@@ -179,12 +184,20 @@ def bracket_options(labels: list[str], spot: dict) -> list[dict]:
 
 
 def crowd_series(store: Store, naptan: str, start: int, now: int) -> list[tuple[int, float]]:
-    return [(ts, math.log(s[naptan])) for ts, s in store.between("crowding", start, now) if naptan in s]
+    """(ts, log vs usual) per reading: the usual-day curve is taken out, so a fit sees only the moves around it."""
+    return [(ts, math.log(s[naptan] / (store.usual(naptan, ts) or 1.0)))
+            for ts, s in store.between("crowding", start, now) if naptan in s]
 
 
-def crowd_station(store: Store, h: dict, snap: dict, now: int) -> tuple[str, str, float, float, float]:
-    mu, sd = pricing.fit_log_walk(crowd_series(store, h["naptan"], now - HISTORY_MS, now), 0.01, 0.002, 0.05)
-    return h["id"], h["naptan"], math.log(snap[h["naptan"]]), mu, sd
+def crowd_station(store: Store, h: dict, snap: dict, now: int, ts0: int | None = None, t_end: int | None = None,
+                  minutes: int = 1) -> tuple[str, str, float, float, float]:
+    """(option id, naptan, log live % at ts0, drift, sigma): the walk fitted around the usual curve, plus that curve's
+    slope from the open reading (ts0) to t_end when both are given."""
+    nap = h["naptan"]
+    mu, sd = pricing.fit_log_walk(crowd_series(store, nap, now - HISTORY_MS, now), 0.01, 0.002, 0.05)
+    if ts0 is not None and t_end is not None:
+        mu += pricing.usual_drift(store.usual(nap, ts0), store.usual(nap, t_end), minutes)
+    return h["id"], nap, math.log(snap[nap]), mu, sd
 
 
 def crowd_horizon(last_ts: int, settles_at: int, now: int) -> int:
@@ -194,20 +207,44 @@ def crowd_horizon(last_ts: int, settles_at: int, now: int) -> int:
     return max(1, math.ceil((expected - now) / MIN_MS))
 
 
+def crowd_walk(last_ts: int, settles_at: int, now: int) -> tuple[int, int]:
+    """(t_end, minutes): a crowding walk runs from the reading it starts at (last_ts), not from now, so the minutes
+    between TfL's reading and the open carry their share of the variance."""
+    t_end = now + crowd_horizon(last_ts, settles_at, now) * MIN_MS
+    return t_end, max(1, round((t_end - last_ts) / MIN_MS))
+
+
 def crowd_settle_rule(settles_at: int) -> str:
     closes = settles_at - CLOSE_MS
-    return (f"the first TfL Crowding reading published after bets close at {local_time(closes, '%H:%M:%S')} (TfL "
-            f"publishes every 5 min). No reading by {local_time(closes + CROWD_WAIT_MS)} → void, stakes refunded")
+    return (f"each station's first TfL Crowding reading that TfL stamps (timeUtc) after bets close at "
+            f"{local_time(closes, '%H:%M:%S')}, not the time we fetch it (TfL stamps every 5 min and publishes a few "
+            f"minutes later). No such reading by {local_time(closes + CROWD_WAIT_MS)} → void, stakes refunded")
+
+
+def first_after_close(store: Store, naptans: dict[str, str], closes_at: int, until: int) -> tuple[dict, dict, int]:
+    """Per key of `naptans`: the first value TfL stamped after closes_at, polled by `until`. ({key: value},
+    {key: TfL stamp}, poll ts of the last one found). A row without a TfL stamp counts at its poll time."""
+    vals, stamps, last = {}, {}, 0
+    for ts, snap in store.between("crowding", closes_at + 1, until):
+        for key, nap in naptans.items():
+            if key in vals or nap not in snap:
+                continue
+            stamp = store.tfl_stamp(ts, nap) or ts
+            if stamp > closes_at:
+                vals[key], stamps[key], last = snap[nap], stamp, ts
+        if len(vals) == len(naptans):
+            break
+    return vals, stamps, last
 
 
 def crowd_values(m: Market, store: Store, now: int):
-    """('ok', ts, {option-or-hotspot: fraction of usual}) from the first reading after bets close that has every
-    station in m.spec['stations']; ('wait', ms) until CROWD_WAIT_MS after the close, then ('missing',)."""
+    """('ok', ts, {option-or-hotspot: fraction of usual}, {same: TfL stamp}) once every station in
+    m.spec['stations'] has a reading TfL stamped after bets close; ('wait', ms) until CROWD_WAIT_MS after the close,
+    then ('missing',)."""
     deadline = m.closes_at + CROWD_WAIT_MS
-    for ts, snap in store.between("crowding", m.closes_at + 1, min(now, deadline)):
-        vals = {oid: snap.get(nap) for oid, nap in m.spec["stations"].items()}
-        if all(v is not None for v in vals.values()):
-            return ("ok", ts, vals)
+    vals, stamps, ts = first_after_close(store, m.spec["stations"], m.closes_at, min(now, deadline))
+    if len(vals) == len(m.spec["stations"]):
+        return ("ok", ts, vals, stamps)
     return ("wait", deadline - now) if now < deadline else ("missing",)
 
 
@@ -220,8 +257,10 @@ def build_oxford_busy(mid: str, store: Store, spots: list[dict], now: int, settl
     last = store.latest("crowding", now)
     if not last or spot["naptan"] not in last[1]:
         return None
-    station = crowd_station(store, spot, last[1], now)
-    sim = pricing.LevelSim(station, now, crowd_horizon(last[0], settles_at, now), random.Random(seed_of(mid)))
+    m0 = store.measured_at(last[0])
+    t_end, minutes = crowd_walk(m0, settles_at, now)
+    station = crowd_station(store, spot, last[1], now, m0, t_end, minutes)
+    sim = pricing.LevelSim(station, m0, minutes, random.Random(seed_of(mid)))
     sim.edges = pricing.place_pct_brackets(sim.finals(), BUSY_WIDTHS)
     hhmm = local_time(settles_at)
     rule = f"{spot['short']}'s % of usual busyness in {crowd_settle_rule(settles_at)}. {pct_rule_edges(sim.edges)}."
@@ -247,11 +286,16 @@ def settle_oxford_busy(m: Market, store: Store, now: int):
 # ---------------------------------------------------------------- vs usual (TfL live % ÷ the typical day)
 
 
+def typical_at(store: Store, naptan: str, ts: int) -> float | None:
+    """The typical value for the band TfL measured the station in, for the crowding reading polled at ts."""
+    return store.typical(naptan, store.tfl_stamp(ts, naptan) or ts)
+
+
 def vs_usual(store: Store, spots: list[dict], ts: int, snap: dict) -> dict[str, float] | None:
     """{hub id: live % ÷ typical % for that weekday and 15-min band}, or None unless every hub has both."""
     out = {}
     for h in spots:
-        typ = store.typical(h["naptan"], ts)
+        typ = typical_at(store, h["naptan"], ts)
         if h["naptan"] not in snap or not typ:
             return None
         out[h["id"]] = snap[h["naptan"]] / typ
@@ -273,10 +317,10 @@ def settled_vs(m: Market, store: Store, now: int):
     got = crowd_values(m, store, now)
     if got[0] != "ok":
         return got
-    ts, vals = got[1], got[2]
+    ts, vals, stamps = got[1], got[2], got[3]
     vs = {}
     for hid, v in vals.items():
-        typ = store.typical(m.spec["stations"][hid], ts)
+        typ = store.typical(m.spec["stations"][hid], stamps[hid])
         if not typ:
             return ("missing",)
         vs[hid] = v / typ
@@ -355,7 +399,7 @@ def sim_view(m: Market, store: Store, now: int) -> dict | None:
         return None
     rng = random.Random(seed_of(m.id) ^ SIM_SALT ^ now)
     if m.sub in ("hub_surge", "hub_hour") and last:
-        t_end = now + crowd_horizon(last[0], m.settles_at, now) * MIN_MS
+        t_end = now + crowd_horizon(store.measured_at(last[0]), m.settles_at, now) * MIN_MS
         hubs = m.option_ids()
         naps = [m.spec["stations"][h] for h in hubs]
         draws = pricing.sim_draws(fc, naps, t_end, rng, SIM_DRAWS)
@@ -371,7 +415,7 @@ def sim_view(m: Market, store: Store, now: int) -> dict | None:
             detail[h] = spread(fc, nap, t_end) + frm
         return {"probs": {h: c / len(draws) for h, c in counts.items()}, "detail": detail}
     if m.sub == "city_pulse" and last and pulse_of(last[1]):
-        t_end = now + crowd_horizon(last[0], m.settles_at, now) * MIN_MS
+        t_end = now + crowd_horizon(store.measured_at(last[0]), m.settles_at, now) * MIN_MS
         naps = [nap for nap in last[1] if nap in fc["stations"]]
         draws = pricing.sim_draws(fc, naps, t_end, rng, SIM_DRAWS) if naps else None
         pulses = sorted(p for d in draws or [] if (p := pulse_from(d, last[1], store, last[0], t_end)))
@@ -397,18 +441,28 @@ def sim_view(m: Market, store: Store, now: int) -> dict | None:
 # ---------------------------------------------------------------- S1 hub_surge (every round)
 
 
+def hub_reversion(store: Store, spots: list[dict], snap: dict, ts0: int, stations: list) -> list:
+    """Pull each hub's drift toward the five hubs' mean log vs usual: the hub furthest below its usual catches up.
+    debt: HUB_REVERSION is one Saturday's fit (0.0095 ± 0.0017 per min of TfL time, 445 hub-rounds, 12:40-20:10).
+    ceiling: one day of data. upgrade: refit per weekday once the recorder holds a week."""
+    xs = [math.log(snap[h["naptan"]] / typical_at(store, h["naptan"], ts0)) for h in spots]
+    mean = sum(xs) / len(xs)
+    return [(oid, nap, x0, mu - HUB_REVERSION * (x - mean), sd) for (oid, nap, x0, mu, sd), x in zip(stations, xs)]
+
+
 def build_hub_surge(mid: str, store: Store, spots: list[dict], now: int, settles_at: int) -> Market | None:
     """5-way race: the hub whose vs-usual rises most from the reading at open to the first reading after close."""
     last = store.latest("crowding", now)
     if not last or vs_usual(store, spots, last[0], last[1]) is None:
         return None
     ts0, snap = last
-    stations = [crowd_station(store, h, snap, now) for h in spots]
-    minutes = crowd_horizon(ts0, settles_at, now)
-    t_end = now + minutes * MIN_MS
-    typ0 = [store.typical(h["naptan"], ts0) for h in spots]
+    m0 = store.measured_at(ts0)
+    t_end, minutes = crowd_walk(m0, settles_at, now)
+    stations = hub_reversion(store, spots, snap, ts0,
+                             [crowd_station(store, h, snap, now, m0, t_end, minutes) for h in spots])
+    typ0 = [typical_at(store, h["naptan"], ts0) for h in spots]
     typ_t = [store.typical(h["naptan"], t_end) or t0 for h, t0 in zip(spots, typ0)]
-    sim = pricing.RaceSim(stations, now, minutes, random.Random(seed_of(mid)), typ0, typ_t, "gain")
+    sim = pricing.RaceSim(stations, m0, minutes, random.Random(seed_of(mid)), typ0, typ_t, "gain")
     blend_hubs(sim, store, spots, now, t_end, mid)
     spec = hub_spec(store, spots, stations, ts0, snap)
     day = spec["day"]
@@ -450,6 +504,30 @@ def pulse_series(store: Store, start: int, now: int) -> list[tuple[int, float]]:
     return [(ts, p) for ts, s in store.between("crowding", start, now) if (p := pulse_of(s))]
 
 
+def pulse_vs_usual(store: Store, start: int, now: int) -> list[tuple[int, float]]:
+    """(ts, log City Pulse ÷ a usual day's pulse over the same stations) per reading; the raw log pulse when the
+    usual-day profile is missing."""
+    raw, out = [], []
+    for ts, s in store.between("crowding", start, now):
+        if not (p := pulse_of(s)):
+            continue
+        raw.append((ts, math.log(p)))
+        typ = [store.usual(nap, ts) for nap in s]
+        if all(typ):
+            out.append((ts, math.log(p / (100 * sum(typ) / len(typ)))))
+    return out if len(out) * 2 >= len(raw) else raw
+
+
+def pulse_along_usual(store: Store, snap_at: tuple[int, dict], t_end: int) -> float | None:
+    """City Pulse at t_end if every station follows its usual-day curve from the reading at snap_at."""
+    ts0, snap = snap_at
+    vals = {}
+    for nap, live in snap.items():
+        a, b = store.usual(nap, ts0), store.usual(nap, t_end)
+        vals[nap] = live * b / a if a and b else live
+    return pulse_of(vals)
+
+
 def build_city_pulse(mid: str, store: Store, spots: list[dict], now: int, settles_at: int) -> Market | None:
     """Over/under on City Pulse; line = pulse at open + the median 5-min change over the last 3 h, on a .5."""
     last = store.latest("crowding", now)
@@ -459,10 +537,12 @@ def build_city_pulse(mid: str, store: Store, spots: list[dict], now: int, settle
     hist = pulse_series(store, now - HISTORY_MS, now)
     d5 = pricing.deltas_at(hist, 5, CROWD_TOL_MS)
     line = math.floor(p0 + (statistics.median(d5) if len(d5) >= 3 else 0.0)) + 0.5
-    mu, sd = pricing.fit_log_walk([(ts, math.log(p)) for ts, p in hist], 0.01, 0.002, 0.05)
-    minutes = crowd_horizon(last[0], settles_at, now)
-    sim = pricing.ScalarSim(p0, mu, sd, now, minutes, random.Random(seed_of(mid)), pulse_of, line)
-    blend_pulse(sim, store, last, now, now + minutes * MIN_MS, mid)
+    mu, sd = pricing.fit_log_walk(pulse_vs_usual(store, now - HISTORY_MS, now), 0.01, 0.002, 0.05)
+    m0 = store.measured_at(last[0])
+    t_end, minutes = crowd_walk(m0, settles_at, now)
+    mu += pricing.usual_drift(p0, pulse_along_usual(store, (m0, last[1]), t_end), minutes)
+    sim = pricing.ScalarSim(p0, mu, sd, m0, minutes, random.Random(seed_of(mid)), pulse_of, line)
+    blend_pulse(sim, store, last, now, t_end, mid)
     hhmm = local_time(settles_at)
     rule = (f"City Pulse = 100 × the mean live TfL busyness (% of baseline) over the {PULSE_STATIONS} TfL Crowding "
             f"stations, in {crowd_settle_rule(settles_at)}. Fewer than {PULSE_MIN_STATIONS} stations reporting → "
@@ -474,15 +554,19 @@ def build_city_pulse(mid: str, store: Store, spots: list[dict], now: int, settle
 
 
 def settle_city_pulse(m: Market, store: Store, now: int):
+    """Each station that reports at the close counts at its first reading TfL stamped after the close. Settles once
+    all of them have one, or at the deadline on the ones that do (18 of 20 needed)."""
     deadline = m.closes_at + CROWD_WAIT_MS
     after = store.between("crowding", m.closes_at + 1, min(now, deadline))
     if not after:
         return ("wait", deadline - now) if now < deadline else ("missing",)
-    ts, snap = after[0]
-    pulse = pulse_of(snap)
+    vals, _, ts = first_after_close(store, {nap: nap for nap in after[0][1]}, m.closes_at, min(now, deadline))
+    if len(vals) < len(after[0][1]) and now < deadline:
+        return ("wait", deadline - now)
+    pulse = pulse_of(vals)
     if pulse is None:
-        return ("void", f"Only {len(snap)} of {PULSE_STATIONS} stations reported — void",
-                {"value": None, "source": "TfL Crowding API", "fetchedAt": ts})
+        return ("void", f"Only {len(vals)} of {PULSE_STATIONS} stations reported — void",
+                {"value": None, "source": "TfL Crowding API", "fetchedAt": ts or None})
     pulse = round(pulse, 4)
     winner = "over" if pulse > m.spec["line"] else "under"
     return ("done", winner, f"City Pulse {pulse:.2f} vs line {m.spec['line']:.2f} → {m.label(winner)}",
@@ -511,12 +595,14 @@ def over_under_options(line_label: str, over: str = "Over", under: str = "Under"
 
 
 def vix_state(store: Store, now: int) -> dict:
-    """Whether the London VIX can be traded now: a multiverse frame at most 2 min old, the engine past its first
-    hour since spawn (the VIX decays from ~16 to ~2.3 over it) and enough post-warm-up moves to price from.
-    {ok, reason, vix, ts, spawnTs, history [(ts, vix)] since warm-up within 3 h, driver}."""
+    """Whether the London VIX can be traded now: a multiverse frame no older than the feed's 3-min staleness (the
+    engine stamps frames 60-120 s apart and serves them up to ~70 s late, so 2 min failed on its normal cadence), the
+    engine past its first hour since spawn (the VIX decays from ~16 to ~2.3 over it) and enough post-warm-up moves to
+    price from. {ok, reason, vix, ts, spawnTs, history [(ts, vix)] since warm-up within 3 h, driver}."""
     last = store.latest("vix", now)
-    if not last or now - last[0] > READING_MAX_AGE_MS:
-        return {"ok": False, "reason": "the multiverse engine is unreachable (no VIX frame in 2 min)"}
+    if not last or now - last[0] > VIX_MAX_AGE_MS:
+        return {"ok": False, "reason": f"the multiverse engine is unreachable (no VIX frame in "
+                                       f"{VIX_MAX_AGE_MS // MIN_MS} min)"}
     ts, snap = last
     spawn = snap.get("spawnTs")
     out = {"vix": snap["vix"], "ts": ts, "spawnTs": spawn, "driver": snap.get("driver") or "",
@@ -633,22 +719,26 @@ def build_hub_hour(mid: str, store: Store, spots: list[dict], now: int, settles_
     ts0, snap = last
     end = headline_end(settles_at)
     mid = f"hub_hour-{local_time(end, '%H%M')}"
-    minutes = crowd_horizon(ts0, end, now)
+    m0 = store.measured_at(ts0)
+    t_end, minutes = crowd_walk(m0, end, now)
+    typ0 = [typical_at(store, h["naptan"], ts0) for h in spots]
+    typ_t = [store.typical(h["naptan"], t_end) or t0 for h, t0 in zip(spots, typ0)]
     stations = []
     for h in spots:
+        a, b = store.usual(h["naptan"], m0), store.usual(h["naptan"], t_end)
         series = crowd_series(store, h["naptan"], now - HISTORY_MS, now)
         d60 = pricing.deltas_at(series, 60, CROWD_TOL_MS)
-        sd = (statistics.pstdev(d60) / math.sqrt(60)) if len(d60) >= 6 else crowd_station(store, h, snap, now)[4]
-        stations.append((h["id"], h["naptan"], math.log(snap[h["naptan"]]), 0.0, max(sd, 0.002)))
-    typ0 = [store.typical(h["naptan"], ts0) for h in spots]
-    typ_t = [store.typical(h["naptan"], now + minutes * MIN_MS) or t0 for h, t0 in zip(spots, typ0)]
+        sd = (statistics.pstdev(d60) / math.sqrt(60)) if len(d60) >= 6 else \
+            crowd_station(store, h, snap, now, m0, t_end, minutes)[4]
+        stations.append((h["id"], h["naptan"], math.log(snap[h["naptan"]]), pricing.usual_drift(a, b, minutes),
+                         max(sd, 0.002)))
     rng = random.Random(seed_of(mid))
     for _ in range(20):
-        sim = pricing.RaceSim(stations, now, minutes, rng, typ0, typ_t, "level")
+        sim = pricing.RaceSim(stations, m0, minutes, rng, typ0, typ_t, "level")
         if max(pricing.Futures(sim, [h["id"] for h in spots]).probs().values()) <= HEADLINE_CAP:
             break
         stations = [(a, b, x, mu, sd * 1.3) for a, b, x, mu, sd in stations]
-    blend_hubs(sim, store, spots, now, now + minutes * MIN_MS, mid)
+    blend_hubs(sim, store, spots, now, t_end, mid)
     spec = hub_spec(store, spots, stations, ts0, snap)
     day = spec["day"]
     rule = (f"Each hub's vs usual = its live TfL busyness ÷ its typical {day} for that 15-min band. The hub with the "
@@ -698,8 +788,9 @@ def build_clean_sheet(mid: str, store: Store, spots: list[dict], now: int, settl
     start = local_time(settles_at - ROUND_MS)
     names = [last[1][lid]["name"] for lid in good]
     rule = (f"YES if every Tube line on Good Service at {start} ({', '.join(names)}) reads Good Service on every TfL "
-            f"Line Status reading until {local_time(end)}. The first reading that shows any of them worse settles "
-            f"NO at once. Readings missing for more than 5 min in total → void, stakes refunded.")
+            f"Line Status reading until {local_time(end)}. Betting closes at "
+            f"{local_time(end - CLEAN_CLOSE_BEFORE_MS)}, with the opening round. The first reading that shows any of "
+            f"them worse settles NO at once. Readings missing for more than 5 min in total → void, stakes refunded.")
     return Market(mid, "clean_sheet", "yesno", f"Clean sheet: does every Tube line on Good Service at {start} stay "
                   f"Good until {local_time(end)}?", [], now, end,
                   [{"id": "yes", "label": "Yes, all stay Good"}, {"id": "no", "label": "No, a line breaks"}], sim,
@@ -734,11 +825,12 @@ def settle_clean_sheet(m: Market, store: Store, now: int):
 
 register(Series("hub_surge", "crowding", build_hub_surge, settle_hub_surge))
 register(Series("city_pulse", "crowding", build_city_pulse, settle_city_pulse))
-register(Series("london_vix", "vix", build_london_vix, settle_london_vix))
+register(Series("london_vix", "vix", build_london_vix, settle_london_vix,
+                why_none=lambda store, now: vix_state(store, now)["reason"]))
 register(Series("heathrow_stack", "aircraft", build_heathrow_stack, settle_heathrow_stack, skip=skip_heathrow_stack))
 register(Series("hub_hour", "crowding", build_hub_hour, settle_hub_hour, due=hourly(0)))
 register(Series("clean_sheet", "line_status", build_clean_sheet, settle_clean_sheet, due=hourly(30),
-                settles_early=True))
+                settles_early=True, close_before_ms=CLEAN_CLOSE_BEFORE_MS))
 register(Series("oxford-busy", "crowding", build_oxford_busy, settle_oxford_busy, enabled=False))
 
 
@@ -765,7 +857,7 @@ def try_settle(m: Market, store: Store, now: int):
 def observe(m: Market, store: Store, now: int) -> None:
     """Feed new readings of the market's feed (up to settlesAt) to its futures and its jump detector."""
     for ts, snap in store.between(m.feed, m.last_obs_ts + 1, min(now, m.settles_at)):
-        m.futures.observe(ts, snap)
+        m.futures.observe(store.measured_at(ts) if m.feed == "crowding" else ts, snap)
         jump = jump_of(m, ts, snap)
         if jump:
             m.halt_reason, m.clean_ticks = jump, 0

@@ -214,7 +214,7 @@ class RecordedCase(unittest.TestCase):
         self.assertTrue(0.3 <= max(probs.values()) <= 0.7, probs)
         res = self.settle_all(ex, m, utc(20, 40))
         after = next((ts, s) for ts, s in ex.store.between("crowding", m.closes_at + 1, utc(20, 40))
-                     if "940GZZLUBND" in s)
+                     if "940GZZLUBND" in s and ex.store.tfl_stamp(ts, "940GZZLUBND") > m.closes_at)
         pct = after[1]["940GZZLUBND"] / ex.store.typical("940GZZLUBND", after[0]) * 100
         self.assertEqual(res["settlement"]["fetchedAt"], after[0])
         self.assertAlmostEqual(res["settlement"]["value"], pct, places=2)

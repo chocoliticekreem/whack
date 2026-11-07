@@ -36,9 +36,17 @@ def main() -> None:
     spots = load_hotspots()
     ex = Exchange(Store(raw, spots), Clock(start), spots, Ledger(":memory:"))
     probe: dict[str, dict] = {}
+    cap = int(pricing.RULED_OUT_CAP * pricing.N_FUTURES)
+    after_cap: dict[str, list[int]] = defaultdict(lambda: [0, 0])  # [readings after the cap, of which moved the model]
     t = start
     while t <= end:
+        before = {m.id: (m.last_obs_ts, m.futures.probs()) for m in ex.active() if m.futures.ruled_out >= cap}
         ex.tick(t)
+        for mid, (seen, probs) in before.items():
+            m = ex.markets[mid]
+            if m.last_obs_ts > seen:
+                after_cap[mid][0] += 1
+                after_cap[mid][1] += any(abs(m.futures.probs()[o] - probs[o]) > 1e-9 for o in probs)
         for m in ex.active():
             if m.id not in probe and ex.status(m, t) == "open":
                 probe[m.id] = {"fav_quote": None}
@@ -132,10 +140,10 @@ def main() -> None:
         for s, (n, w, net) in by_s.items():
             print(f"    {s:15} n={n:3d} won={w:3d} ROI={net / n:+.1%}")
 
-    print("\nAI traders (stake 100 each, locked odds):")
+    print("\nAI traders (stake min(100, 10% of points), locked odds):")
     for tid, rec in ex.record.items():
         print(f"  {tid:11} won {rec['won']:3d} lost {rec['lost']:3d} points {rec['points']}")
-    per = defaultdict(lambda: [0, 0, 0.0])
+    per = defaultdict(lambda: [0, 0, 0.0, 0.0])
     for s, ms_ in rows.items():
         for m in ms_:
             for b in m.ai_bets:
@@ -144,14 +152,18 @@ def main() -> None:
                 r[0] += 1
                 r[1] += won
                 r[2] += (b["stake"] * b["odds"] if won else 0) - b["stake"]
+                r[3] += b["stake"]
     print("  by series (bets, wins, net points, ROI per point staked):")
-    for (tid, s), (n, w, net) in sorted(per.items()):
-        print(f"    {tid:11} {s:15} n={n:3d} won={w:3d} net={net:+8.0f} ROI={net / (100 * n):+.1%}")
+    for (tid, s), (n, w, net, staked) in sorted(per.items()):
+        print(f"    {tid:11} {s:15} n={n:3d} won={w:3d} net={net:+8.0f} ROI={net / staked:+.1%}")
     st = ex.stats_json()
     print("\nopen favourite share 30-70%:", st["openFavourite"]["share30to70"], "n", st["openFavourite"]["n"],
           "rejected>85%:", st["openFavourite"]["rejectedOver85"])
     capped = sum(1 for i in ex.order if ex.markets[i].futures.ruled_out >= int(pricing.RULED_OUT_CAP * 50))
-    print(f"markets that hit the 60% ruled-out cap (pruning stops): {capped}/{len(ex.order)}")
+    print(f"markets that hit the 60% ruled-out cap: {capped}/{len(ex.order)}")
+    got = [v for v in after_cap.values() if v[0]]
+    print(f"  of those, got readings after the cap: {len(got)}; frozen (no reading after the cap moved the model "
+          f"price): {sum(1 for v in got if v[1] == 0)}")
 
 
 if __name__ == "__main__":

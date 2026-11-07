@@ -2,7 +2,9 @@
 
 Live prediction markets across five central-London hotspots (Oxford Circus, King's Cross St Pancras,
 Piccadilly Circus, Waterloo, Bank). Simulated futures set the prices; real recorded TfL and Open-Meteo data settles them.
-Seven rule-based AI traders each read one feed and bet against the players. The web app proxies `/api/city/*` here.
+Seven rule-based AI traders each read one feed and bet against the players. Each stakes min(100, 10% of its points)
+and sits out under 100 points; their records (points, won/lost, last reason) are appended to the ledger's SQLite
+(`ai_records`) on every settle and reloaded on start. The web app proxies `/api/city/*` here.
 
 ```bash
 python3 services/city/server.py                                   # live: reads the recorder's newest data
@@ -14,7 +16,8 @@ Env: `CITY_PORT` (8051), `CITY_RAW` (recorder root; default `data/raw` of the ma
 `MULTIVERSE_URL` (default `http://127.0.0.1:8349`; live mode polls its `GET /vix` every 15 s for the London VIX; the
 multiverse server itself defaults to :8049, so start it with `MULTIVERSE_PORT=8349` or set this),
 `SIM_URL` (default `http://127.0.0.1:8449`, the central-London agent simulation; live mode polls its `GET /state` every
-30 s), `SIM_WEIGHT` (0.5: the share of each market's 50 futures sampled from the simulation), `CITY_LEDGER_DB`.
+30 s), `SIM_WEIGHT` (default 0: the share of each market's 50 futures sampled from the simulation; the sim loses to
+persistence, so by default it only trades, as the Simulation trader), `CITY_LEDGER_DB`.
 CORS allows localhost:3047, :3349 and :3849.
 
 ## Endpoints
@@ -58,33 +61,38 @@ registered but out of the lineup. The lineup is the data-backed one from `docs/q
 
 | series | when | kind | question | settles on |
 |---|---|---|---|---|
-| hub_surge (S1) | every round | versus (5 hubs) | Which hub surges most by 18:35? | biggest rise in vs usual, open → first TfL reading after close; no move → void |
-| city_pulse (S2) | every round | over/under | City Pulse at 18:35: over or under 34.62? | 100 × mean % of baseline over the 20 stations, first reading after close; < 18 → void |
+| hub_surge (S1) | every round | versus (5 hubs) | Which hub surges most by 18:35? | biggest rise in vs usual, open → each hub's first reading TfL stamps after close; no move → void |
+| city_pulse (S2) | every round | over/under | City Pulse at 18:35: over or under 34.62? | 100 × mean % of baseline over the 20 stations, each at its first reading TfL stamps after close; < 18 → void |
 | london_vix (S3) | every round | over/under | London VIX at 18:35: higher or lower than 2.31? | multiverse VIX, last frame ≤ T (≤ 2 min old); void in the engine's first hour |
 | heathrow_stack (S4) | in place of S3 | over/under | Planes holding over Heathrow at 18:35: over or under 4.5? | adsb.lol holding_total, last reading ≤ T (≤ 2 min old) |
 | hub_hour (S5) | round spanning :00 | versus (5 hubs) | Which hub ends the hour furthest above its usual Saturday? | highest vs usual at the next :00 |
-| clean_sheet (S6) | round spanning :30 | yes/no | Clean sheet: does every Tube line on Good Service at 18:30 stay Good until 19:30? | NO the moment a Good line breaks; YES at the bell; > 5 min of gaps → void |
-| oxford-busy | retired (`enabled=False`) | bracket | Oxford Circus busyness at 17:50 | first TfL reading after close |
+| clean_sheet (S6) | round spanning :30 | yes/no | Clean sheet: does every Tube line on Good Service at 18:30 stay Good until 19:30? | betting closes at :35 with the opening round; NO the moment a Good line breaks; YES at the bell; > 5 min of gaps → void |
+| oxford-busy | retired (`enabled=False`) | bracket | Oxford Circus busyness at 17:50 | first reading TfL stamps after close |
 
-S4 is listed only when S3 can't be: no VIX frame in 2 min (engine down or not polled, as in replay), the engine
-spawned under 60 min ago, or too few post-warm-up moves. Replay never polls the multiverse, so replays list S4.
+S4 is listed only when S3 can't be: no VIX frame in 3 min (engine down or not polled, as in replay), the engine
+spawned under 60 min ago, or too few post-warm-up moves (10 five-minute moves, so about 75 min after a spawn).
+`/round` `skipped.london_vix` says which. Replay never polls the multiverse, so replays list S4.
 Hourly markets open with the round whose betting window spans :00 / :30 (at hh:59 / hh:29) and settle at the next
 :00 / :30; `/round` shows them under `current.headlines`.
 
 Bracket ladders: three equal-width edges on whole numbers, placed on the futures so the favourite is a middle bracket
 near 40% and no bracket is under 5%; lower edges are inclusive and `rule` says so. A bracket series whose favourite
-would still exceed 85% is skipped for the round. Crowding settles on the first reading published after bets close,
-so nobody bets on a reading that is already out. A market halts on a stale feed (3 min; 6 min for the 5-minutely
+would still exceed 85% is skipped for the round. Crowding settles on each station's first reading that TfL
+stamps (`timeUtc`) after bets close, not on our poll time: TfL stamps a row a median 7 min before we poll it and rows
+in one poll are up to 10 min apart, so that reading arrives about 14 min after the close (void after 20 min). A market halts on a stale feed (3 min; 6 min for the 5-minutely
 crowding) or on a 3σ jump in a crowding series, and resumes after 2 clean ticks. With no reading in time it voids
 with a refund.
 
 ## Pricing
 
 Each market runs 50 futures. Every future starts from the last real reading:
-- crowding (hub_surge, city_pulse): a log random walk per station (or of City Pulse). Per-minute sigma comes from
-  today's real changes, drift is half the last hour's trend (capped), and every step is capped at 2.5σ.
-- hub_hour: the same walk with sigma fitted on 60-min changes, widened until the favourite at open is ≤ 70% (the
-  5-min fit priced it at 89% against a real 56%).
+- crowding (hub_surge, city_pulse): a log random walk per station (or of City Pulse) from TfL's own stamp on the
+  open reading to the expected settle reading. Sigma and drift (half the last hour's trend, capped) are fitted on
+  today's changes around TfL's usual day, and the walk adds the usual day's slope (a smooth curve through the 15-min
+  bands) over its horizon; without it, copying the usual curve beat the house by 32-48% a bet. hub_surge also pulls
+  each hub toward the five hubs' mean vs usual (0.01 per min, fitted on today's replay). Steps are capped at 2.5σ.
+- hub_hour: the same walk and usual slope with sigma fitted on 60-min changes, widened until the favourite at open is
+  ≤ 70% (the 5-min fit priced it at 89% against a real 56%).
 - london_vix, heathrow_stack: a bootstrap of today's own h-minute changes (VIX: post-warm-up frames only).
 - clean_sheet: P(break) from a rolling 3-h per-line hazard × the Good lines, held to 30–70% at open (the whole-day
   rate priced 85% against a real 43%); each future draws its break time, so a clean hour drifts toward YES.
@@ -92,8 +100,11 @@ Each market runs 50 futures. Every future starts from the last real reading:
 Today's replay (15:05–18:30, 42 rounds): favourite at open in 30–70% for city_pulse 86%, heathrow_stack 82%, both
 headlines 100%; hub_surge sits at 0.25–0.45 as a 5-way race should (Tube Crowd's furthest-below pick won 15/42 = 36%).
 
-Each new observation rules out the futures that disagree with it, never more than 60% of them in total.
-prob = share of surviving futures, clamped to [3%, 97%]. Bets move prices through LMSR with b = 1200, with the futures'
+Each new observation weights every surviving future by its likelihood exp(-(e/tol)²/2), e = its error in sigmas,
+tempered so the effective sample size stays at half the survivors or more; futures off by more than tol are also
+ruled out, never more than 60% of them in total. After that cap the weights still move the price (on main, 96 of the
+96 capped markets that got later readings stopped learning; now 42 do). prob = weighted share of the surviving
+futures, clamped to [3%, 97%]. Bets move prices through LMSR with b = 1200, with the futures'
 probabilities as the base (prob_i ∝ model_i · e^(q_i/b)), so a 100-point bet on a 50% option moves it about 4 points.
 A 5% fee keeps the locked payout near the displayed `odds = 0.95/prob`.
 
@@ -105,7 +116,7 @@ everything prices exactly as above. The forecast is each station's % of usual (T
 as mean, p10, p90, read as a normal (sd = (p90 − p10) / 2.563) and interpolated to the expected settle reading.
 Stations share one city-wide shock (correlation 0.5) because the sim publishes marginals only.
 
-- Pricing: for hub_surge, hub_hour and city_pulse, the last `round(SIM_WEIGHT × 50)` futures (25 by default) are replaced
+- Pricing: for hub_surge, hub_hour and city_pulse, the last `round(SIM_WEIGHT × 50)` futures (0 by default; 25 at `SIM_WEIGHT=0.5`) are replaced
   by draws from the sim, each a bridge from the live reading to the drawn value so the particle filter scores it like any
   other. hub_surge / hub_hour read the hub station's vs usual directly; City Pulse takes the drawn vs usual × the typical
   day for the 13 simulated stations and holds the other stations' vs usual. `futures.fromSim` on each market counts them.
