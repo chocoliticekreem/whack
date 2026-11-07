@@ -8,7 +8,7 @@ and the survivors spawn jittered children so N stay live.
 |---|---|
 | Assumptions per world (moving share, tourist mix, pavement capacity, riders per bus, bus delay, walking pace, rain onset, random incident) | `worlds.py` `sample_assumptions` / `jitter_assumptions` |
 | Common random numbers: every world draws personas, departures and destinations from one `crnSeed`; assumptions come from a separate per-world stream | `worlds.run_world` |
-| Likelihood: camera counts compared on the sqrt scale (Poisson sd 0.5 + model sd 1.0); bus delay Gaussian (sd 2 min) | `engine.log_likelihood_*` |
+| Likelihood: camera counts compared on the sqrt scale (Poisson sd 0.5 + model sd 0.4 on real data, 1.0 on the fixture); bus delay Gaussian (sd 2 min); rain, tube crowding and bikes out (real data, below) | `engine.log_likelihood_*`, `engine.feed_parts` |
 | Price = normalised posterior; delist below `0.1 / N`; systematic resampling refills to N; a parent splits its price with its children | `engine.Multiverse.observe` |
 | Explanation trail: per-observation log-likelihood and the worst camera; delist reason in words | `world.trail`, `world.delistReason` |
 | Place an event: every live world forks a child with the Predict intervention (`closure`/`incident`/`event`/`weather`), prior 50 % | `engine.Multiverse.intervene` |
@@ -45,7 +45,7 @@ The fixture writes these feeds in the recorder's payload shapes from the hidden 
 ## Run
 
 ```bash
-python3 services/multiverse/server.py            # :8049, replay on the fixture by default
+python3 services/multiverse/server.py            # :8049; real Oxford Circus replay by default (prints REAL or SYNTHETIC)
 python3 services/multiverse/demo.py 3 50         # CLI: spawn 50 -> 3 observations -> board + VIX
 python3 services/multiverse/demo.py 3 50 --brokers  # same, with the broker leaderboard each frame (Haiku if a key is found)
 ANTHROPIC_API_KEY= python3 services/multiverse/demo.py 8 50 --brokers  # rules brokers, no network
@@ -57,9 +57,8 @@ python3 services/multiverse/fixture.py           # regenerate the synthetic fixt
 UI: `apps/stream` → `/multiverse` (proxied through `/api/multiverse/*`).
 
 Env (names only): `MULTIVERSE_PORT` (8049), `MULTIVERSE_CORS_ORIGIN`, `TWIN_URL` (live mode, default
-`http://localhost:3047`), `MULTIVERSE_SEED` (a seed JSON, absolute or relative to this folder; a `real…` seed switches replay and live to
-the recorder's `jamcams` + `bus`), `MULTIVERSE_RAW` (recorder root, default `data/raw` or the main checkout's
-when `MULTIVERSE_SEED` is set), `MULTIVERSE_CAM_SOURCES`,
+`http://localhost:3047`), `MULTIVERSE_SEED` (a seed JSON, absolute or relative to this folder; overrides the default seed),
+`MULTIVERSE_RAW` (recorder root; default `data/raw`, else the main checkout's `data/raw`), `MULTIVERSE_CAM_SOURCES`,
 `MULTIVERSE_BUS_SOURCES` (comma lists of recorder source names), `MULTIVERSE_ALT_RAW` (recorder root for the
 brokers' live feeds), `ANTHROPIC_API_KEY` (broker ideas
 from Claude Haiku 4.5, two concurrent calls of 5 brokers per observation; read from the env or the repo / main-checkout
@@ -67,11 +66,16 @@ from Claude Haiku 4.5, two concurrent calls of 5 brokers per observation; read f
 
 ## Real London (Oxford Circus)
 
+**Real is the default.** With no env, the server uses `seeds/oxford-circus.json` on the recorder's data: the
+first of `MULTIVERSE_RAW`, the repo's `data/raw`, the main checkout's `data/raw` that holds any recorded
+`jamcams` (`feeds.real_root`). Only when none does it falls back to the synthetic fixture. It prints which at
+startup (`REAL data: …` or `SYNTHETIC fixture …`). `MULTIVERSE_SEED` still picks another seed.
+
 ```bash
 python3 services/multiverse/real_seed.py              # rebuild seeds/oxford-circus.json (needs a twin, TWIN_URL, default :3060)
 python3 services/multiverse/real_seed.py --offline    # rebuild from the cached seeds/oxford-circus-field.json
 # real replay (the demo's safe mode): recorded frames, default = the 45 min with the most YOLO counts
-MULTIVERSE_PORT=8549 MULTIVERSE_SEED=seeds/oxford-circus.json python3 services/multiverse/server.py
+MULTIVERSE_PORT=8549 python3 services/multiverse/server.py
 curl -XPOST localhost:8549/spawn -d '{"n":50,"mode":"replay"}'                    # or add "from"/"to" (ms)
 curl -XPOST localhost:8549/observe -d '{"next":true}'                             # one recorded minute
 # live: same server; reseeds at the newest recorder snapshot, then reads the newest one every 60 s by itself
@@ -93,15 +97,37 @@ curl -XPOST localhost:8549/spawn -d '{"n":50,"mode":"live"}'                    
   (vehicle, stop) prediction at the seed's stops is followed across the last 15 min of snapshots, its slip is
   latest ETA - first ETA, and the reading is the median slip (floored at 0). Mostly 0-1 min on a normal afternoon.
 - **Frames**: one per recorded `jamcams` snapshot (60 s cadence); the brokers' feeds come from the same recorder root.
+- **Observation fields** (every observation in `/observe` and `/state`, also `/replay` frames and push frames;
+  `null` when the recorder has nothing recent, and then no likelihood term):
+
+  | Key | Source | Meaning | Scores | Term (cap) |
+  |---|---|---|---|---|
+  | `busDelayMin` | `bus` | lateness proxy above | `busDelayMin` | Gaussian, sd 2 min |
+  | `rainMmH` | `rain_now` (≤ 30 min old) | Open-Meteo `current.precipitation` over its 15-min interval, mm/h | `rainAtMin` | raining (≥ 0.1 mm/h) vs "rain by now" (`rainAtMin` ≤ minute): agree 0, disagree -3.0 |
+  | `crowding` | `crowding` (≤ 30 min old) | Oxford Circus station live busyness, TfL `percentageOfBaseline` 0..1 | `touristFactor` | log(tourists / (crowding / `crowdingTypical`)), sd 0.3, floor -4.5 |
+  | `crowdingTypical` | `crowding_profile` | typical busyness for this weekday and 15-min band | (with `crowding`) | |
+  | `bikesOut` | `bikepoint` | share of bikes at docks within 800 m gone since the window start (replay: first frame; live: the spawn), negative = filling | `movingShare` | implied 0.6 + 3 x bikesOut, sd 0.2, floor -4.5 |
+
+  Delist reasons name the feed ("said rain by now at +2 min; radar read 0.0 mm/h"); the VIX driver can be
+  "rain radar", "tube crowding" or "bike docks".
 - **Likelihood**: a camera costs a world at most `OUTLIER_LL` (-4.5): small, noisy YOLO counts and walking groups
   crossing short segments otherwise delist good worlds on one reading.
+- **Anchored camera forecasts** (real seeds only): a world's camera forecast is the camera's last real count
+  (the seed's count, a newer count too old to score from the frame's `lastCounts`, or the last observed reading),
+  moved by how much more or less this world's count changes than the market's price-weighted average world, at
+  most 0.1 per minute on the sqrt scale (`engine.anchored`). Raw world counts spike on short segments
+  (9.8 -> 58 a minute apart) and their shared drift has no skill against persistence. A camera with no count
+  yet starts from the mean of the counted ones. A new world's bus delay is pulled 80 % of the way to the latest
+  reading; before any reading a real seed's 0-8 min prior is scaled to 0-0.8 min. `w.run.rawCams` keeps the raw series.
+- **Forecast check**: `eval_real.py --raw data/raw --windows 6` scores the market against persistence on today's
+  recorded counts (people MAE, 80 % coverage, bus MAE).
 - Recorder root: `MULTIVERSE_RAW`, else `data/raw`, else (in a worktree) the main checkout's `data/raw`. Read-only.
 
 ## Modes
 
 - **replay**: frames from recorder NDJSON `data/raw/<source>/YYYY-MM-DD/HH.ndjson(.gz)`, lines
   `{"ts","source","payload"}`. Camera payloads carry `readings: [{camId, people}]` (the YOLO `/counts`
-  shape); the bus payload carries `meanDelayMin`. Without `MULTIVERSE_SEED` it uses `fixtures/`: a
+  shape); the bus payload carries `meanDelayMin`. When no recorded `jamcams` is found it uses `fixtures/`: a
   synthetic 80 m grid with real Oxford Circus anchors, and ten one-minute frames from a hidden true world
   (`fixture.TRUE_ASSUMPTIONS`: rain from +3 min, tourists x1.5, buses 4 min late) plus Poisson noise,
   rolled into a second five-minute epoch exactly as the engine rolls, plus the synthetic alternative feeds.
@@ -111,5 +137,5 @@ curl -XPOST localhost:8549/spawn -d '{"n":50,"mode":"live"}'                    
 
 ## API
 
-`POST /spawn {n, horizonMin=5, mode, crnSeed, rngSeed, brokers: "on"|"off"}` · `GET /brokers` · `GET /vix` (`horizon_min`, `vix`, `vix_history` [{t, vix, delta, driver, spike}], `vix_driver`; brokers carry `source` + `glyph`) · `POST /observe {next:true} | {ts, readings, busDelayMin} | {}`
+`POST /spawn {n, horizonMin=5, mode, crnSeed, rngSeed, brokers: "on"|"off"}` · `GET /brokers` · `GET /vix` (`horizon_min`, `vix`, `vix_history` [{t, vix, delta, driver, spike}], `vix_driver`; brokers carry `source` + `glyph`) · `POST /observe {next:true} | {ts, readings, busDelayMin, rainMmH, crowding, crowdingTypical, bikesOut} | {}`
 · `GET /state` · `POST /intervene {kind, zoneId, atMin, note?, prior?}` · `GET /replay?from&to` · `GET /geometry`

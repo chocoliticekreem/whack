@@ -409,21 +409,78 @@ def bus_snapshots(raw_root: Path, naptans: set[str], start_ms: int, end_ms: int)
             if isinstance(payload, list)]
 
 
+def rain_mm_h(payload: Any) -> float | None:
+    """Open-Meteo `current`: precipitation over its interval (900 s), as a rate in mm/h."""
+    cur = payload.get("current") if isinstance(payload, dict) else None
+    if not isinstance(cur, dict):
+        return None
+    mm, interval = num(cur.get("precipitation")), num(cur.get("interval")) or 900.0
+    return round(mm * 3600.0 / interval, 2) if mm is not None and interval > 0 else None
+
+
+def crowding_now(payload: Any) -> float | None:
+    """Oxford Circus live busyness (TfL `percentageOfBaseline`, 0..1) from one `crowding` record."""
+    for row in payload if isinstance(payload, list) else []:
+        if isinstance(row, dict) and row.get("naptan") == OXFORD_CIRCUS_NAPTAN and row.get("dataAvailable"):
+            return num(row.get("percentageOfBaseline"))
+    return None
+
+
+def bikes_out(base: Any, now: Any) -> float | None:
+    """Share of the base snapshot's bikes (docks within BIKE_RADIUS_KM) gone by now; negative = docks filling."""
+    b0, b1 = bikes_near(base), bikes_near(now)
+    common = set(b0) & set(b1)
+    start = sum(b0[i][0] for i in common)
+    if not common or start <= 0:
+        return None
+    return round((start - sum(b1[i][0] for i in common)) / start, 4)
+
+
+def bikes_base(raw_root: Path, at_ms: int) -> Any:
+    """The bikepoint payload at the start of a window (newest record at or before at_ms), or None."""
+    recs = latest_records(raw_root, "bikepoint", at_ms, k=1)
+    return recs[-1]["payload"] if recs else None
+
+
+def real_extras(raw_root: Path, at_ms: int, base_bikes: Any) -> dict[str, float | None]:
+    """The non-camera observations at Oxford Circus as of at_ms; None where nothing recent is recorded."""
+    rain = latest_records(raw_root, "rain_now", at_ms, k=1)
+    crowd = latest_records(raw_root, "crowding", at_ms, k=1)
+    profile = next((r["payload"] for r in reversed(latest_records(raw_root, "crowding_profile", at_ms, k=MANY["crowding_profile"]))
+                    if isinstance(r["payload"], dict) and r["payload"].get("naptan") == OXFORD_CIRCUS_NAPTAN), None)
+    bikes = latest_records(raw_root, "bikepoint", at_ms, k=1)
+    return {"rainMmH": rain_mm_h(rain[-1]["payload"]) if rain else None,
+            "crowding": crowding_now(crowd[-1]["payload"]) if crowd else None,
+            "crowdingTypical": typical_crowding(profile, at_ms) if profile else None,
+            "bikesOut": bikes_out(base_bikes, bikes[-1]["payload"]) if bikes and base_bikes is not None else None}
+
+
+def stale_counts(payload: Any, ts_ms: int, cam_ids: set[str] | None) -> dict[str, dict]:
+    """Counts too old to score (> READING_MAX_AGE_MIN) but still each camera's last real count: {camId: {people, at}}."""
+    return {cid: {"people": r["people"], "at": r["at"]} for cid, r in jamcam_readings(payload).items()
+            if (cam_ids is None or cid in cam_ids) and r["at"] is not None
+            and ts_ms - r["at"] > READING_MAX_AGE_MIN * 60_000}
+
+
 def real_frame(payload: Any, ts: int, cam_ids: set[str] | None, buses: list) -> dict:
     delay, n = bus_delay_min(buses, ts) if buses else (None, 0)
-    return {"ts": ts, "readings": fresh_people(payload, ts, cam_ids), "busDelayMin": delay, "busCount": n}
+    return {"ts": ts, "readings": fresh_people(payload, ts, cam_ids), "lastCounts": stale_counts(payload, ts, cam_ids),
+            "busDelayMin": delay, "busCount": n}
 
 
 def load_real_frames(raw_root: Path, cam_ids: set[str] | None, start_ms: int, end_ms: int,
                      naptans: set[str] | None = None, with_feeds: bool = False) -> list[dict]:
     """One frame per recorded `jamcams` snapshot (60 s cadence) in [start, end]: fresh YOLO people for the
-    seed's cameras, the bus lateness proxy as of that minute, optionally the brokers' feeds."""
+    seed's cameras, the bus lateness proxy, rain / tube crowding / bikes out (bikes vs the window start)
+    as of that minute, optionally the brokers' feeds."""
     buses = bus_snapshots(raw_root, naptans or set(), start_ms, end_ms)
     frames = {ts // 60_000: real_frame(payload, ts, cam_ids, buses)
               for ts, payload in records_between(raw_root, "jamcams", start_ms, end_ms)}
     out = [frames[k] for k in sorted(frames)]
-    if with_feeds:
-        for frame in out:
+    base = bikes_base(raw_root, out[0]["ts"]) if out else None
+    for frame in out:
+        frame |= real_extras(raw_root, frame["ts"], base)
+        if with_feeds:
             frame["feeds"] = feeds_at(raw_root, frame["ts"])
     return out
 
@@ -441,12 +498,38 @@ def default_window(raw_root: Path, cam_ids: set[str], now_ms: int, span_min: int
     return best * 60_000, (best + span_min) * 60_000 - 1
 
 
-def latest_real_frame(raw_root: Path, cam_ids: set[str], naptans: set[str], now_ms: int) -> dict | None:
-    """Live: the newest recorded jamcams snapshot as one frame (no extra TfL calls), plus the brokers' feeds."""
+def latest_real_frame(raw_root: Path, cam_ids: set[str], naptans: set[str], now_ms: int,
+                      base_bikes: Any = None) -> dict | None:
+    """Live: the newest recorded jamcams snapshot as one frame (no extra TfL calls), plus rain / crowding /
+    bikes out (vs `base_bikes`, the spawn's bikepoint snapshot) and the brokers' feeds."""
     recs = latest_records(raw_root, "jamcams", now_ms, k=1, back_min=5)
     if not recs:
         return None
     ts = recs[-1]["tsMs"]
     frame = real_frame(recs[-1].get("payload"), ts, cam_ids, bus_snapshots(raw_root, naptans, ts, ts))
+    frame |= real_extras(raw_root, ts, base_bikes)
     frame["feeds"] = feeds_at(raw_root, ts)
     return frame
+
+
+def has_jamcams(root: Path) -> bool:
+    return any((root / "jamcams").glob("*/*.ndjson*"))
+
+
+def real_root() -> Path | None:
+    """Recorder root with real `jamcams`: MULTIVERSE_RAW, the repo's data/raw, or (in a worktree) the main
+    checkout's data/raw. None when none of them holds any."""
+    env = os.environ.get("MULTIVERSE_RAW")
+    if env:
+        return Path(env) if has_jamcams(Path(env)) else None
+    local = REPO / "data" / "raw"
+    if has_jamcams(local):
+        return local
+    dotgit = REPO / ".git"
+    if dotgit.is_file():
+        gitdir = dotgit.read_text().strip().removeprefix("gitdir:").strip()
+        if "/.git/worktrees/" in gitdir:
+            main = Path(gitdir.split("/.git/worktrees/")[0]) / "data" / "raw"
+            if has_jamcams(main):
+                return main
+    return None

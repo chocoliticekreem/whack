@@ -19,8 +19,10 @@ _patches: list = []
 
 
 def setUpModule() -> None:
-    """Offline by construction: no key from the environment or a .env file reaches the brokers."""
-    env = {k: v for k, v in os.environ.items() if k != "ANTHROPIC_API_KEY"}
+    """Offline by construction: no key from the environment or a .env file reaches the brokers, and the
+    replay reads the synthetic fixture, not whatever the recorder has written today."""
+    env = {k: v for k, v in os.environ.items() if k not in ("ANTHROPIC_API_KEY", "MULTIVERSE_SEED")}
+    env["MULTIVERSE_RAW"] = str(fixture.RAW_DIR)
     for p in (mock.patch.dict(os.environ, env, clear=True), mock.patch.object(brokers, "load_env", lambda: None)):
         p.start()
         _patches.append(p)

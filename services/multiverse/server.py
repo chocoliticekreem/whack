@@ -2,10 +2,12 @@
 
 POST /spawn      {n=50, horizonMin=5, mode="replay"|"live", crnSeed=47, rngSeed=7, brokers="on"|"off",
                   from?, to? (ms, real replay window; default the 45 min with most YOLO counts)}
-                 With MULTIVERSE_SEED set to a real seed (seeds/oxford-circus.json): replay reads the recorder's
-                 `jamcams` + `bus`; live reseeds at the newest recorder snapshot and polls it every 60 s.
+                 Default (or MULTIVERSE_SEED set to a real seed): seeds/oxford-circus.json on the recorder's data;
+                 replay reads `jamcams`, `bus`, `rain_now`, `crowding`, `bikepoint`; live reseeds at the newest
+                 recorder snapshot and polls it every 60 s. The synthetic fixture only when no jamcams is recorded.
 POST /observe    {next: true} (replay: consume the next recorded frame)
-                 | {ts, readings: {camId: people}, busDelayMin?} (push a frame)
+                 | {ts, readings: {camId: people}, busDelayMin?, rainMmH?, crowding?, crowdingTypical?, bikesOut?}
+                   (push a frame)
                  | {} in live mode (poll the twin's /api/around/counts now)
 GET  /state      exchange board, consensus, implied volatility, recent observations, vix, vix_history
 GET  /vix        the London VIX now, its history and what moved it
@@ -38,6 +40,7 @@ TWIN_URL = os.environ.get("TWIN_URL", "http://localhost:3047")
 LIVE_ORIGIN = (51.5152, -0.1419)
 MAX_N = 200
 HERE = Path(__file__).resolve().parent
+REAL_SEED = HERE / "seeds" / "oxford-circus.json"
 LIVE_POLL_S = 60
 
 
@@ -50,10 +53,12 @@ class App:
         self.cursor = 0
         self.raw_root: Path | None = None
         self.last_live_ts = 0
-
+        self.bikes_base: Any = None
         self.live_gen = 0
 
     def replay_seed(self) -> tuple[dict, Path]:
+        """MULTIVERSE_SEED if set; else the real Oxford Circus seed on the recorder's data when any `jamcams`
+        is recorded (feeds.real_root); else the synthetic fixture."""
         seed_path = os.environ.get("MULTIVERSE_SEED")
         if seed_path:
             path = Path(seed_path)
@@ -61,6 +66,9 @@ class App:
                 path = HERE / seed_path
             raw = Path(os.environ.get("MULTIVERSE_RAW") or feeds.alt_root())
             return json.loads(path.read_text()), raw
+        root = feeds.real_root()
+        if root is not None and REAL_SEED.is_file():
+            return json.loads(REAL_SEED.read_text()), root
         if not fixture.SEED_PATH.is_file():
             fixture.main()
         return json.loads(fixture.SEED_PATH.read_text()), Path(os.environ.get("MULTIVERSE_RAW") or fixture.RAW_DIR)
@@ -112,10 +120,12 @@ class App:
             if self.frames and not (seed["at"] <= self.frames[0]["ts"] <= seed["at"] + horizon * 60_000):
                 seed = engine.reseed(seed, self.frames[0]["ts"], self.frames[0]["readings"])
                 self.frames = self.frames[1:]
-        elif os.environ.get("MULTIVERSE_SEED"):
-            seed, self.raw_root = self.replay_seed()
+        elif self.is_real((real := self.replay_seed())[0]):
+            seed, self.raw_root = real
             cams, naptans = self.seed_ids(seed)
-            frame = feeds.latest_real_frame(self.raw_root, cams, naptans, int(time.time() * 1000))
+            now = int(time.time() * 1000)
+            self.bikes_base = feeds.bikes_base(self.raw_root, now)
+            frame = feeds.latest_real_frame(self.raw_root, cams, naptans, now, self.bikes_base)
             if frame is None:
                 raise LookupError(f"no jamcams snapshot in the last 5 min under {self.raw_root}: is the recorder running?")
             seed = engine.reseed(seed, frame["ts"], frame["readings"])
@@ -158,10 +168,10 @@ class App:
                 raise ValueError("readings must be {camId: people} or [{camId, people}]")
             frame = {"ts": int(body.get("ts") or mv.seed["at"] + 60_000 * (mv.now_minute() + 1)),
                      "readings": {str(k): float(v) for k, v in readings.items()},
-                     "busDelayMin": body.get("busDelayMin")}
+                     "busDelayMin": body.get("busDelayMin"), **{k: body.get(k) for k in engine.EXTRA_KEYS}}
         elif self.mode == "live" and self.is_real(mv.seed):
             cams, naptans = self.seed_ids(mv.seed)
-            frame = feeds.latest_real_frame(self.raw_root, cams, naptans, int(time.time() * 1000))
+            frame = feeds.latest_real_frame(self.raw_root, cams, naptans, int(time.time() * 1000), self.bikes_base)
             if frame is None or frame["ts"] <= self.last_live_ts:
                 return {"stale": True, "observation": None, "latestTs": frame["ts"] if frame else None, **self.state()}
             self.last_live_ts = frame["ts"]
@@ -199,8 +209,8 @@ class App:
             frames = feeds.load_real_frames(root, cams, start or now - 3_600_000, end or now, naptans)
         else:
             frames = feeds.load_frames(root, start, end)
-        return {"root": str(root), "frames": [{"ts": f["ts"], "cams": len(f["readings"]), "busDelayMin": f["busDelayMin"]}
-                                              for f in frames]}
+        return {"root": str(root), "frames": [{"ts": f["ts"], "cams": len(f["readings"]), "busDelayMin": f["busDelayMin"],
+                                               **{k: f.get(k) for k in engine.EXTRA_KEYS}} for f in frames]}
 
     def vix(self) -> dict:
         mv = self.need()
@@ -282,7 +292,10 @@ class Handler(BaseHTTPRequestHandler):
 
 
 def main() -> None:
-    print(f"multiverse on :{PORT} (twin {TWIN_URL})", file=sys.stderr)
+    seed, root = APP.replay_seed()
+    data = (f"REAL data: seed {seed.get('area')} ({seed.get('source')}), recorder {root}" if App.is_real(seed)
+            else f"SYNTHETIC fixture (no recorded jamcams found), raw {root}")
+    print(f"multiverse on :{PORT} (twin {TWIN_URL}); {data}", file=sys.stderr)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 
