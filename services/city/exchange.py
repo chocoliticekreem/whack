@@ -68,6 +68,13 @@ class Exchange:
         self.sat_out: dict[str, tuple[int, str]] = {}
         self.integrity = integrity.Integrity()
         self.local = local.LocalMarkets(self)
+        self.ledger.ai_exposure = self.ai_exposure
+
+    def ai_exposure(self) -> list[tuple]:
+        """The AI traders' bets on unsettled markets, as the ledger's worst-case rows. An AI win is paid as
+        round(stake × odds) (settle), so that is its payout here."""
+        return [(m.id, m.settles_at, b["option"], b["stake"], round(b["stake"] * b["odds"]))
+                for m in self.active() for b in m.ai_bets]
 
     # ------------------------------------------------------------ the loop
 
@@ -102,18 +109,45 @@ class Exchange:
 
     # ------------------------------------------------------------ restart
 
-    def recover(self) -> dict:
+    def recover(self, now: int | None = None) -> dict:
         """After a restart: bets on a recorded market are settled from recorded data by the next ticks, like any
-        other; only bets that cannot be settled (no record, or a series that no longer exists) are refunded now."""
-        refunded = 0
+        other; only bets that cannot be settled (no record, or a series that no longer exists) are refunded now. A
+        market that outlives the current round (an hourly headline) is listed again for trading, rebuilt from its
+        record, with its bets on it."""
+        now = self.clock.now() if now is None else now
+        self.store.refresh(now - mk.HISTORY_MS, now)
+        refunded = pending = 0
         for g in self.ledger.open_markets():
             rec = g["record"]
             if rec is None or rec.get("series") not in mk.REGISTRY:
                 refunded += self.ledger.settle_bets(
                     g["bets"], None, "Exchange restarted and this market cannot be settled from data; stake refunded")
                 continue
-            self.restored.append((mk.Restored(rec), g["bets"]))
-        return {"refunded": refunded, "pending": sum(len(b) for _, b in self.restored)}
+            pending += len(g["bets"])
+            m = self.relist(rec, now) if rec["settlesAt"] > round_for(now) else None
+            if m is None:
+                self.restored.append((mk.Restored(rec), g["bets"]))
+            else:
+                m.bets = self.ledger.open_bets(g["bets"])
+        return {"refunded": refunded, "pending": pending}
+
+    def relist(self, rec: dict, now: int) -> mk.Market | None:
+        """A tradable market rebuilt from its ledger record: futures from the data now, everything the settle rule
+        reads (spec, options, opening time) from the record. None if the series cannot build one now."""
+        series = mk.REGISTRY[rec["series"]]
+        at = mk.headline_round(rec["settlesAt"]) if series.due else rec["settlesAt"]
+        try:
+            m = series.build(rec["id"], self.store, self.spots, now, at)
+        except Exception as exc:  # noqa: BLE001 - it still settles from its record as a Restored market
+            print(f"relist {rec['id']} failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+            return None
+        if m is None or (m.id, m.settles_at, m.option_ids()) != (rec["id"], rec["settlesAt"],
+                                                                 [o["id"] for o in rec["options"]]):
+            return None
+        m.opened_at, m.spec, m.options = rec["openedAt"], rec["spec"], rec["options"]
+        self.markets[m.id] = m
+        self.order.append(m.id)
+        return m
 
     def settle_restored(self, now: int) -> None:
         keep = []
@@ -147,6 +181,10 @@ class Exchange:
             m = series.build(f"{sid}-{local_time(at, '%H%M')}", self.store, self.spots, now, at)
             if m is None:
                 rnd["skipped"][sid] = (series.why_none and series.why_none(self.store, now)) or "no fresh reading"
+                continue
+            same = self.markets.get(m.id)
+            if same is not None and same.settles_at == m.settles_at:  # relisted after a restart: keep its bets
+                rnd["markets"].append(m.id)
                 continue
             fav = max(m.open_model.values())
             reason = series.skip(m) if series.skip else None
@@ -228,17 +266,22 @@ class Exchange:
             raise PermissionError(f"market {status}")
         bankroll = self.ledger.equity(player)  # wallet hook: cash + escrow from the ledger
         cap = max(0.0, self.integrity.cap(m.sub) * bankroll)
-        held = sum(b["stake"] for b in m.bets if b["player"] == player) + self.integrity.held(player, m.id)
+        # The ledger, not m.bets: bets booked before a restart count toward the cap of the market rebuilt after it.
+        held = self.ledger.staked(player, m.id, m.settles_at) + self.integrity.held(player, m.id)
         if held + stake > cap:
             raise PermissionError(f"position cap: max {cap:g} points in this market ({held:g} already staked)")
         if self.integrity.delay_ms(m.sub):
-            self.ledger.precheck(player, key, stake, market=m.id, settles_at=m.settles_at, option=option,
-                                 confirm_token=body.get("confirm_token"))
-            return self.integrity.reply(self.integrity.accept(player, key, m, option, stake, now), self.ledger, False)
-        return self.book(m, player, key, option, stake, now, body.get("confirm_token"))
+            self.quote(m, option, stake)  # a price already under the floor can never fill: refuse it now
+            confirmed = self.ledger.precheck(player, key, stake, market=m.id, settles_at=m.settles_at, option=option,
+                                             confirm_token=body.get("confirm_token"),
+                                             reserved=self.integrity.pending_stakes(player))
+            order = self.integrity.accept(player, key, m, option, stake, now, confirmed)
+            return self.integrity.reply(order, self.ledger, False)
+        return self.book(m, player, key, option, stake, now, body.get("confirm_token"),
+                         reserved=self.integrity.pending_stakes(player))
 
     def book(self, m: mk.Market, player: str, key: str, option: str, stake: int, now: int, confirm_token,
-             bet_id: str | None = None) -> dict:
+             bet_id: str | None = None, reserved: int = 0) -> dict:
         """Books a bet at the price now: the immediate fill, or a pending bet's fill after its delay."""
         # wallet hook: checks, the quote and cash -> escrow run in one transaction; the book moves only after commit.
         quoted: dict[str, float] = {}
@@ -250,7 +293,8 @@ class Exchange:
         booked = self.ledger.place_bet(player, key, stake, market=m.id, question=m.question, option=option,
                                        label=m.label(option), settles_at=m.settles_at, price=priced,
                                        commit=lambda: m.book.commit(option, quoted["shares"]),
-                                       confirm_token=confirm_token, record=mk.record_of(m), bet_id=bet_id)
+                                       confirm_token=confirm_token, record=mk.record_of(m), bet_id=bet_id,
+                                       reserved=reserved)
         m.bets.append({"player": player, "option": option, "stake": float(stake), "odds": booked["odds"], "at": now,
                        "bet_id": booked["betId"]})
         return self.bet_reply(m, booked)
@@ -304,6 +348,8 @@ class Exchange:
         try:
             shares, odds = self.quote(m, option, stake)
         except WalletError:
+            return
+        if not self.ledger.within_cap((m.id, m.settles_at, option, stake, round(stake * odds))):
             return
         m.book.commit(option, shares)
         m.ai_bets.append({"trader": tid, "option": option, "why": why, "stake": stake, "odds": odds})

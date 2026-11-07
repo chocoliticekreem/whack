@@ -40,8 +40,13 @@ ledger). Balances are sums of entries. `/bet` takes an `idempotency_key` (scoped
 of 10, and moves the stake from cash to escrow; a payout never exceeds the market maker's shares (odds under 1.05 are
 refused) and rounds down. A daily gross-loss limit, a server-issued 60 s confirm token above 25% of the balance, a
 1 h / 24 h break and a house worst-case exposure cap (`CITY_HOUSE_BANKROLL`, `CITY_EXPOSURE_CAP`, 100000 each) are
-enforced on the server. After a restart, bets on recorded markets settle from data; only unresolvable ones are
-refunded. `/leaderboard` ranks players by ledger equity. The server binds 127.0.0.1 (`CITY_HOST`) and refuses bodies
+enforced on the server. The exposure cap counts the AI traders' open bets as well as the players' (an AI fill past it
+is skipped), though AI points stay off the player ledger. The confirm threshold and the loss-limit room count the
+player's other pending bets, so firing several large bets at once needs a confirm token for each one past 25%. After a
+restart, bets on recorded markets settle from data; only unresolvable ones are refunded. A market that outlives the
+current round (an hourly headline) is listed again, rebuilt from its ledger record, with its bets on it; the position
+cap reads a player's booked stakes from the ledger, so bets placed before a restart still count. On a live start the
+server fetches the VIX once (5 s timeout) before the first round, so london_vix lists in it. `/leaderboard` ranks players by ledger equity. The server binds 127.0.0.1 (`CITY_HOST`) and refuses bodies
 over 16 KB. `Ledger.audit()` re-checks every invariant from the raw entries. A `/bet` is accepted as pending and fills
 after the series' delay (see Integrity below); `GET /bet?player=&id=` shows it pending, filled or cancelled, and
 `/positions` lists the pending ones under `pending`.
@@ -81,7 +86,16 @@ would still exceed 85% is skipped for the round. Crowding settles on each statio
 stamps (`timeUtc`) after bets close, not on our poll time: TfL stamps a row a median 7 min before we poll it and rows
 in one poll are up to 10 min apart, so that reading arrives about 14 min after the close (void after 20 min). A market halts on a stale feed (3 min; 6 min for the 5-minutely
 crowding) or on a 3σ jump in a crowding series, and resumes after 2 clean ticks. With no reading in time it voids
-with a refund.
+with a refund. Every settlement snapshot is `{value, source, measuredAt, fetchedAt}`: `measuredAt` is the source's
+own time for the value (TfL's `timeUtc`, the earliest one used when several stations count; the image time for a
+camera; the frame or poll time elsewhere) and `fetchedAt` is when the recorder fetched it. A crowding or camera market
+that is not locked early settles only when `measuredAt` > `closesAt`; any other answer voids it.
+
+Daily loss limit counts **gross** losses (stakes of bets lost today plus stakes in play), so wins never buy back room:
+a player up +593 can still be refused for the limit, as the live test's Kelly bot was. That is deliberate. A net limit
+lets a winning streak fund unlimited further risk, so the limit would stop binding exactly when a player is chasing.
+A gross limit caps how much a player can put at risk in a day whatever their running P&L, matching the responsible-play
+rule it stands in for; a player who wants more room can raise it, which takes effect after 24 h.
 
 ## Pricing
 
@@ -158,7 +172,10 @@ table (`TABLE`):
 | heathrow_stack | 2 | holding changes by 4+ aircraft | 10 s | 25% |
 
 - **Bet delay.** `POST /bet` returns `{"status": "pending", "fillsAt", "betId", …}` once the player checks pass (funds,
-  loss limit, break, confirm token) but holds no escrow. At `fillsAt` the bet is booked through the ledger at the price
+  loss limit, break, confirm token, each net of the player's other pending stakes) and the price now is still above
+  the 1.05x floor (else 409 "price too short"), but holds no escrow. Fills run in placement order and keep the
+  player's earlier pending stakes aside, so a later bet on a faster market cannot spend an earlier bet's room. A fill
+  past 25% of cash goes through only if the player confirmed that bet; otherwise it is cancelled. At `fillsAt` the bet is booked through the ledger at the price
   then, under the same `betId` and idempotency key. If the market halted, closed or was suspended in between, or the
   wallet refuses the fill, the bet is cancelled and nothing has moved, so the ledger invariants never see a pending bet.
   Replaying the key returns the pending, filled or cancelled bet. AI traders, the Simulation trader included, queue

@@ -186,10 +186,15 @@ class Integrity:
         return sum(o["stake"] for o in self.orders.values()
                    if o["player"] == player and o["market"] == market and o["status"] == "pending")
 
-    def accept(self, player: str, key: str, m, option: str, stake: int, now: int) -> dict:
+    def pending_stakes(self, player: str, before: dict | None = None) -> int:
+        """The player's pending stakes on every market; with `before`, only those placed ahead of that order."""
+        return sum(o["stake"] for o in self.orders.values() if o["player"] == player and o["status"] == "pending"
+                   and o is not before and (before is None or o["seq"] < before["seq"]))
+
+    def accept(self, player: str, key: str, m, option: str, stake: int, now: int, confirmed: bool = False) -> dict:
         o = {"betId": uuid.uuid4().hex, "player": player, "key": key, "market": m.id, "option": option,
              "label": m.label(option), "stake": stake, "placedAt": now, "fillsAt": now + self.delay_ms(m.sub),
-             "status": "pending", "epoch": self.epoch.get(m.id, 0)}
+             "status": "pending", "epoch": self.epoch.get(m.id, 0), "seq": len(self.orders), "confirmed": confirmed}
         self.orders[o["betId"]] = o
         self.keys[(player, Ledger.scoped_key(key, m.id, m.settles_at))] = o["betId"]
         return o
@@ -213,8 +218,11 @@ class Integrity:
             m.decided.discard(a["trader"])  # it may decide again once the market reopens
 
     def fill_due(self, ex, now: int) -> None:
-        """Cancel pending orders on a market that is no longer open; fill the due ones at the price now."""
-        for o in [o for o in self.orders.values() if o["status"] == "pending"]:
+        """Cancel pending orders on a market that is no longer open; fill the due ones at the price now, in placement
+        order. A fill keeps the player's earlier pending stakes aside, so a bet placed later (on a market with a
+        shorter delay) can never spend the room an earlier one was accepted with. A fill gets a confirm token only if
+        the player confirmed that bet when placing it; past the 25% line without one, the fill is cancelled."""
+        for o in sorted((o for o in self.orders.values() if o["status"] == "pending"), key=lambda o: o["seq"]):
             m = ex.markets.get(o["market"])
             status = ex.status(m, now)
             if status != "open" or self.epoch.get(m.id, 0) != o["epoch"]:
@@ -224,8 +232,10 @@ class Integrity:
             if now < o["fillsAt"]:
                 continue
             try:
-                token = ex.ledger.confirm_token(o["player"], m.id, m.settles_at, o["option"], o["stake"])
-                o["fill"] = ex.book(m, o["player"], o["key"], o["option"], o["stake"], now, token, o["betId"])
+                token = ex.ledger.confirm_token(o["player"], m.id, m.settles_at, o["option"], o["stake"]) \
+                    if o["confirmed"] else None
+                o["fill"] = ex.book(m, o["player"], o["key"], o["option"], o["stake"], now, token, o["betId"],
+                                    reserved=self.pending_stakes(o["player"], before=o))
                 o.update(status="filled", filledAt=now)
             except PermissionError as exc:  # WalletError included: nothing moved, the bet is cancelled
                 o.update(status="cancelled", reason=str(exc))

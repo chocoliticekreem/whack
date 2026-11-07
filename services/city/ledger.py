@@ -214,6 +214,7 @@ class Ledger:
                  bankroll: int = HOUSE_BANKROLL, exposure_cap: int = EXPOSURE_CAP):
         self.path, self.now = str(path), now
         self.bankroll, self.exposure_cap = bankroll, exposure_cap
+        self.ai_exposure: Callable[[], list[tuple]] = list  # the exchange's AI open bets, as _worst_case rows
         self.lock = threading.RLock()
         self.secret = secrets.token_bytes(32)
         self.lockfile = None
@@ -409,32 +410,39 @@ class Ledger:
             return False
         return hmac.compare_digest(sig, self._confirm_sig(player, market, settles_at, option, stake, int(exp)))
 
-    def _guard(self, player: str, stake: int, now: int, confirm: Callable[[], bool], mint: Callable[[], str]) -> None:
+    def _guard(self, player: str, stake: int, now: int, confirm: Callable[[], bool], mint: Callable[[], str],
+               reserved: int = 0) -> None:
+        """`reserved`: the player's other pending stakes (no escrow yet) that this bet must not spend first."""
         until = self.break_until(player, now)
         if until:
             raise WalletError("on_break", f"You are taking a break until {_clock(until)}. Bets are paused.")
-        cash = self.cash(player)
+        cash = self.cash(player) - reserved
+        held = f" after {reserved} in pending bets" if reserved else ""
         if stake > cash:
-            raise WalletError("insufficient_funds", f"Insufficient funds: stake {stake}, available {cash}")
+            raise WalletError("insufficient_funds", f"Insufficient funds: stake {stake}, available {max(0, cash)}"
+                                                    f"{held}")
         limit, _ = self.loss_limit(player, now)
         lost_today = self.lost_since(player, london_midnight(now))
-        room = limit - lost_today - self.escrow(player)
+        in_play = self.escrow(player) + reserved
+        room = limit - lost_today - in_play
         if stake > room:
             raise WalletError("loss_limit", f"Daily loss limit: you can risk {max(0, room)} more points today "
-                                            f"(limit {limit}, lost {lost_today}, in play {self.escrow(player)})")
+                                            f"(limit {limit}, lost {lost_today}, in play {in_play})")
         if stake > CONFIRM_SHARE * cash and not confirm():
             raise WalletError("confirm_required",
-                              f"This stake is {round(100 * stake / cash)}% of your balance. Confirm to place it.",
+                              f"This stake is {round(100 * stake / cash)}% of your balance{held}. Confirm to place it.",
                               {"confirmToken": mint()})
 
     # ------------------------------------------------------------ house
 
     def _worst_case(self, extra: tuple | None = None) -> int:
-        """Worst-case house loss over open bets: per market, the worst single outcome, netting the other stakes."""
+        """Worst-case house loss over open bets: per market, the worst single outcome, netting the other stakes.
+        Counts the AI traders' open bets too (`ai_exposure`), though their points stay off this ledger."""
         per: dict[tuple, dict[str, list[int]]] = {}
         rows = [tuple(r) for r in self.db.execute(
             "SELECT b.market, b.settles_at, b.option, b.stake, b.payout FROM bets b "
             "LEFT JOIN settlements s ON s.bet_id = b.id WHERE s.bet_id IS NULL")]
+        rows += list(self.ai_exposure())
         for market, settles_at, option, stake, payout in rows + ([extra] if extra else []):
             acc = per.setdefault((market, settles_at), {}).setdefault(option, [0, 0])
             acc[0] += payout - stake
@@ -450,6 +458,11 @@ class Ledger:
         pnl = self._sum("account = 'house'", ())
         return {"bankroll": self.bankroll, "pnl": pnl, "exposure": self._worst_case(),
                 "cap": min(self.exposure_cap, self.bankroll + pnl)}
+
+    @_locked
+    def within_cap(self, row: tuple) -> bool:
+        """Whether one more open bet (market, settles_at, option, stake, payout) keeps the house under its cap."""
+        return self._worst_case(row) <= self.house()["cap"]
 
     # ------------------------------------------------------------ bets
 
@@ -479,11 +492,13 @@ class Ledger:
     @_locked
     def place_bet(self, player, key, stake, *, market: str, question: str, option: str, label: str,
                   settles_at: int, price: Callable[[], tuple[float, float]], commit: Callable[[], None] | None = None,
-                  confirm_token: str | None = None, record: dict | None = None, bet_id: str | None = None) -> dict:
+                  confirm_token: str | None = None, record: dict | None = None, bet_id: str | None = None,
+                  reserved: int = 0) -> dict:
         """Moves the stake from cash to escrow in one transaction. `price()` quotes (shares, locked odds) without
         touching the market; it runs inside the transaction after the player checks. `commit()` books the shares on
         the market only after the transaction has committed. Replaying an idempotency key returns the original bet
-        and changes nothing."""
+        and changes nothing. `reserved`: the player's earlier pending stakes, which keep their place ahead of this
+        bet."""
         player = self.require(player)
         key = str(key or "")
         if not 0 < len(key) <= 128:
@@ -498,7 +513,7 @@ class Ledger:
             now = self.now()
             self._guard(player, stake, now,
                         lambda: self._confirmed(confirm_token, player, market, settles_at, option, stake, now),
-                        lambda: self.confirm_token(player, market, settles_at, option, stake))
+                        lambda: self.confirm_token(player, market, settles_at, option, stake), reserved)
             shares, odds = price()
             if odds < MIN_ODDS:
                 raise WalletError("price_too_short", f"Price too short: under {MIN_ODDS}x pays less than the stake")
@@ -525,8 +540,9 @@ class Ledger:
 
     @_locked
     def precheck(self, player, key, stake, *, market: str, settles_at: int, option: str,
-                 confirm_token: str | None = None) -> None:
-        """The player checks place_bet runs, without moving anything: for a bet that fills after a delay."""
+                 confirm_token: str | None = None, reserved: int = 0) -> bool:
+        """The player checks place_bet runs, without moving anything: for a bet that fills after a delay. `reserved`
+        is the player's other pending stakes. Returns whether the player confirmed this exact bet."""
         player = self.require(player)
         if not 0 < len(str(key or "")) <= 128:
             raise ValueError("idempotency_key is required (1-128 chars)")
@@ -534,9 +550,28 @@ class Ledger:
         if stake < MIN_STAKE:
             raise ValueError(f"stake must be at least {MIN_STAKE} points")
         now = self.now()
-        self._guard(player, stake, now,
-                    lambda: self._confirmed(confirm_token, player, market, settles_at, option, stake, now),
-                    lambda: self.confirm_token(player, market, settles_at, option, stake))
+        confirmed = self._confirmed(confirm_token, player, market, settles_at, option, stake, now)
+        self._guard(player, stake, now, lambda: confirmed,
+                    lambda: self.confirm_token(player, market, settles_at, option, stake), reserved)
+        return confirmed
+
+    @_locked
+    def staked(self, player: str, market: str, settles_at: int) -> int:
+        """Everything the player has booked on one market round, from the ledger (so it survives a restart)."""
+        return int(self.db.execute("SELECT COALESCE(SUM(stake), 0) FROM bets WHERE player = ? AND market = ? AND "
+                                   "settles_at = ?", (player, market, int(settles_at))).fetchone()[0])
+
+    @_locked
+    def open_bets(self, bet_ids: list[str]) -> list[dict]:
+        """The open bets among `bet_ids`, as the exchange keeps them on a market."""
+        out = []
+        for bet_id in bet_ids:
+            r = self.db.execute("SELECT b.* FROM bets b LEFT JOIN settlements s ON s.bet_id = b.id "
+                                "WHERE b.id = ? AND s.bet_id IS NULL", (bet_id,)).fetchone()
+            if r:
+                out.append({"player": r["player"], "option": r["option"], "stake": float(r["stake"]),
+                            "odds": r["odds"], "at": r["placed_at"], "bet_id": r["id"]})
+        return out
 
     @_locked
     def settle_bets(self, bet_ids: list[str], winner: str | None, reading: str) -> int:
