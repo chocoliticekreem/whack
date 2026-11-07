@@ -33,7 +33,6 @@ judges touch it, not the point. Points only, never real money.
    - 📰 news: geocoded GDELT events
    - 🚲 bikes: Santander docks emptying
    - 🚇 Tube: crowding vs the typical day
-   - 🎭 theatre: West End show-out times (scraped)
    - 📚 attention: Wikipedia edits and views on West End articles
 
    They talk in character, but **the market discovers which data actually has alpha on a city.**

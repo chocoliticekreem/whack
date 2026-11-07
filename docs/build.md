@@ -24,7 +24,7 @@ prior_art: https://github.com/chocoliticekreem/mirrorverse (built 2026-10-17 at 
    - 5-minute markets (horizon 5 min, observation every ~60 s);
    - the **London VIX** index;
    - **brokers each read one alternative-data feed**, scored on which data has alpha.
-   - **In progress now (separate agent):** alternative-data feeds + scrapers in the recorder (aircraft, grid, rain, GDELT, Wikipedia, theatre/events).
+   - **In progress now (separate agent):** alternative-data feeds + scrapers in the recorder (aircraft, grid, rain, GDELT, Wikipedia; one optional events scraper).
 1. The engine runs on a **synthetic fixture**. It needs a real Oxford Circus seed whose camera IDs
    match the recorder's.
 2. **No people counts yet:** start `services/yolo` and restart the recorder with `--yolo`.
