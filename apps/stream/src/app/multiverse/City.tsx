@@ -1,6 +1,6 @@
 "use client";
 
-import { Flame, Trophy, X } from "lucide-react";
+import { Flame, Trophy, WalletIcon, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LIVE_SETTINGS, setDemoSettings } from "@/platform/demo";
 import { setCurrentOrigin } from "@/twin/config";
@@ -20,6 +20,7 @@ import {
 } from "./city-store";
 import type { BetResponse, Hotspot, LeaderRow, Market, MarketsResponse, SettleResponse, Trader } from "./city-types";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
+import { WalletPanel, useServerWallet, useStakeConfirm } from "./Wallet";
 
 // Why: this module only loads in the browser (ssr: false), so the twin is re-centred before World first renders.
 setCurrentOrigin(CITY_ORIGIN);
@@ -136,6 +137,11 @@ export function City() {
   const [betError, setBetError] = useState<string | null>(null);
   const [book, setBook] = useState<Book>({ markets: {}, hist: {} });
   const settling = useRef(new Set<string>());
+  // Wallet hook: the server ledger owns the balance; wallet.points mirrors it outside the demo mock.
+  const [walletOpen, setWalletOpen] = useState(false);
+  const mirrorCash = useCallback((cash: number) => setWallet((w) => (w.points === cash ? w : { ...w, points: cash })), []);
+  const { wallet: server, refresh: refreshWallet } = useServerWallet(wallet.player, !mock, mirrorCash);
+  const [askStake, stakeDialog] = useStakeConfirm();
 
   useEffect(() => saveWallet(wallet), [wallet]);
 
@@ -212,7 +218,7 @@ export function City() {
         const done: MyBet["done"] = isVoid ? "void" : won ? "won" : "lost";
         const next: Wallet = {
           ...w,
-          points: w.points + (isVoid ? bet.stake : won ? bet.payout : 0),
+          points: mock ? w.points + (isVoid ? bet.stake : won ? bet.payout : 0) : w.points,
           streak: isVoid ? w.streak : won ? w.streak + 1 : 0,
           bets: { ...w.bets, [m.id]: { ...bet, done } },
         };
@@ -229,8 +235,9 @@ export function City() {
         postScore(next);
         return next;
       });
+      if (!mock) void refreshWallet();
     },
-    [postScore],
+    [postScore, mock, refreshWallet],
   );
 
   const due = useMemo(
@@ -303,7 +310,12 @@ export function City() {
       if (amount <= 0) return;
       setBetError(null);
       try {
-        const r = await call<BetResponse>(mock, "bet", { player: w.player, market: m.id, option: opt.id, stake: amount });
+        const body = { player: w.player, name: w.name, market: m.id, option: opt.id, stake: amount, idempotency_key: crypto.randomUUID() };
+        let r = await call<BetResponse>(mock, "bet", body);
+        if (r.data.code === "confirm_required") {
+          if (!(await askStake(r.data.error ?? "Confirm this stake."))) return;
+          r = await call<BetResponse>(mock, "bet", { ...body, confirm: true });
+        }
         if (!r.ok || !r.data.ok) {
           setBetError(r.data.error ?? "Bet rejected");
           return;
@@ -322,7 +334,7 @@ export function City() {
         }
         setWallet((cur) => ({
           ...cur,
-          points: cur.points - amount,
+          points: r.data.balance ?? cur.points - amount,
           bets: { ...cur.bets, [m.id]: { market: m.id, option: opt.id, label: opt.label, stake: amount, payout } },
         }));
         setDraft(null);
@@ -330,7 +342,7 @@ export function City() {
         setBetError("Could not reach the exchange");
       }
     },
-    [draft, stake, mock, book],
+    [draft, stake, mock, book, askStake],
   );
 
   const confirm = () => {
@@ -419,7 +431,7 @@ export function City() {
             <Flame size={14} strokeWidth={2.5} />
             <span className="tl-data">{wallet.streak}</span>
           </span>
-          {broke && (
+          {broke && mock && (
             <button type="button" className="tl-refill" onClick={() => setWallet((w) => ({ ...w, points: START_POINTS, streak: 0 }))}>
               Refill
             </button>
@@ -439,6 +451,10 @@ export function City() {
           >
             <span className="tl-health-dot" />
             <span className="tl-desk">Data</span>
+          </button>
+          <button type="button" className="wl-open" onClick={() => setWalletOpen(true)}>
+            <WalletIcon size={16} />
+            <span className="tl-desk">Wallet</span>
           </button>
           <button type="button" className="tl-board-btn" onClick={() => setBoardOpen(true)}>
             <Trophy size={16} />
@@ -553,6 +569,9 @@ export function City() {
           <div className="tl-muted">{tipTrader.style}</div>
         </div>
       )}
+
+      <WalletPanel player={wallet.player} wallet={server} open={walletOpen} onClose={() => setWalletOpen(false)} refresh={() => void refreshWallet()} />
+      {stakeDialog}
 
       {toast && (
         <div key={toast.key} className="tl-toast" data-good={toast.good || undefined}>

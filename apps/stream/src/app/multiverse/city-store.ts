@@ -16,6 +16,7 @@ export interface MyBet {
 export interface Wallet {
   player: string;
   name: string | null;
+  /** Mirrors the server ledger's cash (GET /wallet). Never persisted; only the demo mock counts it locally. */
   points: number;
   streak: number;
   bets: Record<string, MyBet>;
@@ -32,7 +33,7 @@ export function freshWallet(): Wallet {
 export function loadWallet(): Wallet {
   try {
     const raw = JSON.parse(window.localStorage.getItem(KEY) ?? "null");
-    if (raw && typeof raw.player === "string") return { ...freshWallet(), ...raw };
+    if (raw && typeof raw.player === "string") return { ...freshWallet(), ...raw, points: START_POINTS };
   } catch {
     // Private mode or blocked storage: play with a fresh wallet this session.
   }
@@ -42,7 +43,9 @@ export function loadWallet(): Wallet {
 export function saveWallet(w: Wallet) {
   try {
     const keep = Object.fromEntries(Object.entries(w.bets).slice(-40));
-    window.localStorage.setItem(KEY, JSON.stringify({ ...w, bets: keep }));
+    const { points: _serverOwned, ...rest } = w;
+    void _serverOwned;
+    window.localStorage.setItem(KEY, JSON.stringify({ ...rest, bets: keep }));
   } catch {
     // Private mode or blocked storage: points live only in this tab.
   }

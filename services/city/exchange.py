@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import random
 import time
+import uuid
 
 import markets as mk
 import pricing
 import traders
 from data import SOURCES, STALE_S, Store, load_hotspots, local_time
+from ledger import Ledger
 from pricing import MIN_MS
 
 MIN_OPEN, MAX_OPEN = 3, 5
@@ -45,8 +47,9 @@ class Clock:
 
 
 class Exchange:
-    def __init__(self, store: Store, clock: Clock, hotspots: list[dict] | None = None):
+    def __init__(self, store: Store, clock: Clock, hotspots: list[dict] | None = None, ledger: Ledger | None = None):
         self.store, self.clock = store, clock
+        self.ledger = ledger or Ledger()  # wallet hook: player points live in the ledger, not here
         self.spots = hotspots or load_hotspots()
         self.by_id = {h["id"]: h for h in self.spots}
         self.markets: dict[str, mk.Market] = {}
@@ -224,18 +227,38 @@ class Exchange:
         stake = body.get("stake")
         if not isinstance(stake, (int, float)) or isinstance(stake, bool) or stake <= 0:
             raise ValueError("stake must be a positive number")
+        # wallet hook (ledger.py): a replayed idempotency_key returns the original bet before anything moves.
+        player = self.ledger.ensure_player(player, body.get("name"))
+        key = str(body.get("idempotency_key") or uuid.uuid4().hex)
+        prior = self.ledger.find_bet(player, key, m.id, option, stake)
+        if prior:
+            return self.bet_reply(m, prior)
         status = self.status(m, now)
         if status != "open":
             raise PermissionError(f"market {status}")
-        bankroll = self.scores.get(player, {}).get("points", DEFAULT_BANKROLL)
+        bankroll = self.ledger.equity(player)  # wallet hook: cash + escrow from the ledger
         cap = max(0.0, POSITION_CAP * bankroll)
         held = sum(b["stake"] for b in m.bets if b["player"] == player)
         if held + stake > cap:
             raise PermissionError(f"position cap: max {cap:g} points in this market ({held:g} already staked)")
-        shares, price, odds = self.place(m, option, float(stake))
-        m.bets.append({"player": player, "option": option, "stake": float(stake), "odds": odds, "at": now})
-        return {"ok": True, "price": round(price, 4), "shares": round(shares, 1), "odds": odds,
-                "options": self.options_json(m)}
+        # wallet hook: funds, limits and break are checked and the stake moves cash -> escrow in one transaction.
+        def priced() -> tuple[float, float]:
+            shares, _, odds = self.place(m, option, float(stake))
+            return shares, odds
+
+        label = next(o["label"] for o in m.options if o["id"] == option)
+        booked = self.ledger.place_bet(player, key, stake, market=m.id, question=m.question, option=option,
+                                       label=label, settles_at=m.settles_at, confirm=bool(body.get("confirm")),
+                                       price=priced)
+        m.bets.append({"player": player, "option": option, "stake": float(stake), "odds": booked["odds"], "at": now,
+                       "bet_id": booked["betId"]})
+        return self.bet_reply(m, booked)
+
+    def bet_reply(self, m: mk.Market, booked: dict) -> dict:
+        return {"ok": True, "price": round(m.prices()[booked["option"]], 4), "shares": round(booked["shares"], 1),
+                "odds": booked["odds"], "options": self.options_json(m), "betId": booked["betId"],
+                "payout": booked["payout"], "balance": booked["balance"], "escrow": booked["escrow"],
+                "replayed": booked["replayed"]}
 
     def ai_bets(self, m: mk.Market, now: int) -> None:
         ctx = {"spots": self.by_id}
@@ -278,6 +301,7 @@ class Exchange:
         m.result = {"settled": True, "winner": winner, "reading": reading, "aiResults": results,
                     "futuresRuledOut": m.futures.ruled_out, "settlement": snap, "void": winner is None}
         m.settled_at = now
+        self.ledger.settle_bets([b["bet_id"] for b in m.bets if "bet_id" in b], winner, reading)  # wallet hook
         self.stats[m.sub]["void" if winner is None else "real"] += 1
         if winner is not None and m.close_prices:
             for key, probs in (("price", m.close_prices), ("model", m.close_model)):

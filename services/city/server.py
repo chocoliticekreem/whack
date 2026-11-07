@@ -18,6 +18,7 @@ from typing import Any
 
 from data import Store, feeds, load_hotspots, raw_root
 from exchange import Clock, Exchange
+from ledger import Ledger, get_routes, post_routes
 
 PORT = int(os.environ.get("CITY_PORT", "8051"))
 ORIGINS = {"http://localhost:3047", "http://localhost:3349", "http://localhost:3849",
@@ -65,7 +66,8 @@ class Handler(BaseHTTPRequestHandler):
             with LOCK:
                 self._send(200, fn())
         except PermissionError as exc:
-            self._send(409, {"ok": False, "error": str(exc)})
+            code = getattr(exc, "code", None)  # wallet hook: ledger.WalletError carries a stable code
+            self._send(409, {"ok": False, "error": str(exc)} | ({"code": code} if code else {}))
         except LookupError as exc:
             self._send(404, {"ok": False, "error": str(exc)})
         except (ValueError, TypeError) as exc:
@@ -74,10 +76,12 @@ class Handler(BaseHTTPRequestHandler):
             self._send(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
 
     def do_GET(self) -> None:
-        path = urllib.parse.urlparse(self.path).path.rstrip("/")
+        url = urllib.parse.urlparse(self.path)
+        path = url.path.rstrip("/")
         routes = {"/health": lambda: {"ok": True, "live": EX.clock.live, "now": EX.clock.now()},
                   "/hotspots": EX.hotspots_json, "/traders": EX.traders_json, "/markets": EX.markets_json,
                   "/leaderboard": EX.leaderboard, "/stats": EX.stats_json}
+        routes |= get_routes(EX.ledger, dict(urllib.parse.parse_qsl(url.query)))  # wallet hook
         if path in routes:
             self.run(routes[path])
         else:
@@ -95,6 +99,7 @@ class Handler(BaseHTTPRequestHandler):
             return
         routes = {"/settle": lambda: EX.settle_request(str(body.get("id"))), "/bet": lambda: EX.bet(body),
                   "/score": lambda: EX.score(body)}
+        routes |= post_routes(EX.ledger, body)  # wallet hook
         if path in routes:
             self.run(routes[path])
         else:
@@ -109,11 +114,14 @@ def main() -> None:
     start = feeds.parse_ts(args.replay_from) if args.replay_from else None
     root = raw_root()
     hotspots = load_hotspots()
-    EX = Exchange(Store(root, hotspots), Clock(start), hotspots)
+    ledger = Ledger.from_env()  # wallet hook: CITY_LEDGER_DB, default services/city/data/ledger.db
+    refunded = ledger.void_open("Exchange restarted before this market settled; stake refunded")
+    EX = Exchange(Store(root, hotspots), Clock(start), hotspots, ledger)
     EX.tick()
     threading.Thread(target=ticker, daemon=True).start()
     mode = f"replay from {args.replay_from} at 12x" if start else "live"
-    print(f"city markets on :{PORT} ({mode}, data {root})", file=sys.stderr)
+    print(f"city markets on :{PORT} ({mode}, data {root}, ledger {ledger.path}, {refunded} open bets refunded)",
+          file=sys.stderr)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 
 

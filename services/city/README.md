@@ -19,6 +19,12 @@ CORS allows localhost:3047, :3349 and :3849.
 `POST /score {player, name, points}`. The response shapes are in the city contract (shared with the UI); `/stats` is
 the settled count per market kind (real reading vs void) plus a calibration table.
 
+Wallet: `GET /wallet /ledger /positions /history ?player=`, `POST /limits {player, dailyLoss}`, `POST /break {player, hours}`.
+`ledger.py` keeps player points in an append-only, double-entry SQLite ledger (`CITY_LEDGER_DB`, default
+`services/city/data/ledger.db`, gitignored). Balances are sums of entries. `/bet` takes an `idempotency_key` and moves the
+stake from cash to escrow; settlement pays it out exactly once. A daily loss limit, a stake confirmation above 25% of the
+balance and a 1 h / 24 h break are enforced on the server. `Ledger.audit()` re-checks every invariant from the raw entries.
+
 ## Markets
 
 | kind | question | feed | settles on |

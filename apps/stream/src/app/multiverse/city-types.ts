@@ -84,6 +84,13 @@ export interface BetResponse {
   odds?: number;
   options?: Pick<MarketOption, "id" | "prob" | "odds">[];
   error?: string;
+  /** Wallet (round 5): the ledger's reply. `balance` is the player's cash after the stake moved to escrow. */
+  code?: "insufficient_funds" | "confirm_required" | "loss_limit" | "on_break";
+  betId?: string;
+  payout?: number;
+  balance?: number;
+  escrow?: number;
+  replayed?: boolean;
 }
 
 export interface LeaderRow {
