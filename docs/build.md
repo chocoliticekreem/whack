@@ -10,7 +10,7 @@ prior_art: https://github.com/chocoliticekreem/mirrorverse (built 2026-10-17 at 
 ## 0. Status (Sat 7 Nov, ~19:30)
 **Live:** OverWatch at https://overwatchcapital.vercel.app/multiverse. The front end is on Vercel (#41); `/api/city/*`
 reaches the city backend on the laptop through a Cloudflare quick tunnel. City-wide markets run in 5-minute rounds on
-the London clock, priced from 50 simulated futures, settled by real TfL and adsb.lol readings, against 6 AI traders.
+the London clock, priced from 50 futures, settled by real TfL and adsb.lol readings, against 7 AI traders.
 Points only.
 
 Example settled round (19:15, from `GET /round`): "Waterloo rose most: 99% → 104% of a usual Saturday";
@@ -21,11 +21,11 @@ Example settled round (19:15, from `GET /round`): "Waterloo rose most: 99% → 1
 | **Recorder** | Live under `scripts/run-data.sh`, which restarts it if a key feed stalls for 3 min. Polls 83 JamCams; YOLO counts only the 13 market cameras, so counts stay fresh (#27, #33) | `recorder/`, `scripts/run-data.sh` (#11, #22, #27, #30) |
 | **Data health** | Per-feed age and status, YOLO check, `GET /health` on :8052; 16 sources | `services/health/` (#30) |
 | **City markets** | 5-minute rounds. Every round: hub_surge (5 hubs vs a usual Saturday), city_pulse (20 stations, line on a .5), london_vix (higher/lower) or heathrow_stack in its place. Hourly: hub_hour, clean_sheet. 50 futures per market, particle-filter pruning, LMSR (b = 1200). Kalshi-style integrity rules. :8051 | `services/city/` (#33, #40, #42, #43) |
-| **AI traders** | 6, each reading one feed (Tube Crowd, Camera Eye, Line Watcher, Rain Radar, Plane Spotter, The Contrarian). Rule-based strategies, not LLMs; they bet through the same LMSR and give a reason citing a real number | `services/city/traders.py` (#33, #42) |
-| **Wallet** | Append-only double-entry SQLite ledger, server-issued player tokens, daily gross-loss limit, stake confirmation, 1 h / 24 h breaks, house exposure cap, odds floor. Wallet panel with P&L and history. 118 city tests | `services/city/ledger.py`, `Wallet.tsx` (#45) |
+| **AI traders** | 7, each reading one feed (Tube Crowd, Camera Eye, Line Watcher, Rain Radar, Plane Spotter, The Contrarian, Simulation). Rule-based strategies, not LLMs; they bet through the same LMSR and give a reason citing a real number | `services/city/traders.py` (#33, #42) |
+| **Wallet** | Append-only double-entry SQLite ledger, server-issued player tokens, daily gross-loss limit, stake confirmation, 1 h / 24 h breaks, house exposure cap, odds floor. Wallet panel with P&L and history. 129 city tests | `services/city/ledger.py`, `Wallet.tsx` (#45) |
 | **OverWatch UI** | MapLibre map (OpenFreeMap tiles, extruded buildings) in the style of RAISE, Kalshi × PostHog styling, no emojis, phone layout | `apps/stream/src/app/multiverse/` (#32, #38, #44, #46) |
 | **Oxford Circus multiverse** | Agent simulation on the real street graph: 50 worlds, common random numbers, 5-min horizon, real seed. Produces the London VIX | `services/multiverse/` (#24, #26, #31); also `/multiverse/oxford`, `/multiverse/board` |
-| **Accuracy check** | People forecast ties persistence: MAE 2.4 vs 2.4 on 30 real minutes (#31); re-run at 19:22 on 28 minutes: 1.88 vs 1.88, 77% inside the 80% range. Persistence wins on bus delay | `services/multiverse/eval_real.py` (#29, #31) |
+| **Accuracy check** | People forecast ties persistence: latest run (`--windows 6`, 30 real minutes to 20:44 UTC, 48 counts) MAE 2.06 vs 2.04, 79% inside the 80% range. Persistence wins on bus delay (0.34 vs 0.04 min). Central London (`--central --windows 7 --minutes 60`): station MAE 4.14 vs persistence 3.61 on 919 readings, so the sim loses by 15% | `services/multiverse/eval_real.py` (#29, #31) |
 | **Market questions** | Lineup measured on Saturday's data | `docs/questions.md`, `analysis/questions/` (#39) |
 
 **In progress** (not shipped; see [idea.md](idea.md) "Why simulate, not just read data"):
@@ -60,7 +60,7 @@ cd apps/stream && MULTIVERSE_URL=http://127.0.0.1:8349 npx next dev -H 0.0.0.0 -
 cloudflared tunnel --url http://localhost:8051                 # public backend; put the URL in Vercel CITY_URL
 ```
 Replay instead of live: `python3 services/city/server.py --replay-from 2026-11-07T14:00:00Z`. Tests:
-`python3 -m unittest discover -s services/city` (118), `-s services/multiverse` (83), `-s recorder` (16).
+`python3 -m unittest discover -s services/city` (129), `-s services/multiverse` (127), `-s recorder` (16).
 
 ## 1. Code reuse: approved
 - **The organisers confirmed (Sat 7 Nov) that we can build on Mirrorverse.** It's disclosed in

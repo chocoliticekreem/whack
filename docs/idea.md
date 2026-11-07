@@ -11,18 +11,21 @@ buses and disruptions (see [build.md](build.md)). This doc covers *what we make 
 "Why simulate" and "Superseded ideas" are current; §1–§5 are Saturday morning's reasoning, kept as history.
 
 ## ★ The pitch (current, as shipped)
-**OverWatch: a live stock exchange on London's next five minutes.** Every price is 50 simulated futures of the city,
-ruled out live by real TfL data, traded against six AI traders that each read one stream of alternative data
-(TOPS-style). The London VIX is the city's fear index.
+**OverWatch: a live stock exchange on London's next five minutes.** Every price comes from 50 futures: statistical
+walks fitted to today's data, with a share of them (half by default, `SIM_WEIGHT`) drawn from our central-London agent
+simulation when it's running. Each reading rules out the futures that disagree, up to 30 of the 50. You trade against
+seven AI traders that each read one stream of alternative data and build a public track record: the first half of
+TOPS. Weighting their picks into the price is next. The London VIX is an uncertainty gauge for the area the agent
+simulation covers (Oxford Circus by default): the spread of 50 simulated worlds, listed after a 60-minute warm-up.
 
 Live at https://overwatchcapital.vercel.app/multiverse. Points only, never real money.
 
 | Layer | What ships today | Role in the pitch |
 |---|---|---|
-| **1. The futures** (engine) | Each market runs 50 futures from the latest real readings. City markets use statistical walks fitted to today's data; the London VIX comes from the agent simulation of Oxford Circus on the real street graph (50 worlds, common random numbers) | *The new world*: futures that don't exist yet |
-| **2. The market** (exchange) | City-wide 5-minute rounds on the London clock. Each new reading prunes the futures that disagree with it (particle-filter style), and LMSR turns the survivors and the bets into prices. Kalshi-style rules: a source and rule on every market, betting closes before settle, settlement on a window, void and refund | *The interaction*: you bet, reality settles it |
-| **3. The traders** (TOPS) | 6 AI traders, each reading one live feed: Tube Crowd (station crowding), Camera Eye (the VIX), Line Watcher (Tube status), Rain Radar (rain), Plane Spotter (Heathrow holding stacks), The Contrarian (where the points are going). Each bets through the same LMSR and states a reason citing a real number | *The MW hook*: their founding idea, pointed at a city |
-| **Output: the London VIX** | The price-weighted spread of predicted crowds across the simulated worlds, as one index | *The new data* |
+| **1. The futures** (engine) | Each market runs 50 futures from the latest real readings. City markets use statistical walks fitted to today's data; on the crowding markets a share of them (half by default, `SIM_WEIGHT`) is drawn from the central-London agent simulation when it's running. The London VIX comes from the agent simulation of Oxford Circus on the real street graph (50 worlds, common random numbers) | *The new world*: futures that don't exist yet |
+| **2. The market** (exchange) | City-wide 5-minute rounds on the London clock. Each new reading prunes the futures that disagree with it (particle-filter style, up to 30 of the 50; after that the market stops narrowing), and LMSR turns the survivors and the bets into prices. Kalshi-style rules: a source and rule on every market, betting closes before settle, void and refund, a frozen reading | *The interaction*: you bet, reality settles it |
+| **3. The traders** (the first half of TOPS) | 7 AI traders, each reading one live feed: Tube Crowd (station crowding), Camera Eye (the VIX), Line Watcher (Tube status), Rain Radar (rain), Plane Spotter (Heathrow holding stacks), The Contrarian (where the points are going), Simulation (the agent simulation's forecast). Each bets through the same LMSR, states a reason citing a real number and builds a track record (in memory; a restart resets it). Their picks don't move the model price yet | *The MW hook*: their founding idea, pointed at a city |
+| **Output: the London VIX** | The price-weighted spread of predicted crowds across the simulated worlds, as one index, for the area the engine covers. Lists only after a 60-minute warm-up | *The new data* |
 
 **Every round lists:**
 - **hub_surge:** "Which hub surges most by HH:MM?" 5 hubs (Oxford Circus, King's Cross, Piccadilly Circus,
@@ -36,38 +39,45 @@ Live at https://overwatchcapital.vercel.app/multiverse. Points only, never real 
 **Rule:** lead with the stock-exchange image. Say TOPS once, after it lands. Betting is how people touch it, not the
 point.
 
-**10 s:** "A live stock exchange on London's next five minutes. Every price is 50 simulated futures, ruled out live
-by real TfL data. You trade against six AI traders, each reading one live feed."
+**10 s:** "A live stock exchange on London's next five minutes. Every price comes from 50 futures, narrowed by real
+TfL data as it arrives. You trade against seven AI traders, each reading one live feed."
 
 **30 s:** "Every five minutes OverWatch lists new markets on London: which of five hubs surges most against a usual
 Saturday, whether the city's pulse across 20 stations ends over or under the line, and whether the London VIX goes up
-or down *(creativity)*. Each price comes from 50 simulated futures. Every new TfL reading rules some out, and an LMSR
-market maker prices what's left *(technical)*. Six AI traders, each reading one feed (Tube crowding, Tube status,
-rain, planes over Heathrow), bet against you and say why, and real data settles every market on the map
-*(presentation)*. It's Marshall Wace's TOPS idea pointed at a city."
+or down *(creativity)*. Each price comes from 50 futures: statistical walks fitted to today's data, part of them
+drawn from our agent simulation when it's live. Every new TfL reading rules some out, up to 30 of the 50, and an LMSR
+market maker prices what's left *(technical)*. Seven AI traders, each reading one feed (Tube crowding, Tube status,
+rain, planes over Heathrow, the simulation), bet against you, say why and build a public track record, and real data
+settles every market on the map *(presentation)*. It's the first half of Marshall Wace's TOPS idea pointed at a city:
+weighting the traders into the price is next."
 
 **100 words:**
 > Prediction markets like Polymarket and Kalshi price the questions someone thought to ask. **OverWatch prices a
 > city's next five minutes, starting with London.**
 >
 > Every five minutes it lists markets on central London: which hub surges, the city's pulse, the London VIX. Each
-> price comes from 50 simulated futures that real TfL data rules out as it arrives. Six AI traders, each reading one
-> stream of alternative data, bet against you and explain why, TOPS-style. Real readings settle every market under
-> published rules, on a double-entry ledger built for real money later.
+> price comes from 50 futures that real TfL data narrows as it arrives. Seven AI traders, each reading one stream
+> of alternative data, bet against you, explain why and build a public track record. Real readings settle every
+> market under published rules, on a double-entry ledger.
 >
-> Nobody knows the outcome in advance. The edge is reading the data better.
+> Nobody knows the outcome in advance. The edge is reading the data better. Today our own Tube Crowd trader proves
+> the house can be read better. That's the leaderboard's job.
 
 **Close:** "Marshall Wace built TOPS to find out which brokers to trust. We built it to find out which data reads a
 city best."
 
 **Q&A, honestly:**
-- *"Is the forecast accurate?"* On real Oxford Circus camera counts the simulation ties "nothing changes" (MAE 2.4 vs
-  2.4 over 30 minutes, 77% inside its 80% range; `eval_real.py`). It doesn't beat it yet. The markets are built to
-  stay uncertain: strikes are placed so the favourite opens well under 85%.
-- *"Real betting?"* No. Points only. The ledger is built so real money would need a licence, not a rewrite
-  (business.md).
-- *"Can someone know the answer?"* We list only outcomes that emerge from many people, never one person's decision
-  (business.md).
+- *"Is the forecast accurate?"* On real Oxford Circus camera counts the simulation ties "nothing changes": MAE 2.06
+  vs 2.04 over the latest 30 minutes (48 counts), 79% inside its 80% range (`eval_real.py --windows 6`). Central
+  London loses to persistence by 15% (station MAE 4.14 vs 3.61, 919 readings; `--central`). Neither beats
+  persistence yet. Lines are set per series so markets stay uncertain: the hourly hub market widens
+  its fit until the favourite opens at 70% or less, the clean sheet holds 30–70% at open, and a bracket market whose
+  favourite is over 85% isn't listed.
+- *"Real betting?"* No. Points only. The ledger is real-money grade; a house-banked LMSR is bookmaking, so the
+  peer-to-peer order book (roadmap) and licensing are the work left (business.md).
+- *"Can someone know the answer?"* We list aggregates of many people's behaviour only. Clean sheet is the exception:
+  a line failure is one event TfL staff see first. The market closes the moment a reading shows a break, stakes are
+  capped at 25% per market, and a bet delay is next (business.md).
 
 **Horizon: 5-minute rounds.** The floor is how fast reality reports back: TfL crowding publishes every 5 minutes;
 cameras, buses and Tube status every minute. A judge sees one or two settlements inside the 3-minute slot.
@@ -75,8 +85,8 @@ cameras, buses and Tube status every minute. A judge sees one or two settlements
 **Mapped to MW's three criteria:**
 | Criterion | What delivers it | What the judge sees |
 |---|---|---|
-| **Creativity** (the idea) | A stock exchange on a city's next five minutes, AI traders that each read one alternative-data feed (TOPS-style), and a fear index for London | "I've never seen that" |
-| **Technical complexity** (the engine) | A 16-source recorder (YOLO on 13 cameras) → 50 futures per market, pruned live → LMSR → settlement under Kalshi-style integrity rules on a double-entry ledger; an agent simulation with common random numbers for the VIX | "That's hard, and it works" |
+| **Creativity** (the idea) | A stock exchange on a city's next five minutes, AI traders that each read one alternative-data feed and build a track record (the first half of TOPS), and an uncertainty gauge for Oxford Circus | "I've never seen that" |
+| **Technical complexity** (the engine) | A 16-source recorder (YOLO on 13 cameras) → 50 futures per market, pruned live → LMSR → settlement under Kalshi-style rules (source and rule on every market, close before settle, void and refund, frozen reading) on a double-entry ledger; an agent simulation with common random numbers for the VIX | "That's hard, and it works" |
 | **Presentation** (the visualisation) | A MapLibre map of London in the style of RAISE, Kalshi × PostHog market cards. Picking a market flies to its hubs; on settle the winner lights up and the payout pops | "That looks good, and I get it" |
 
 **3-minute demo:**
@@ -92,9 +102,9 @@ cameras, buses and Tube status every minute. A judge sees one or two settlements
 
 ## Why simulate, not just read data
 Owner's direction: the digital twin and the agent simulation must earn their place beyond looks, with no
-special-cased scenarios, and the scope is central London, not one junction. **Status: today the agent simulation
-covers only the Oxford Circus area and produces the London VIX. Items marked (in progress) are being built now and
-are not shipped** (build.md §0).
+special-cased scenarios, and the scope is central London, not one junction. **Status: the Oxford Circus simulation
+produces the London VIX; the central-London simulation (#54) feeds part of the crowding futures and trades as the
+Simulation trader (#55). It loses to persistence today. Items marked (in progress) are not shipped** (build.md §0).
 
 **Data looks backwards; simulation looks forwards.** Sensors (13 cameras, 20 stations) show what already happened,
 and statistical futures only extend trends. The agent simulation on the real street graph can:
@@ -110,7 +120,7 @@ and statistical futures only extend trends. The agent simulation on the real str
 5. **Explain prices** (in progress): show where the simulated crowd is heading.
 6. **B2B** (later): councils, TfL and event organisers stress-test interventions, priced (stage 3 in business.md).
 
-**The Simulation trader** (in progress): an AI trader that bets from the simulation's forecast. Its P&L against the
+**The Simulation trader** (shipped, #55): an AI trader that bets from the simulation's forecast. Its P&L against the
 data-only traders answers live whether a model of the city beats raw data. That's Marshall Wace's question (model vs
 signal), asked about a city.
 
