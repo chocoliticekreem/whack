@@ -1,17 +1,21 @@
-import type { Metadata } from "next";
-import { departure, syne } from "./fonts";
-import { MultiverseClient } from "./multiverse-client";
-import "./theme.css";
+import type { Metadata, Viewport } from "next";
+import { Geist } from "next/font/google";
+import { GameClient } from "./game-client";
+import "./game.css";
+
+const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
 
 export const metadata: Metadata = {
-  title: "Exchange of Worlds",
-  description: "Parallel Londons, repriced by reality.",
+  title: "Which London is real?",
+  description: "Pick which future of Oxford Circus happens next, against the AI forecasters. Real London decides.",
 };
+
+export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover" };
 
 export default function MultiversePage() {
   return (
-    <div className={`mv ${syne.variable} ${departure.variable}`}>
-      <MultiverseClient />
+    <div className={`mvg-root ${geist.variable}`}>
+      <GameClient />
     </div>
   );
 }

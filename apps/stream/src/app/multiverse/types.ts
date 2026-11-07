@@ -19,6 +19,16 @@ export interface WorldRow {
   trail: TrailStep[];
   events: string[];
   broker: string | null;
+  assumptions?: Assumptions;
+}
+
+export interface Assumptions {
+  movingShare: number;
+  touristFactor: number;
+  capacityScale: number;
+  busDelayMin: number;
+  rainAtMin: number | null;
+  [knob: string]: unknown;
 }
 
 export type BrokerSource =
@@ -48,6 +58,7 @@ export interface BrokerRow {
   mass: number;
   conviction: number | null;
   rationale: string | null;
+  idea?: Record<string, number | null> | null;
   source: BrokerSource | (string & {});
   pnl: number[];
   cumulative: number;
@@ -81,6 +92,7 @@ export interface Observation {
   busDelayMin?: number | null;
   delisted: string[];
   spawned: string[];
+  readings?: Record<string, number>;
 }
 
 export interface Zone {
