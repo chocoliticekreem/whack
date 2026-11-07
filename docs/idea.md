@@ -76,8 +76,8 @@ city best."
 - *"Real betting?"* No. Points only. The ledger is real-money grade; a house-banked LMSR is bookmaking, so the
   peer-to-peer order book (roadmap) and licensing are the work left (business.md).
 - *"Can someone know the answer?"* We list aggregates of many people's behaviour only. Clean sheet is the exception:
-  a line failure is one event TfL staff see first. The market closes the moment a reading shows a break, stakes are
-  capped at 25% per market, and a bet delay is next (business.md).
+  a line failure is one event TfL staff see first. The market closes the moment a reading shows a break,
+  bets fill 45 s after you place them, the market pauses whenever any line's status changes, and stakes are capped at 10% of bankroll (#61). A head start shorter than the delay gains nothing; longer leads are bounded by the cap. (business.md).
 
 **Horizon: 5-minute rounds.** The floor is how fast reality reports back: TfL crowding publishes every 5 minutes;
 cameras, buses and Tube status every minute. A judge sees one or two settlements inside the 3-minute slot.

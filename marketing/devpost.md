@@ -154,7 +154,7 @@ The "new world" in the brief is the one nobody can see yet: the London of five m
 - Measure against the naive baseline before claiming anything. Ours was "nothing changes", and it was hard to beat.
 - List only outcomes that emerge from many people's behaviour, never one person's decision. Clean sheet is the
   exception: a line failure is one event that TfL staff see before the feed does. Today the market closes the moment
-  a reading shows a break, stakes are capped at 25% per market, and it's points only; a bet delay is next.
+  a reading shows a break, bets fill 45 s after you place them, the market pauses whenever any line's status changes, and stakes are capped at 10% of bankroll (#61). A head start shorter than the delay gains nothing; longer leads are bounded by the cap. Points only.
 
 ## What's next
 - **Make the simulation earn its place:** the central-London simulation and the Simulation trader are live, and its
