@@ -20,12 +20,16 @@ from ledger import GRANT, Ledger
 
 class HttpCase(unittest.TestCase):
     def setUp(self):
+        tc.no_delay(self)
         self.raw = tc.Raw()
         self.addCleanup(self.raw.dir.cleanup)
         tc.city(self.raw, tc.T0 + 30 * tc.MIN)
         ex = Exchange(Store(self.raw.root, tc.SPOTS), Clock(tc.T0), tc.SPOTS, Ledger(":memory:"))
         ex.tick(tc.T0)
-        patches = [mock.patch.object(server, "EX", ex), mock.patch.object(server, "NEW_PLAYERS", server.RateLimit(5, 3600))]
+        self.clock = [0.0]
+        patches = [mock.patch.object(server, "EX", ex),
+                   mock.patch.object(server, "NEW_PLAYERS", server.RateLimit(30, 60, lambda: self.clock[0])),
+                   mock.patch.object(server, "NEW_PLAYERS_DAY", server.RateLimit(500, 86_400, lambda: self.clock[0]))]
         for p in patches:
             p.start()
             self.addCleanup(p.stop)
@@ -82,12 +86,37 @@ class Identity(HttpCase):
         self.assertEqual(self.ex.ledger.db.execute("SELECT COUNT(*) FROM players").fetchone()[0], 0)
         self.assertEqual(self.ex.ledger._sum("1 = 1", ()), 0)
 
-    def test_new_player_is_rate_limited_per_client_ip(self):
-        for _ in range(5):
-            self.new_player(**{"X-Forwarded-For": "203.0.113.7"})
-        self.assertEqual(self.call("/player/new", {}, headers={"X-Forwarded-For": "203.0.113.7"})[0], 429)
+    def test_a_room_on_one_ip_can_join_in_a_burst_of_30_a_minute(self):
+        venue = {"X-Forwarded-For": "203.0.113.7"}
+        for _ in range(30):
+            self.new_player(**venue)
+        status, out = self.call("/player/new", {}, headers=venue)
+        self.assertEqual((status, out["error"]), (429, "Too many new players from this network, try again in a minute"))
         self.new_player(**{"X-Forwarded-For": "203.0.113.8"})
-        self.assertEqual(self.ex.ledger.db.execute("SELECT COUNT(*) FROM players").fetchone()[0], 6)
+        self.clock[0] += 60
+        self.new_player(**venue)
+        self.assertEqual(self.ex.ledger.db.execute("SELECT COUNT(*) FROM players").fetchone()[0], 32)
+
+    def test_new_players_per_ip_stop_at_the_daily_cap(self):
+        venue = {"X-Forwarded-For": "203.0.113.9"}
+        with mock.patch.object(server, "NEW_PLAYERS_DAY", server.RateLimit(3, 86_400, lambda: self.clock[0])):
+            for _ in range(3):
+                self.new_player(**venue)
+                self.clock[0] += 61
+            status, out = self.call("/player/new", {}, headers=venue)
+            self.assertEqual(status, 429)
+            self.assertIn("today, try again tomorrow", out["error"])
+            self.clock[0] += 86_400
+            self.new_player(**venue)
+
+    def test_the_limits_read_their_env_vars(self):
+        import os
+        import subprocess
+        import sys
+        env = dict(os.environ, CITY_NEWPLAYER_PER_MIN="7", CITY_NEWPLAYER_PER_DAY="70")
+        code = "import server; print(server.NEW_PLAYERS.n, server.NEW_PLAYERS_DAY.n)"
+        out = subprocess.run([sys.executable, "-c", code], env=env, cwd=os.path.dirname(server.__file__), capture_output=True, text=True, check=True)
+        self.assertEqual(out.stdout.split(), ["7", "70"])
 
     def test_nickname_only_through_player_name(self):
         pid, token = self.new_player()
@@ -98,6 +127,31 @@ class Identity(HttpCase):
         self.assertEqual(self.call("/player/name", {"player": pid, "name": "x" * 25}, token=token)[0], 400)
         self.assertEqual(self.call("/player/name", {"player": pid, "name": "Ann"}, token=token)[0], 200)
         self.assertEqual(self.call(f"/wallet?player={pid}", token=token)[1]["player"]["nickname"], "Ann")
+
+
+class PendingBets(HttpCase):
+    def test_bet_is_pending_then_get_bet_shows_the_fill(self):
+        import integrity
+        real = staticmethod(lambda series: integrity.rule_for(series).delay_s * 1000)
+        with mock.patch.object(integrity.Integrity, "delay_ms", real):
+            pid, token = self.new_player()
+            m = self.market()
+            bet = {"player": pid, "market": m.id, "option": m.option_ids()[0], "stake": 50, "idempotency_key": "k"}
+            status, out = self.call("/bet", bet, token=token)
+            self.assertEqual((status, out["status"], out["escrow"]), (200, "pending", 0))
+            self.assertEqual(out["fillsAt"] - out["placedAt"], 5000)
+            got = self.call(f"/bet?player={pid}&id={out['betId']}", token=token)[1]
+            self.assertEqual(got["status"], "pending")
+            self.assertEqual(self.call(f"/positions?player={pid}", token=token)[1]["pending"][0]["betId"],
+                             out["betId"])
+            self.assertEqual(self.call(f"/bet?player={pid}&id={out['betId']}", token="wrong")[0], 401)
+            self.assertEqual(self.call(f"/bet?player={pid}&id=nope", token=token)[0], 404)
+            with server.LOCK:
+                self.ex.tick(out["fillsAt"])
+            got = self.call(f"/bet?player={pid}&id={out['betId']}", token=token)[1]
+            self.assertEqual(got["status"], "filled")
+            self.assertEqual(self.call(f"/positions?player={pid}", token=token)[1]["positions"][0]["betId"],
+                             out["betId"])
 
 
 class Boundary(HttpCase):

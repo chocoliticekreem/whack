@@ -57,7 +57,10 @@ class RateLimit:
             return True
 
 
-NEW_PLAYERS = RateLimit(5, 3600)
+# Why: at a venue every phone on the Wi-Fi shares one public IP through NAT, so these caps are per network, not per
+# person: a burst limit that lets a room join at once, and a daily ceiling.
+NEW_PLAYERS = RateLimit(int(os.environ.get("CITY_NEWPLAYER_PER_MIN") or 30), 60)
+NEW_PLAYERS_DAY = RateLimit(int(os.environ.get("CITY_NEWPLAYER_PER_DAY") or 500), 86_400)
 
 
 class TooMany(Exception):
@@ -138,9 +141,16 @@ class Handler(BaseHTTPRequestHandler):
     def player(self, claimed) -> str:
         return EX.ledger.auth(claimed, self.headers.get("X-Player-Token"))
 
+    def positions(self, q: dict) -> dict:
+        player = self.player(q.get("player"))
+        return get_routes(EX.ledger, q, player)["/positions"]() | {"pending": EX.integrity.pending_json(player)}
+
     def new_player(self, body: dict) -> dict:
-        if not NEW_PLAYERS.allow(self.client_ip()):
-            raise TooMany("too many new players from this address; try again later")
+        ip = self.client_ip()
+        if not NEW_PLAYERS.allow(ip):  # burst first, so a refused burst never spends the daily allowance
+            raise TooMany("Too many new players from this network, try again in a minute")
+        if not NEW_PLAYERS_DAY.allow(ip):
+            raise TooMany("Too many new players from this network today, try again tomorrow")
         return EX.ledger.create_player(body.get("name"))
 
     def run(self, fn) -> None:
@@ -171,7 +181,11 @@ class Handler(BaseHTTPRequestHandler):
                   "/hotspots": EX.hotspots_json, "/traders": EX.traders_json, "/markets": EX.markets_json,
                   "/leaderboard": EX.leaderboard, "/stats": EX.stats_json, "/round": EX.round_json,
                   "/signals": lambda: signals.strip(EX.store, EX.spots, EX.clock.now())}
-        if path in WALLET_GET:  # wallet hook: reads prove the token and never create a player
+        if path == "/bet":  # a bet's pending -> filled / cancelled state
+            self.run(lambda: EX.integrity.lookup(EX.ledger, self.player(q.get("player")), q.get("id")))
+        elif path == "/positions":
+            self.run(lambda: self.positions(q))
+        elif path in WALLET_GET:  # wallet hook: reads prove the token and never create a player
             self.run(lambda: get_routes(EX.ledger, q, self.player(q.get("player")))[path]())
         elif path in routes:
             self.run(routes[path])

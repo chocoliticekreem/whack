@@ -8,8 +8,10 @@ import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
+from unittest import mock
 
 import data
+import integrity
 import markets as mk
 import pricing
 import signals
@@ -160,6 +162,13 @@ def build_hopeless(mid, store, spots, now, settles_at):
     sim.edges = [10.0, 20.0, 30.0]
     return mk.Market(mid, "test-hopeless", "bracket", "Hopeless", ["oxford-circus"], now, settles_at,
                      mk.bracket_options(mk.pct_labels(sim.edges), OXFORD), sim, "src", "rule", {})
+
+
+def no_delay(case: unittest.TestCase) -> None:
+    """For tests of what a fill does, not when: every bet fills at once (the delay has its own tests)."""
+    p = mock.patch.object(integrity.Integrity, "delay_ms", staticmethod(lambda series: 0))
+    p.start()
+    case.addCleanup(p.stop)
 
 
 class TestSeries:
@@ -595,6 +604,7 @@ class RoundTest(CityCase):
         self.assertEqual(ex.rejected, 1)
 
     def test_bet_moves_price_and_enforces_cap_and_status(self):
+        no_delay(self)
         ex = self.exchange()
         for p in ("p", "q", "r"):
             ex.ledger.open_account(p)
@@ -617,6 +627,7 @@ class RoundTest(CityCase):
         self.assertEqual(ex.halt_reason(ex.biddable(T0)[0], T0 + 40 * MIN), "stale feed")
 
     def test_void_refunds_traders(self):
+        no_delay(self)
         raw = Raw()
         self.addCleanup(raw.dir.cleanup)
         raw.profile()
@@ -839,6 +850,7 @@ class TraderTest(CityCase):
             self.assertNotEqual(alt, max(m.prices(), key=lambda o: m.prices()[o]))
 
     def test_traders_with_nothing_sit_out_with_a_number(self):
+        no_delay(self)
         ex = self.exchange(self.now)
         ex.tick(self.now)
         why = {t["id"]: t["why"] for t in ex.traders_json(self.now)["traders"]}
@@ -946,6 +958,7 @@ class SimTest(CityCase):
                               rf"{p * 100:.0f}%$")
 
     def test_the_sim_trader_respects_the_position_cap_and_the_odds_floor(self):
+        no_delay(self)
         store = self.store(sim_state(self.now, hub_pct()))
         ex = Exchange(store, Clock(self.now), SPOTS)
         ex.tick(self.now)
@@ -1019,6 +1032,230 @@ class SimTest(CityCase):
         self.assertIsNotNone(feed.now(self.now + 3 * MIN))
         self.assertIsNone(feed.now(self.now + 3 * MIN + 1))
         self.assertIn("min old", feed.why_none(self.now + 4 * MIN))
+
+
+# ---------------------------------------------------------------- integrity: courtsiding
+
+CLEAN_OPEN = T0 + 29 * MIN + 10_000  # inside the betting window spanning :30, so the clean sheet is listed
+BREAK_AT = T0 + 40 * MIN + 30_000  # TfL publishes the Central line's delay; the courtsider saw it T s earlier
+
+
+class CourtsidingTest(CityCase):
+    """A courtsider on a stopped Central line train knows the clean sheet is lost T s before TfL publishes it."""
+
+    def setUp(self):
+        super().setUp()
+        city(self.raw, T0 + 29 * MIN)
+        bad = lines({"central": (6, "Severe Delays", "Signal failure at Bank")})
+        minutely(self.raw, T0 + 30 * MIN, T0 + 40 * MIN, "line_status", lambda ts: lines())
+        self.raw.put("line_status", BREAK_AT, bad)
+        minutely(self.raw, T0 + 41 * MIN, T0 + 50 * MIN, "line_status", lambda ts: bad)
+
+    def run_to(self, ex: Exchange, start: int, end: int, step: int = 1000) -> None:
+        for t in range(start, end + 1, step):
+            ex.tick(t)
+
+    def opened(self) -> tuple[Exchange, mk.Market]:
+        ex = self.exchange()
+        self.addCleanup(ex.ledger.close)
+        ex.ledger.open_account("courtsider")
+        ex.tick(CLEAN_OPEN)
+        return ex, next(m for m in ex.active() if m.sub == "clean_sheet")
+
+    def courtside(self, early_s: int) -> tuple[float, dict]:
+        """Bets 'no' early_s before the break is published; returns (profit, the bet reply)."""
+        ex, m = self.opened()
+        t_bet = BREAK_AT - early_s * 1000
+        self.run_to(ex, CLEAN_OPEN, t_bet, 15_000)
+        out = ex.bet({"player": "courtsider", "market": m.id, "option": "no", "stake": 100,
+                      "idempotency_key": "seen-it"}, t_bet)
+        self.run_to(ex, t_bet, BREAK_AT + 60_000)
+        self.assertEqual(m.result["winner"], "no")
+        self.assertEqual(ex.ledger.audit(), [])
+        return ex.ledger.cash("courtsider") - 1000, ex.integrity.lookup(ex.ledger, "courtsider", out["betId"])
+
+    def test_with_the_defences_the_courtsiders_edge_is_zero(self):
+        rule = integrity.rule_for("clean_sheet")
+        self.assertEqual((rule.delay_s, rule.cap_pct), (45, 0.10))
+        profits = []
+        for early in (5, 15, 30, 44):
+            profit, bet = self.courtside(early)
+            self.assertEqual(bet["status"], "cancelled", early)
+            self.assertRegex(bet["reason"], r"paused: Central now Severe Delays|market (closed|settled)")
+            profits.append(profit)
+        self.assertEqual(profits, [0, 0, 0, 0])
+
+    def test_without_the_defences_the_courtsider_profits(self):
+        undefended = integrity.Rule(0, (), 0, 0.10)
+        with mock.patch.dict(integrity.TABLE, {"clean_sheet": undefended}):
+            profits = [self.courtside(early)[0] for early in (5, 15, 30, 44)]
+        edge = sum(profits) / len(profits) / 100
+        self.assertGreater(edge, 0.5, profits)  # 'no' trades near 25% ten minutes into a clean hour: ~+3x
+
+    def test_any_line_change_pauses_the_market_and_reopens_after_the_cool_off(self):
+        ex, m = self.opened()
+        ex.tick(T0 + 30 * MIN)
+        prev, snap = ex.store.latest("line_status", T0 + 30 * MIN)[1], dict(ex.store.latest(
+            "line_status", T0 + 30 * MIN)[1])
+        snap["weaver"] = dict(snap["weaver"], sev=6)
+        self.assertIsNone(integrity.line_changed(m, prev, snap), "only Tube lines count")
+        m.book.commit("yes", 300)
+        ex.integrity.suspend(m, "Victoria now Minor Delays", T0 + 30 * MIN)
+        self.assertEqual(m.book.q, {"yes": 0.0, "no": 0.0}, "the price restarts from the futures")
+        self.assertEqual(ex.status(m, T0 + 30 * MIN + 19_000), "halted")
+        self.assertIn("suspended: Victoria now Minor Delays", ex.halt_reason(m, T0 + 30 * MIN + 19_000))
+        self.assertEqual(ex.status(m, T0 + 30 * MIN + 20_000), "open")
+
+    def test_markets_carry_their_integrity_rules_in_plain_english(self):
+        ex, m = self.opened()
+        got = {j["series"]: j for j in ex.markets_json(CLEAN_OPEN)["markets"]}
+        self.assertEqual(got["clean_sheet"]["integrity"], {"delayS": 45, "suspendsOn": [
+            "any Tube line's status changes"], "coolOffS": 20, "capPct": 10})
+        self.assertIn("Bets fill 45 s after you place them", got["clean_sheet"]["rule"])
+        self.assertIn("pauses for 20 s whenever any Tube line's status changes", got["clean_sheet"]["rule"])
+        self.assertEqual(got["hub_surge"]["integrity"]["delayS"], 5)
+        self.assertEqual(got["heathrow_stack"]["integrity"]["delayS"], 2)
+        self.assertEqual(integrity.meta("london_vix")["delayS"], 2)
+        self.assertEqual(integrity.meta("city_pulse")["capPct"], 25)
+
+    def test_the_cap_on_a_locally_observable_series_is_ten_percent(self):
+        ex, m = self.opened()
+        with self.assertRaisesRegex(PermissionError, "position cap: max 100 points"):
+            ex.bet({"player": "courtsider", "market": m.id, "option": "no", "stake": 110}, CLEAN_OPEN)
+        ex.bet({"player": "courtsider", "market": m.id, "option": "no", "stake": 60}, CLEAN_OPEN)
+        with self.assertRaisesRegex(PermissionError, "60 already staked"):  # pending stakes count
+            ex.bet({"player": "courtsider", "market": m.id, "option": "no", "stake": 50}, CLEAN_OPEN)
+
+
+class PendingBetTest(CityCase):
+    def setUp(self):
+        super().setUp()
+        city(self.raw, T0 + 30 * MIN)
+        self.ex = self.exchange()
+        self.addCleanup(self.ex.ledger.close)
+        self.ex.ledger.open_account("p")
+        self.ex.tick(T0)
+        self.m = next(m for m in self.ex.active() if m.sub == "hub_surge")
+        self.L = self.ex.ledger
+
+    def place(self, key="k", stake=100, now=T0):
+        return self.ex.bet({"player": "p", "market": self.m.id, "option": self.m.option_ids()[0], "stake": stake,
+                            "idempotency_key": key}, now)
+
+    def test_pending_then_fill_at_the_price_then_then_settle_keeps_the_ledger_whole(self):
+        out = self.place()
+        self.assertEqual((out["status"], out["fillsAt"], out["balance"], out["escrow"]), ("pending", T0 + 5000,
+                                                                                          1000, 0))
+        self.assertEqual(self.L.audit(), [])
+        self.ex.tick(T0 + 4000)
+        self.assertEqual(self.ex.integrity.lookup(self.L, "p", out["betId"])["status"], "pending")
+        quoted = self.ex.quote(self.m, self.m.option_ids()[0], 100)[1]
+        self.ex.tick(T0 + 5000)
+        got = self.ex.integrity.lookup(self.L, "p", out["betId"])
+        self.assertEqual((got["status"], got["odds"]), ("filled", quoted))
+        self.assertEqual((self.L.cash("p"), self.L.escrow("p")), (900, 100))
+        self.assertEqual(self.L.positions("p")["positions"][0]["betId"], out["betId"])
+        self.assertEqual(self.L.audit(), [])
+        self.ex.tick(self.m.closes_at + mk.CROWD_WAIT_MS)
+        self.assertIn(self.ex.integrity.lookup(self.L, "p", out["betId"])["result"], ("won", "lost", "void"))
+        self.assertEqual((self.L.escrow("p"), self.L.audit()), (0, []))
+
+    def test_a_suspend_cancels_a_pending_bet_and_nothing_moves(self):
+        out = self.place()
+        self.ex.integrity.suspend(self.m, "Bank crowding +14%", T0 + 2000)
+        got = self.ex.integrity.lookup(self.L, "p", out["betId"])
+        self.assertEqual((got["status"], got["reason"]), ("cancelled", "market paused: Bank crowding +14%"))
+        self.ex.tick(T0 + 6000)
+        self.assertEqual(self.ex.integrity.lookup(self.L, "p", out["betId"])["status"], "cancelled")
+        self.assertEqual((self.L.cash("p"), self.L.escrow("p"), self.L.positions("p")["positions"]), (1000, 0, []))
+        self.assertEqual(self.L.db.execute("SELECT COUNT(*) FROM bets").fetchone()[0], 0)
+        self.assertEqual(self.L.audit(), [])
+        with self.assertRaisesRegex(PermissionError, "market halted"):
+            self.place("k2", now=T0 + 3000)
+
+    def test_a_market_that_closes_or_halts_before_the_fill_cancels_it(self):
+        late = self.place("late", now=self.m.closes_at - 3000)
+        self.ex.tick(self.m.closes_at + 2000)
+        got = self.ex.integrity.lookup(self.L, "p", late["betId"])
+        self.assertEqual((got["status"], got["reason"]), ("cancelled", "market closed"))
+        pulse = next(m for m in self.ex.active() if m.sub == "city_pulse")
+        out = self.ex.bet({"player": "p", "market": pulse.id, "option": "over", "stake": 50}, T0)
+        self.ex.store.fresh = lambda *_: False
+        self.ex.tick(T0 + 5000)
+        self.assertEqual(self.ex.integrity.lookup(self.L, "p", out["betId"])["reason"], "stale feed")
+        self.assertEqual((self.L.cash("p"), self.L.audit()), (1000, []))
+
+    def test_a_fill_the_wallet_refuses_is_a_cancel(self):
+        out = self.place()
+        self.ex.ledger.take_break("p", 1)
+        self.ex.tick(T0 + 5000)
+        got = self.ex.integrity.lookup(self.L, "p", out["betId"])
+        self.assertEqual(got["status"], "cancelled")
+        self.assertIn("taking a break", got["reason"])
+        self.assertEqual((self.L.cash("p"), self.L.audit()), (1000, []))
+
+    def test_idempotency_holds_while_pending_after_the_fill_and_after_a_cancel(self):
+        first = self.place("tap")
+        again = self.place("tap")
+        self.assertEqual((again["betId"], again["status"], again["replayed"]), (first["betId"], "pending", True))
+        self.assertEqual(len(self.ex.integrity.orders), 1)
+        with self.assertRaisesRegex(ValueError, "already used for a different bet"):
+            self.place("tap", stake=50)
+        self.ex.tick(T0 + 5000)
+        filled = self.place("tap", now=T0 + 6000)
+        self.assertEqual((filled["betId"], filled["status"], filled["replayed"]), (first["betId"], "filled", True))
+        self.assertEqual(self.L.db.execute("SELECT COUNT(*) FROM bets").fetchone()[0], 1)
+        other = self.place("tap-2", now=T0 + 6000)
+        self.ex.integrity.suspend(self.m, "Bank crowding +14%", T0 + 7000)
+        after = self.place("tap-2", now=T0 + 8000)
+        self.assertEqual((after["betId"], after["status"], after["replayed"]), (other["betId"], "cancelled", True))
+        self.assertEqual(self.L.audit(), [])
+
+    def test_ai_traders_honour_the_delay_and_the_cancels(self):
+        self.assertEqual(self.m.ai_bets, [])
+        queued = [a for a in self.ex.integrity.ai if a["market"] == self.m.id]
+        self.assertTrue(queued)
+        self.assertEqual({a["fillsAt"] for a in queued}, {T0 + 5000})
+        self.ex.tick(T0 + 4000)
+        self.assertEqual(self.m.ai_bets, [])
+        self.ex.tick(T0 + 5000)
+        self.assertEqual(sorted(b["trader"] for b in self.m.ai_bets), sorted(a["trader"] for a in queued))
+        pulse = next(m for m in self.ex.active() if m.sub == "city_pulse")
+        held = [a for a in self.ex.integrity.ai if a["market"] == pulse.id]
+        self.ex.integrity.suspend(pulse, "City Pulse +4.0%", T0 + 5000)
+        self.assertFalse([a for a in self.ex.integrity.ai if a["market"] == pulse.id])
+        self.assertFalse({a["trader"] for a in held} & pulse.decided, "a cancelled trader may decide again")
+
+    def test_crowding_moves_trip_the_thresholds(self):
+        nap = NAPTANS["bank"]
+        self.assertEqual(integrity.hub_moved(self.m, {nap: 0.10}, {nap: 0.111}), "Bank crowding +11%")
+        self.assertIsNone(integrity.hub_moved(self.m, {nap: 0.10}, {nap: 0.109}))
+        self.assertIsNotNone(integrity.vix_moved(self.m, {"vix": 2.3}, {"vix": 2.61}))
+        self.assertIsNone(integrity.stack_moved(self.m, {"total": 6}, {"total": 9}))
+        self.assertEqual(integrity.stack_moved(self.m, {"total": 6}, {"total": 10}), "Heathrow holding 6 → 10")
+
+
+class SimTraderDelayTest(CityCase):
+    store = SimTest.store
+
+    def setUp(self):
+        super().setUp()
+        city(self.raw, T0 + 10 * MIN)
+        self.now = T0 + 10 * MIN
+
+    def test_the_simulation_trader_goes_through_the_same_delay(self):
+        ex = Exchange(self.store(sim_state(self.now, hub_pct())), Clock(self.now), SPOTS)
+        self.addCleanup(ex.ledger.close)
+        orig = traders.sim_view
+        self.addCleanup(setattr, traders, "sim_view", orig)
+        traders.sim_view = lambda m, *_: {"probs": {o: float(o == m.option_ids()[0]) for o in m.option_ids()},
+                                          "detail": {o: "x" for o in m.option_ids()}}
+        ex.tick(self.now)
+        sims = [a for a in ex.integrity.ai if a["trader"] == "sim"]
+        self.assertTrue(sims)
+        self.assertFalse([b for m in ex.active() for b in m.ai_bets if b["trader"] == "sim"])
+        ex.tick(self.now + 5000)
+        self.assertTrue([b for m in ex.active() for b in m.ai_bets if b["trader"] == "sim"])
 
 
 if __name__ == "__main__":

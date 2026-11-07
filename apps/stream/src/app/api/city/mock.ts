@@ -6,6 +6,7 @@ import type {
   AiBet,
   Feed,
   Hotspot,
+  Integrity,
   LeaderRow,
   Market,
   MarketOption,
@@ -52,8 +53,37 @@ interface State {
   lastDrift: number;
 }
 
-const g = globalThis as unknown as { __cityMock?: State };
+interface PendingOrder {
+  betId: string;
+  market: string;
+  option: number;
+  stake: number;
+  placedAt: number;
+  fillsAt: number;
+  status: "pending" | "filled" | "cancelled";
+  reason?: string;
+  odds?: number;
+  payout?: number;
+}
+
+const g = globalThis as unknown as { __cityMock?: State; __cityMockOrders?: Map<string, PendingOrder> };
 const state: State = (g.__cityMock ??= { markets: [], results: new Map(), scores: new Map(), seq: 0, lastDrift: 0 });
+const orders: Map<string, PendingOrder> = (g.__cityMockOrders ??= new Map());
+
+/** Mirrors services/city/integrity.py: a line board is visible from a platform, so it waits longest. */
+const INTEGRITY: Record<FeedId, Integrity> = {
+  line_status: { delayS: 45, suspendsOn: ["any Tube line's status changes"], coolOffS: 20, capPct: 10 },
+  crowding: { delayS: 5, suspendsOn: ["a hub's TfL crowding reading moves more than 10%"], coolOffS: 15, capPct: 25 },
+  jamcams: { delayS: 2, suspendsOn: [], coolOffS: 10, capPct: 25 },
+  rain_now: { delayS: 5, suspendsOn: [], coolOffS: 15, capPct: 25 },
+  bus: { delayS: 5, suspendsOn: [], coolOffS: 15, capPct: 25 },
+};
+
+const plainIntegrity = (i: Integrity) =>
+  `Bets fill ${i.delayS} s after you place them, at the price then; if the market pauses or closes first the bet is ` +
+  `cancelled and your stake is untouched.` +
+  (i.suspendsOn.length ? ` The market pauses for ${i.coolOffS} s whenever ${i.suspendsOn.join(" or ")}.` : "") +
+  ` Max ${i.capPct}% of your points in this market.`;
 
 const clock = (ms: number, seconds = false) =>
   new Intl.DateTimeFormat("en-GB", {
@@ -217,7 +247,8 @@ function open(now: number, lockIn: number) {
     closesAt: settlesAt - LOCK_MS,
     settlesAt,
     source: d.source,
-    rule: d.rule,
+    rule: `${d.rule} ${plainIntegrity(INTEGRITY[d.feed])}`,
+    integrity: INTEGRITY[d.feed],
     status: "open",
     feed: d.feed,
     base: d.probs,
@@ -297,7 +328,26 @@ function feeds(now: number): Record<string, Feed> {
   );
 }
 
-const publicMarket = ({ feed: _f, q: _q, base: _b, ...m }: MockMarket): Market => m;
+/** A pending order cancels if its market stops being open, else fills at the price once its delay is up. */
+function advance(o: PendingOrder, now: number) {
+  if (o.status !== "pending") return;
+  const m = state.markets.find((x) => x.id === o.market);
+  if (!m || m.status !== "open") {
+    o.status = "cancelled";
+    o.reason = m?.status === "halted" ? "stale feed" : "market closed";
+    return;
+  }
+  if (now < o.fillsAt) return;
+  const p0 = m.options[o.option].prob;
+  const shares = B * Math.log((Math.exp(o.stake / B) - (1 - p0)) / p0);
+  m.q[o.option] += shares;
+  reprice(m);
+  o.status = "filled";
+  o.odds = Number((shares / o.stake).toFixed(2));
+  o.payout = Math.floor(o.stake * o.odds);
+}
+
+const publicMarket =({ feed: _f, q: _q, base: _b, ...m }: MockMarket): Market => m;
 
 export function mockHandle(route: string, method: string, body: Record<string, unknown>): { status: number; data: unknown } {
   const now = Date.now();
@@ -319,22 +369,21 @@ export function mockHandle(route: string, method: string, body: Record<string, u
       return ok({ settled: false, waitMs: Math.max(1000, m.settlesAt + 4_000 - now) });
     }
     case "bet": {
+      if (method === "GET") {
+        const o = orders.get(String(body.id ?? ""));
+        if (!o) return { status: 404, data: { ok: false, error: "unknown bet" } };
+        advance(o, now);
+        return ok({ ok: true, ...o, option: state.markets.find((x) => x.id === o.market)?.options[o.option]?.id });
+      }
       const m = state.markets.find((x) => x.id === body.market);
       if (!m || m.status !== "open") return { status: 409, data: { ok: false, error: m ? `market ${m.status}` : "market closed" } };
       const i = m.options.findIndex((o) => o.id === body.option);
       const stake = Math.max(1, Math.round(Number(body.stake) || 0));
       if (i < 0) return { status: 409, data: { ok: false, error: "unknown option" } };
-      const p0 = m.options[i].prob;
-      const shares = B * Math.log((Math.exp(stake / B) - (1 - p0)) / p0);
-      m.q[i] += shares;
-      reprice(m);
-      return ok({
-        ok: true,
-        price: m.options[i].prob,
-        shares: Number(shares.toFixed(1)),
-        odds: Number((shares / stake).toFixed(2)),
-        options: m.options.map((o) => ({ id: o.id, prob: o.prob, odds: o.odds })),
-      });
+      const delay = (m.integrity?.delayS ?? 5) * 1000;
+      const o: PendingOrder = { betId: crypto.randomUUID(), market: m.id, option: i, stake, placedAt: now, fillsAt: now + delay, status: "pending" };
+      orders.set(o.betId, o);
+      return ok({ ok: true, ...o, option: m.options[i].id });
     }
     case "score": {
       if (method !== "POST") return { status: 405, data: { ok: false } };

@@ -27,8 +27,9 @@ round's results. Every market carries `signals` (1–2 visible clues, shapes in 
 strip: the 5-hub vs-usual strip with the laggard flagged, the Tube line board with reasons, the latest football
 result and the VIX line.
 
-Wallet: `POST /player/new` (5 per hour per client IP) is the only way to get a player: it returns a server-made id, a
-random token (stored hashed) and the 1000-point grant. `GET /wallet /ledger /positions /history ?player=`,
+Wallet: `POST /player/new` (per client IP, which at a venue is the whole Wi-Fi behind NAT: 30 a minute,
+`CITY_NEWPLAYER_PER_MIN`, and 500 a day, `CITY_NEWPLAYER_PER_DAY`) is the only way to get a player: it returns a
+server-made id, a random token (stored hashed) and the 1000-point grant. `GET /wallet /ledger /positions /history ?player=`,
 `POST /bet /limits {dailyLoss} /break {hours} /player/name {name}` all need `X-Player-Token`; reads never create a
 player. `ledger.py` keeps player points in an append-only, double-entry SQLite ledger (`CITY_LEDGER_DB`, default
 `services/city/data/ledger.db`, gitignored, one server per file via a lock file; `--replay-from` uses an in-memory
@@ -38,7 +39,9 @@ refused) and rounds down. A daily gross-loss limit, a server-issued 60 s confirm
 1 h / 24 h break and a house worst-case exposure cap (`CITY_HOUSE_BANKROLL`, `CITY_EXPOSURE_CAP`, 100000 each) are
 enforced on the server. After a restart, bets on recorded markets settle from data; only unresolvable ones are
 refunded. `/leaderboard` ranks players by ledger equity. The server binds 127.0.0.1 (`CITY_HOST`) and refuses bodies
-over 16 KB. `Ledger.audit()` re-checks every invariant from the raw entries.
+over 16 KB. `Ledger.audit()` re-checks every invariant from the raw entries. A `/bet` is accepted as pending and fills
+after the series' delay (see Integrity below); `GET /bet?player=&id=` shows it pending, filled or cancelled, and
+`/positions` lists the pending ones under `pending`.
 
 ## Rounds and series
 
@@ -114,11 +117,49 @@ Stations share one city-wide shock (correlation 0.5) because the sim publishes m
 `eval_sim.py score SIM_LOG --traders http://127.0.0.1:8121` rebuilds each recorded round statistical-only and blended
 from the recorder's data, settles it, and prints Brier, log loss, favourite calibration and the Simulation trader's P&L.
 
+## Integrity: courtsiding
+
+Courtsiding (latency arbitrage): someone on the spot sees the outcome before the TfL feed that settles the market
+publishes it. A passenger on a Central line train that has just stopped knows the clean sheet is lost before Line Status
+says so, and bets while the market is still open. `integrity.py` adds three defences, configured per series in one
+table (`TABLE`):
+
+| series | delay_s | pauses when | cool-off | cap |
+|---|---|---|---|---|
+| clean_sheet (and any line_status series) | 45 | any Tube line's status changes | 20 s | 10% |
+| hub_surge, hub_hour | 5 | a hub's TfL crowding reading moves > 10% | 15 s | 25% |
+| city_pulse | 5 | City Pulse moves > 3% in one reading | 15 s | 25% |
+| london_vix | 2 | the VIX moves > 0.30 in one frame | 10 s | 25% |
+| heathrow_stack | 2 | holding changes by 4+ aircraft | 10 s | 25% |
+
+- **Bet delay.** `POST /bet` returns `{"status": "pending", "fillsAt", "betId", …}` once the player checks pass (funds,
+  loss limit, break, confirm token) but holds no escrow. At `fillsAt` the bet is booked through the ledger at the price
+  then, under the same `betId` and idempotency key. If the market halted, closed or was suspended in between, or the
+  wallet refuses the fill, the bet is cancelled and nothing has moved, so the ledger invariants never see a pending bet.
+  Replaying the key returns the pending, filled or cancelled bet. AI traders, the Simulation trader included, queue
+  through the same delay and are dropped by the same cancels (a dropped trader may decide again once the market reopens).
+- **Suspend on change.** Each tick compares every new reading of a watched feed with the one before. A change past the
+  threshold halts the market (`haltReason: "suspended: Central now Severe Delays; reopens 15:41:20"`), cancels its
+  pending bets, resets the LMSR book so the price restarts from the futures, and reopens after the cool-off. Thresholds
+  are set from 2026-11-07's recordings: 7 of 100 crowding publishes move a hub > 10%, 8 of 100 move City Pulse > 3%; 4+
+  aircraft is the 95th percentile of one-minute holding changes.
+- **Exposure cap.** 10% of equity per market on locally observable series, 25% elsewhere; pending stakes count.
+
+Each market in `/markets` carries `integrity: {delayS, suspendsOn, coolOffS, capPct}` and the rule text says the same in
+plain English ("Bets fill 45 s after you place them … The market pauses for 20 s whenever any Tube line's status
+changes.").
+
+Measured in `CourtsidingTest`: a courtsider stakes 100 on "No, a line breaks" T s before TfL publishes a Central line
+break. Undefended (no delay, no suspend), every bet fills at odds 4.05 and returns +305. Defended, for T = 5, 15, 30 and
+44 s, every bet is cancelled: edge 0. The delay only covers a lead shorter than itself: with T = 50 s the bet fills
+before the feed changes and still pays +305, so on clean_sheet the 10% cap bounds what a longer lead can take. Pending
+bets live in memory, so a restart forgets them (no points move).
+
 ## Files
 
 `data.py` reads the recorder files into compact snapshots and never returns data after `now`. `pricing.py` holds the
 fits, simulators, particle filter and LMSR. `markets.py` holds the series registry and builds and settles each series. `traders.py` holds the
 seven traders (Tube Crowd → S1/S2/S5, Camera Eye → S3, Plane Spotter → S4, Line Watcher → S6, Rain Radar → S2 only in
-rain, Contrarian → all, Simulation → S1/S2/S5). `eval_sim.py` scores the simulation (below). `signals.py` builds the per-market clues and `/signals`. `exchange.py` runs the rounds, betting, settlement and scores. `server.py` is the HTTP layer.
+rain, Contrarian → all, Simulation → S1/S2/S5). `eval_sim.py` scores the simulation (below). `signals.py` builds the per-market clues and `/signals`. `exchange.py` runs the rounds, betting, settlement and scores. `integrity.py` holds the bet delay, suspend-on-change and caps. `server.py` is the HTTP layer.
 `hotspots.json` lists the hotspots with their JamCams, bus stops and lines; the recorder adds these cams to its
 YOLO list.

@@ -479,7 +479,7 @@ class Ledger:
     @_locked
     def place_bet(self, player, key, stake, *, market: str, question: str, option: str, label: str,
                   settles_at: int, price: Callable[[], tuple[float, float]], commit: Callable[[], None] | None = None,
-                  confirm_token: str | None = None, record: dict | None = None) -> dict:
+                  confirm_token: str | None = None, record: dict | None = None, bet_id: str | None = None) -> dict:
         """Moves the stake from cash to escrow in one transaction. `price()` quotes (shares, locked odds) without
         touching the market; it runs inside the transaction after the player checks. `commit()` books the shares on
         the market only after the transaction has committed. Replaying an idempotency key returns the original bet
@@ -508,7 +508,7 @@ class Ledger:
             if worst > house["cap"]:
                 raise WalletError("house_limit", "The exchange has taken all the risk it can on open markets. "
                                                  "Try a smaller stake or wait for markets to settle.")
-            bet_id = uuid.uuid4().hex
+            bet_id = bet_id or uuid.uuid4().hex
             if record is not None:
                 self.db.execute("INSERT OR IGNORE INTO markets (id, settles_at, record) VALUES (?, ?, ?)",
                                 (market, int(settles_at), json.dumps(record)))
@@ -522,6 +522,21 @@ class Ledger:
             commit()
         return self._booked({"id": bet_id, "player": player, "market": market, "option": option, "stake": stake,
                              "odds": float(odds), "shares": float(shares), "payout": payout}, replayed=False)
+
+    @_locked
+    def precheck(self, player, key, stake, *, market: str, settles_at: int, option: str,
+                 confirm_token: str | None = None) -> None:
+        """The player checks place_bet runs, without moving anything: for a bet that fills after a delay."""
+        player = self.require(player)
+        if not 0 < len(str(key or "")) <= 128:
+            raise ValueError("idempotency_key is required (1-128 chars)")
+        stake = as_points(stake)
+        if stake < MIN_STAKE:
+            raise ValueError(f"stake must be at least {MIN_STAKE} points")
+        now = self.now()
+        self._guard(player, stake, now,
+                    lambda: self._confirmed(confirm_token, player, market, settles_at, option, stake, now),
+                    lambda: self.confirm_token(player, market, settles_at, option, stake))
 
     @_locked
     def settle_bets(self, bet_ids: list[str], winner: str | None, reading: str) -> int:

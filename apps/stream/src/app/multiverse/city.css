@@ -386,6 +386,13 @@
   cursor: pointer;
 }
 
+.tl-error[data-quiet] {
+  border-color: var(--muted);
+  background: none;
+  color: var(--ink-2);
+  font-weight: 400;
+}
+
 .tl-market {
   position: relative;
   flex: none;
@@ -927,6 +934,10 @@
 .tl-confirm-win {
   font-weight: 500;
   opacity: 0.9;
+}
+
+.tl-stake-note {
+  font-size: 12px;
 }
 
 /* Your position */

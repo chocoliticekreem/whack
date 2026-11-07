@@ -76,6 +76,7 @@ export interface Market {
   status?: MarketStatus;
   /** 1–2 clues from services/city/signals.py; null or missing renders nothing. */
   signals?: Signal[] | null;
+  integrity?: Integrity;
 }
 
 export type UsualTrend = "up" | "down" | "flat";
@@ -185,6 +186,19 @@ export interface BetResponse {
   balance?: number;
   escrow?: number;
   replayed?: boolean;
+  /** Bet delay: a bet is accepted as pending and polled with GET /bet until it fills or is cancelled. */
+  status?: "pending" | "filled" | "cancelled";
+  fillsAt?: number;
+  /** Why a pending bet was cancelled, e.g. "market paused: Central now Severe Delays". */
+  reason?: string;
+}
+
+/** Courtsiding defences for one market (services/city/integrity.py). */
+export interface Integrity {
+  delayS: number;
+  suspendsOn: string[];
+  coolOffS: number;
+  capPct: number;
 }
 
 export interface LeaderRow {

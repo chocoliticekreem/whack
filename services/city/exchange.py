@@ -6,6 +6,7 @@ import time
 import uuid
 
 import fan
+import integrity
 import markets as mk
 import pricing
 import signals
@@ -17,7 +18,6 @@ from pricing import MIN_MS
 ROUND_MS = 5 * MIN_MS
 KEEP_SETTLED_MS = 60_000
 DEFAULT_BANKROLL = 1000
-POSITION_CAP = 0.25
 MAX_FAVOURITE = 0.85
 
 
@@ -62,12 +62,14 @@ class Exchange:
         self.calibration: dict[str, list[tuple[float, bool]]] = {"price": [], "model": []}
         self.series_calibration: dict[str, list[tuple[float, bool]]] = {s: [] for s in mk.SERIES}
         self.sat_out: dict[str, tuple[int, str]] = {}
+        self.integrity = integrity.Integrity()
 
     # ------------------------------------------------------------ the loop
 
     def tick(self, now: int | None = None) -> None:
         now = self.clock.now() if now is None else now
         self.store.refresh(now - mk.HISTORY_MS, now)
+        self.integrity.scan(self.store, self.active(), now)
         for m in self.active():
             mk.observe(m, self.store, now)
             self.lock_if_decided(m, now)
@@ -79,6 +81,7 @@ class Exchange:
                 print(f"settle {m.id} failed, will retry: {type(exc).__name__}: {exc}", file=sys.stderr)
         self.settle_restored(now)
         self.open_round(now)
+        self.integrity.fill_due(self, now)
         for m in self.active():
             if self.status(m, now) == "open":
                 self.ai_bets(m, now)
@@ -165,7 +168,7 @@ class Exchange:
     def halt_reason(self, m: mk.Market, now: int) -> str | None:
         if not self.store.fresh(m.feed, now):
             return "stale feed"
-        return m.halt_reason
+        return m.halt_reason or self.integrity.suspended(m, now)
 
     def stakes(self, m: mk.Market) -> dict[str, float]:
         out = {o: 0.0 for o in m.option_ids()}
@@ -202,14 +205,26 @@ class Exchange:
         prior = self.ledger.find_bet(player, key, m.id, m.settles_at, option, stake)
         if prior:
             return self.bet_reply(m, prior)
+        order = self.integrity.find(player, key, m, option, stake)
+        if order:
+            return self.integrity.reply(order, self.ledger, replayed=True)
         status = self.status(m, now)
         if status != "open":
             raise PermissionError(f"market {status}")
         bankroll = self.ledger.equity(player)  # wallet hook: cash + escrow from the ledger
-        cap = max(0.0, POSITION_CAP * bankroll)
-        held = sum(b["stake"] for b in m.bets if b["player"] == player)
+        cap = max(0.0, self.integrity.cap(m.sub) * bankroll)
+        held = sum(b["stake"] for b in m.bets if b["player"] == player) + self.integrity.held(player, m.id)
         if held + stake > cap:
             raise PermissionError(f"position cap: max {cap:g} points in this market ({held:g} already staked)")
+        if self.integrity.delay_ms(m.sub):
+            self.ledger.precheck(player, key, stake, market=m.id, settles_at=m.settles_at, option=option,
+                                 confirm_token=body.get("confirm_token"))
+            return self.integrity.reply(self.integrity.accept(player, key, m, option, stake, now), self.ledger, False)
+        return self.book(m, player, key, option, stake, now, body.get("confirm_token"))
+
+    def book(self, m: mk.Market, player: str, key: str, option: str, stake: int, now: int, confirm_token,
+             bet_id: str | None = None) -> dict:
+        """Books a bet at the price now: the immediate fill, or a pending bet's fill after its delay."""
         # wallet hook: checks, the quote and cash -> escrow run in one transaction; the book moves only after commit.
         quoted: dict[str, float] = {}
 
@@ -220,7 +235,7 @@ class Exchange:
         booked = self.ledger.place_bet(player, key, stake, market=m.id, question=m.question, option=option,
                                        label=m.label(option), settles_at=m.settles_at, price=priced,
                                        commit=lambda: m.book.commit(option, quoted["shares"]),
-                                       confirm_token=body.get("confirm_token"), record=mk.record_of(m))
+                                       confirm_token=confirm_token, record=mk.record_of(m), bet_id=bet_id)
         m.bets.append({"player": player, "option": option, "stake": float(stake), "odds": booked["odds"], "at": now,
                        "bet_id": booked["betId"]})
         return self.bet_reply(m, booked)
@@ -229,7 +244,7 @@ class Exchange:
         return {"ok": True, "price": round(m.prices()[booked["option"]], 4), "shares": round(booked["shares"], 1),
                 "odds": booked["odds"], "options": self.options_json(m), "betId": booked["betId"],
                 "payout": booked["payout"], "balance": booked["balance"], "escrow": booked["escrow"],
-                "replayed": booked["replayed"]}
+                "replayed": booked["replayed"], "status": "filled"}
 
     def ai_bets(self, m: mk.Market, now: int) -> None:
         ctx = {"spots": self.by_id}
@@ -249,18 +264,26 @@ class Exchange:
                 self.sat_out[tid] = (m.settles_at, traders.sit_out(tid, self.store, now, round_markets))
                 continue
             option, why = pick
-            cap = POSITION_CAP * max(0, self.record[tid]["points"])
+            cap_pct = self.integrity.cap(m.sub)
+            cap = cap_pct * max(0, self.record[tid]["points"])
             held = sum(b["stake"] for b in m.ai_bets if b["trader"] == tid)
+            held += self.integrity.ai_pending(tid, m.id) * traders.STAKE
             if held + traders.STAKE > cap:
                 self.sat_out[tid] = (m.settles_at, f"Sitting out: position cap {cap:g} points per market "
-                                                   f"({POSITION_CAP:.0%} of its {self.record[tid]['points']} points)")
+                                                   f"({cap_pct:.0%} of its {self.record[tid]['points']} points)")
                 continue
-            try:
-                shares, odds = self.quote(m, option, traders.STAKE)
-            except WalletError:
-                continue
-            m.book.commit(option, shares)
-            m.ai_bets.append({"trader": tid, "option": option, "why": why, "stake": traders.STAKE, "odds": odds})
+            if self.integrity.delay_ms(m.sub):
+                self.integrity.accept_ai(tid, m, option, why, now)
+            else:
+                self.ai_fill(m, tid, option, why)
+
+    def ai_fill(self, m: mk.Market, tid: str, option: str, why: str) -> None:
+        try:
+            shares, odds = self.quote(m, option, traders.STAKE)
+        except WalletError:
+            return
+        m.book.commit(option, shares)
+        m.ai_bets.append({"trader": tid, "option": option, "why": why, "stake": traders.STAKE, "odds": odds})
 
     # ------------------------------------------------------------ settlement
 
@@ -318,6 +341,7 @@ class Exchange:
                "source": m.source, "rule": m.rule, "status": self.status(m, now),
                "series": m.sub, "round": local_time(m.settles_at), "roundSettlesAt": m.settles_at,
                "signals": signals.market(m, self.store, now)}
+        out["integrity"], out["rule"] = integrity.meta(m.sub), f"{m.rule} {integrity.plain(m.sub)}"
         if out["status"] == "halted":
             out["haltReason"] = self.halt_reason(m, now)
         if m.result:
