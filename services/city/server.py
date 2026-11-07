@@ -20,7 +20,7 @@ from typing import Any
 
 import signals
 from data import MULTIVERSE_URL, SIM_POLL_S, SIM_URL, SimFeed, Store, feeds, fetch_vix, load_hotspots, raw_root
-from exchange import Clock, Exchange
+from exchange import Clock, Exchange, round_for
 from ledger import AuthError, Ledger, LedgerInUse, get_routes, post_routes, versus
 
 HOST = os.environ.get("CITY_HOST") or "127.0.0.1"
@@ -180,7 +180,8 @@ class Handler(BaseHTTPRequestHandler):
         routes = {"/health": lambda: {"ok": True, "live": EX.clock.live, "now": EX.clock.now()},
                   "/hotspots": EX.hotspots_json, "/traders": EX.traders_json, "/markets": EX.markets_json,
                   "/leaderboard": EX.leaderboard, "/stats": EX.stats_json, "/round": EX.round_json,
-                  "/signals": lambda: signals.strip(EX.store, EX.spots, EX.clock.now())}
+                  "/signals": lambda: signals.strip(EX.store, EX.spots, EX.clock.now()),
+                  "/local": lambda: EX.local.list_json(q.get("round"))}
         if path == "/bet":  # a bet's pending -> filled / cancelled state
             self.run(lambda: EX.integrity.lookup(EX.ledger, self.player(q.get("player")), q.get("id")))
         elif path == "/positions":
@@ -214,6 +215,8 @@ class Handler(BaseHTTPRequestHandler):
             self.run(lambda: post_routes(EX.ledger, body, self.player(body.get("player")))[path]())
         elif path == "/player/new":
             self.run(lambda: self.new_player(body))
+        elif path == "/local":
+            self.run(lambda: EX.local.create(body, self.player(body.get("player"))))
         elif path == "/settle":
             self.run(lambda: EX.settle_request(str(body.get("id"))))
         else:
@@ -243,6 +246,7 @@ def main() -> None:
     if start is None:
         threading.Thread(target=vix_poller, daemon=True).start()
         threading.Thread(target=sim_poller, args=(store.sim_feed,), daemon=True).start()
+        threading.Thread(target=EX.local.streets.run, args=(round_for, EX.clock.now), daemon=True).start()
     mode = (f"replay from {args.replay_from} at 12x" if start
             else f"live, VIX from {MULTIVERSE_URL}, city simulation from {SIM_URL}")
     print(f"city markets on {HOST}:{PORT} ({mode}, data {root}, ledger {ledger.path}, "

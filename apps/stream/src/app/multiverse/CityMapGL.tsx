@@ -37,6 +37,15 @@ let liveLoaded = false;
 
 const isPhone = () => window.matchMedia("(max-width: 720px)").matches;
 
+export type MapPick = (p: { lat: number; lon: number; hub?: string }) => void;
+let picker: MapPick | null = null;
+
+/** LocalMarket.tsx listens here: a click on empty map, or on a hub, picks that spot. */
+export function onMapPick(fn: MapPick | null) {
+  picker = fn;
+}
+
+
 /** Room for the UI over the map, measured from the real panels: sidebar + traders on desktop, strip + sheet on a phone. */
 function padding() {
   const w = window.innerWidth;
@@ -108,6 +117,7 @@ function makePin(lib: typeof import("maplibre-gl"), map: MapLibreMap, hub: Hotsp
   el.addEventListener("click", (e) => {
     e.stopPropagation();
     map.easeTo({ center: [hub.lon, hub.lat], zoom: Math.max(map.getZoom(), 15.4), duration: 900 });
+    picker?.({ lat: hub.lat, lon: hub.lon, hub: hub.id });
   });
   const marker = new lib.Marker({ element: el, anchor: "center" }).setLngLat([hub.lon, hub.lat]).addTo(map);
   return { marker, el, pop, vs: el.querySelector(".cm-hub-vs") as HTMLSpanElement };
@@ -173,6 +183,7 @@ export function CityMapGL({
         if (map && pending) fit(map, pending, 0);
         pending = null;
       });
+      map.on("click", (e) => picker?.({ lat: e.lngLat.lat, lon: e.lngLat.lng }));
       setReady(true);
       setGlMap(map); // map-3d
     });
