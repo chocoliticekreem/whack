@@ -242,6 +242,12 @@ def first_after_close(store: Store, naptans: dict[str, str], closes_at: int, unt
     return vals, stamps, last
 
 
+def measured(stamps: dict) -> int | None:
+    """TfL's own time for a settle value read from several stations: the earliest timeUtc used, so measuredAt >
+    closesAt holds for every station in it."""
+    return min(stamps.values()) if stamps else None
+
+
 def crowd_values(m: Market, store: Store, now: int):
     """('ok', ts, {option-or-hotspot: fraction of usual}, {same: TfL stamp}) once every station in
     m.spec['stations'] has a reading TfL stamped after bets close; ('wait', ms) until CROWD_WAIT_MS after the close,
@@ -285,7 +291,7 @@ def settle_oxford_busy(m: Market, store: Store, now: int):
     pct = round(next(iter(vals.values())) * 100, 4)  # 0.29 * 100 must stay 29, not 28.999…
     winner = pricing.bracket_of(pct, m.spec["edges"])
     return ("done", winner, f"{m.spec['name']} {pct:.1f}% of usual → {m.label(winner)}",
-            {"value": round(pct, 2), "source": "TfL Crowding API", "fetchedAt": ts})
+            {"value": round(pct, 2), "source": "TfL Crowding API", "measuredAt": measured(got[3]), "fetchedAt": ts})
 
 
 # ---------------------------------------------------------------- vs usual (TfL live % ÷ the typical day)
@@ -318,7 +324,8 @@ def hub_options(spots: list[dict]) -> list[dict]:
 
 
 def settled_vs(m: Market, store: Store, now: int):
-    """('ok', ts, {hub: vs usual}) from the first full TfL reading after close; else wait / missing."""
+    """('ok', ts, {hub: vs usual}, {hub: TfL stamp}) from the first full TfL reading after close; else wait /
+    missing."""
     got = crowd_values(m, store, now)
     if got[0] != "ok":
         return got
@@ -329,7 +336,7 @@ def settled_vs(m: Market, store: Store, now: int):
         if not typ:
             return ("missing",)
         vs[hid] = v / typ
-    return ("ok", ts, vs)
+    return ("ok", ts, vs, stamps)
 
 
 def fmt_vs(v: float) -> str:
@@ -498,7 +505,7 @@ def settle_hub_surge(m: Market, store: Store, now: int):
         return got
     ts, vs = got[1], got[2]
     gains = {hid: vs[hid] - m.spec["open"][hid] for hid in m.option_ids()}
-    snap = {"value": None, "source": "TfL Crowding API", "fetchedAt": ts,
+    snap = {"value": None, "source": "TfL Crowding API", "measuredAt": measured(got[3]), "fetchedAt": ts,
             "values": {hid: round(v, 4) for hid, v in vs.items()}}
     if all(abs(g) < 1e-9 for g in gains.values()):
         return ("void", "No hub moved since open — void, stakes refunded", snap)
@@ -578,17 +585,19 @@ def settle_city_pulse(m: Market, store: Store, now: int):
     after = store.between("crowding", m.closes_at + 1, min(now, deadline))
     if not after:
         return ("wait", deadline - now) if now < deadline else ("missing",)
-    vals, _, ts = first_after_close(store, {nap: nap for nap in after[0][1]}, m.closes_at, min(now, deadline))
+    vals, stamps, ts = first_after_close(store, {nap: nap for nap in after[0][1]}, m.closes_at, min(now, deadline))
     if len(vals) < len(after[0][1]) and now < deadline:
         return ("wait", deadline - now)
     pulse = pulse_of(vals)
     if pulse is None:
         return ("void", f"Only {len(vals)} of {PULSE_STATIONS} stations reported — void",
-                {"value": None, "source": "TfL Crowding API", "fetchedAt": ts or None})
+                {"value": None, "source": "TfL Crowding API", "measuredAt": measured(stamps),
+                 "fetchedAt": ts or None})
     pulse = round(pulse, 4)
     winner = "over" if pulse > m.spec["line"] else "under"
     return ("done", winner, f"City Pulse {pulse:.2f} vs line {m.spec['line']:.2f} → {m.label(winner)}",
-            {"value": round(pulse, 2), "source": "TfL Crowding API", "fetchedAt": ts})
+            {"value": round(pulse, 2), "source": "TfL Crowding API", "measuredAt": measured(stamps),
+             "fetchedAt": ts})
 
 
 # ---------------------------------------------------------------- shared: last reading at or before T
@@ -664,11 +673,11 @@ def settle_london_vix(m: Market, store: Store, now: int):
     ts, snap = got[1], got[2]
     if snap.get("spawnTs") is None or ts - snap["spawnTs"] < VIX_WARMUP_MS:
         return ("void", "The multiverse engine re-spawned during the round — void",
-                {"value": None, "source": FEED_LABEL["vix"], "fetchedAt": ts})
+                {"value": None, "source": FEED_LABEL["vix"], "measuredAt": ts, "fetchedAt": ts})
     v = round(snap["vix"], 4)
     winner = "over" if v > m.spec["line"] else "under"
     return ("done", winner, f"London VIX {v:.2f} vs {m.spec['line']:.2f} → {m.label(winner).split()[0]}",
-            {"value": round(v, 2), "source": FEED_LABEL["vix"], "fetchedAt": ts})
+            {"value": round(v, 2), "source": FEED_LABEL["vix"], "measuredAt": ts, "fetchedAt": ts})
 
 
 # ---------------------------------------------------------------- S4 heathrow_stack (stands in for S3)
@@ -713,7 +722,7 @@ def settle_heathrow_stack(m: Market, store: Store, now: int):
     winner = "over" if n > m.spec["line"] else "under"
     stacks = " · ".join(f"{k} {v}" for k, v in snap["stacks"].items())
     return ("done", winner, f"{n} holding ({stacks}) vs {m.spec['line']:g} → {m.label(winner).split()[0]}",
-            {"value": n, "source": FEED_LABEL["aircraft"], "fetchedAt": ts})
+            {"value": n, "source": FEED_LABEL["aircraft"], "measuredAt": ts, "fetchedAt": ts})
 
 
 # ---------------------------------------------------------------- S5 hub_hour (hourly headline, opens at :00)
@@ -726,6 +735,11 @@ def hourly(offset_min: int) -> Callable[[int], bool]:
 
 def headline_end(at: int) -> int:
     return at - ROUND_MS + HOUR_MS
+
+
+def headline_round(end: int) -> int:
+    """The round a headline settling at `end` opened in (headline_end's inverse)."""
+    return end + ROUND_MS - HOUR_MS
 
 
 def build_hub_hour(mid: str, store: Store, spots: list[dict], now: int, settles_at: int) -> Market | None:
@@ -774,7 +788,8 @@ def settle_hub_hour(m: Market, store: Store, now: int):
     winner = max(m.option_ids(), key=lambda h: vs[h])
     name = m.spec["names"][winner]
     return ("done", winner, f"{name} ends {fmt_vs(vs[winner])} of a usual {m.spec['day']}, the furthest above → "
-            f"{name}", {"value": round(vs[winner], 4), "source": "TfL Crowding API", "fetchedAt": ts,
+            f"{name}", {"value": round(vs[winner], 4), "source": "TfL Crowding API", "measuredAt": measured(got[3]),
+                        "fetchedAt": ts,
                         "values": {hid: round(v, 4) for hid, v in vs.items()}})
 
 
@@ -825,7 +840,7 @@ def settle_clean_sheet(m: Market, store: Store, now: int):
             line = snap[broke[0]]
             why = f": {line['reason'][:120]}" if line.get("reason") else ""
             return ("done", "no", f"{line['name']} broke the clean sheet at {local_time(ts)} ({line['desc']}){why}",
-                    {"value": len(broke), "source": "TfL Line Status API", "fetchedAt": ts,
+                    {"value": len(broke), "source": "TfL Line Status API", "measuredAt": ts, "fetchedAt": ts,
                      "line": broke[0], "lines": broke})
     if now < m.settles_at + SETTLE_LAG_MS:
         return ("wait", min(max(1, m.settles_at + SETTLE_LAG_MS - now), 5_000))
@@ -833,9 +848,11 @@ def settle_clean_sheet(m: Market, store: Store, now: int):
     gaps = sum(max(0, b - a - MIN_MS) for a, b in zip(stamps, stamps[1:]) if b - a > LINE_GAP_MS)
     if gaps > CLEAN_MAX_GAP_MS:
         return ("void", f"Line Status readings missing for {gaps / MIN_MS:.0f} min — void",
-                {"value": None, "source": "TfL Line Status API", "fetchedAt": reads[-1][0] if reads else None})
+                {"value": None, "source": "TfL Line Status API", "measuredAt": reads[-1][0] if reads else None,
+                 "fetchedAt": reads[-1][0] if reads else None})
     return ("done", "yes", f"All {len(m.spec['good'])} lines stayed Good from {local_time(m.opened_at)} to "
             f"{local_time(m.settles_at)} → Yes", {"value": 0, "source": "TfL Line Status API",
+                                                 "measuredAt": reads[-1][0] if reads else None,
                                                  "fetchedAt": reads[-1][0] if reads else None})
 
 
@@ -855,9 +872,14 @@ register(Series("oxford-busy", "crowding", build_oxford_busy, settle_oxford_busy
 # ---------------------------------------------------------------- settlement
 
 
+MEASURED_AFTER_CLOSE = ("crowding", "jamcams")
+
+
 def try_settle(m: Market, store: Store, now: int):
     """('wait', ms) | ('done', winner, reading, settlement) | ('void', reading, settlement). A market locked on a
-    final answer settles on it at settlesAt, or at once for a settles_early series."""
+    final answer settles on it at settlesAt, or at once for a settles_early series (betting closed the moment it was
+    decided). Otherwise a crowding or camera market settles only on a value its source measured after bets closed
+    (settlement measuredAt > closesAt), else voids."""
     series = REGISTRY[m.sub]
     if m.locked is not None and (now >= m.settles_at or series.settles_early):
         return m.locked
@@ -865,7 +887,12 @@ def try_settle(m: Market, store: Store, now: int):
         return ("wait", m.settles_at - now)
     got = series.settle(m, store, now)
     if got[0] == "missing":
-        return ("void", "No data — void", {"value": None, "source": FEED_LABEL[m.feed], "fetchedAt": None})
+        return ("void", "No data — void", {"value": None, "source": FEED_LABEL[m.feed], "measuredAt": None,
+                                          "fetchedAt": None})
+    if got[0] == "done" and m.feed in MEASURED_AFTER_CLOSE and now >= m.closes_at:
+        at = got[3].get("measuredAt")
+        if at is None or at <= m.closes_at:
+            return ("void", "The settling value was measured before bets closed — void, stakes refunded", got[3])
     return got
 
 

@@ -359,7 +359,8 @@ def settle_cam(m, store: Store, now: int):
     name = m.spec["sensor"]["name"]
     return ("done", winner, f"{n} people on {name} in the {local_time(img, '%H:%M:%S')} image vs "
             f"{m.spec['line']:g} → {m.label(winner).split()[0]}",
-            {"value": n, "source": CAM_FEED, "sensorId": cid, "sensor": name, "imageAt": img, "fetchedAt": at})
+            {"value": n, "source": CAM_FEED, "sensorId": cid, "sensor": name, "imageAt": img, "measuredAt": img,
+             "fetchedAt": at})
 
 
 def settle_station(m, store: Store, now: int):
@@ -367,17 +368,17 @@ def settle_station(m, store: Store, now: int):
     got = mk.crowd_values(m, store, now)
     if got[0] != "ok":
         return got
-    ts, vals = got[1], got[2]
+    ts, vals, at = got[1], got[2], got[3]["station"]
     typ = store.typical(nap, ts)
     if not typ:
         return ("void", f"No typical-day value for {m.spec['name']} at {local_time(ts)} — void",
-                {"value": None, "source": CROWD_FEED, "sensorId": nap, "fetchedAt": ts})
+                {"value": None, "source": CROWD_FEED, "sensorId": nap, "measuredAt": at, "fetchedAt": ts})
     pct = round(vals["station"] / typ * 100, 4)
     winner = "over" if pct > m.spec["line"] else "under"
     return ("done", winner, f"{m.spec['name']} {pct:.1f}% of a usual {m.spec['day']} vs {m.spec['line']:g}% → "
             f"{m.label(winner).split()[0]}",
             {"value": round(pct, 2), "source": CROWD_FEED, "sensorId": nap, "sensor": m.spec["name"],
-             "fetchedAt": ts})
+             "measuredAt": at, "fetchedAt": ts})
 
 
 def no_build(*_):

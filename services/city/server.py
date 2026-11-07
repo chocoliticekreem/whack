@@ -29,6 +29,7 @@ ORIGINS = {"http://localhost:3047", "http://localhost:3349", "http://localhost:3
            "http://127.0.0.1:3047", "http://127.0.0.1:3349", "http://127.0.0.1:3849"}
 TICK_S = 1.0
 VIX_POLL_S = 15.0
+VIX_BOOT_TIMEOUT_S = 5.0
 MAX_BODY = 16 * 1024
 WALLET_GET = {"/wallet", "/ledger", "/positions", "/history"}
 WALLET_POST = {"/bet", "/limits", "/break", "/player/name"}
@@ -85,6 +86,15 @@ def ticker() -> None:
             except Exception as exc:  # noqa: BLE001 - one bad tick must not stop the market
                 print(f"tick failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         time.sleep(TICK_S)
+
+
+def prime_vix(store: Store, fetch=fetch_vix) -> bool:
+    """Live only: one VIX fetch before the first round opens, so london_vix lists in it instead of being skipped
+    for "no fresh reading" until the poller's first pass. At most VIX_BOOT_TIMEOUT_S; down → the round goes ahead."""
+    got = fetch(MULTIVERSE_URL, timeout=VIX_BOOT_TIMEOUT_S)
+    if got:
+        store.ingest_vix(got)
+    return bool(got)
 
 
 def vix_poller() -> None:
@@ -239,6 +249,7 @@ def main() -> None:
     if start is None:
         store.sim_feed = SimFeed()
         store.sim_feed.poll()
+        prime_vix(store)
     EX = Exchange(store, Clock(start), hotspots, ledger)
     recovered = EX.recover()
     EX.tick()
