@@ -1,8 +1,9 @@
 import type { NextRequest } from "next/server";
 import { cached, TTL } from "@/lib/server/cache";
 import { cacheShort, json } from "@/lib/server/json";
+import { yoloCounts } from "@/lib/server/yolo";
 import type { LiveWeather } from "@/platform/demo";
-import type { AroundCam, CamReading } from "@/platform/around/types";
+import type { AroundCam } from "@/platform/around/types";
 import { originKey, type LatLon } from "@/twin/config";
 import { estimate } from "@/twin/field/estimate";
 import { buildSegments, type GraphSegment } from "@/twin/field/graph";
@@ -36,18 +37,25 @@ async function computeField(origin: string, at: LatLon): Promise<FieldResponse> 
     getJson<{ cams: AroundCam[] }>(`${origin}/api/around/cams?${q}&radius=${CAM_RADIUS_M}`, { cams: [] }),
     getJson<LiveWeather | null>(`${origin}/api/around/weather?${q}`, null),
   ]);
-  const ids = cams.map((c) => c.id).join(",");
-  const { readings } = ids
-    ? await getJson<{ readings: CamReading[] }>(`${origin}/api/around/counts?ids=${ids}`, { readings: [] })
-    : { readings: [] };
-  return estimate({
+  // Direct call, not HTTP: it shares the per-camera last-good readings with /api/around/counts.
+  const counts = await yoloCounts(cams.map((c) => c.id), 6000);
+  const field = estimate({
     segments,
     pois: geometry.pois,
     cams,
-    readings: readings ?? [],
+    readings: counts.readings,
     weather: weather?.kind ?? "clear",
     now,
   });
+  return {
+    ...field,
+    cameras: {
+      inRange: cams.length,
+      observed: field.cams.length,
+      status: counts.yolo,
+      newestAt: counts.readings.reduce((m, r) => Math.max(m, r.at), 0),
+    },
+  };
 }
 
 export async function GET(request: NextRequest) {

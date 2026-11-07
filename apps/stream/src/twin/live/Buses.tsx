@@ -27,6 +27,12 @@ const DEPART_MAX_MPS = 10;
 const EXIT_M = 400;
 /** Bumper-to-bumper room between buses queued at one stop: 2 m plus a share of their length. */
 const BUS_GAP_M = BUS_L + 2 + 0.04 * 2 * BUS_L;
+/** A refreshed prediction within this of a tracked bus's ETA is the same bus. */
+const MATCH_MS = 180_000;
+/** Seconds a bus takes to scale in when it enters, and out at the end of its run. */
+const FADE_S = 1.5;
+/** Time constant over which a revised TfL ETA is eased in, so a refresh never jumps the bus. */
+const ETA_EASE_S = 2;
 const _xz: XZ = [0, 0];
 const _vs: VehicleSnap = { x: 0, z: 0, heading: 0, laneId: -1, s: 0, dist: 0 };
 const _frustum = new THREE.Frustum();
@@ -85,6 +91,21 @@ function remainingSeconds(stop: AroundBusStop, a: BusArrival, nowMs: number) {
   return a.seconds - (nowMs - stop.at) / 1000;
 }
 
+const etaOf = (stop: AroundBusStop, a: BusArrival) => stop.at + a.seconds * 1000;
+const LIFE_MS = (DWELL_S + DEPART_S) * 1000;
+let busSeq = 0;
+
+/** One bus followed across TfL refreshes; `eta` is absolute (epoch ms). */
+interface TrackedBus {
+  key: string;
+  stopId: string;
+  line: string;
+  destination: string;
+  eta: number;
+  /** `stop.at` of the snapshot that last listed it. */
+  seenAt: number;
+}
+
 /** Signed distance short of the stop (negative once it has pulled away) of a bus with `rem` seconds to go. */
 function stopDistance(rem: number) {
   if (rem > 0) {
@@ -96,10 +117,10 @@ function stopDistance(rem: number) {
   return -(t < ramp ? 0.5 * DEPART_ACCEL * t * t : 0.5 * DEPART_MAX_MPS * ramp + DEPART_MAX_MPS * (t - ramp));
 }
 
-/** Where a bus sits once the buses due before it (`ahead`, soonest first) have taken their places: never closer than BUS_GAP_M behind the one in front. */
-function queuedDistance(stop: AroundBusStop, ahead: BusArrival[], rem: number, nowMs: number) {
+/** Where a bus sits once the buses due before it (`ahead`, their ETAs soonest first) have taken their places: never closer than BUS_GAP_M behind the one in front. */
+function queuedDistance(ahead: number[], rem: number, nowMs: number) {
   let floor = -Infinity;
-  for (const a of ahead) floor = Math.max(stopDistance(remainingSeconds(stop, a, nowMs)), floor) + BUS_GAP_M;
+  for (const eta of ahead) floor = Math.max(stopDistance((eta - nowMs) / 1000), floor) + BUS_GAP_M;
   return Math.max(stopDistance(rem), floor);
 }
 
@@ -108,23 +129,30 @@ function formatDue(seconds: number) {
   return `${Math.max(1, Math.round(seconds / 60))} min`;
 }
 
-function Bus({ place, arrival, ahead }: { place: StopPlace; arrival: BusArrival; ahead: BusArrival[] }) {
+function Bus({ place, bus, ahead }: { place: StopPlace; bus: TrackedBus; ahead: number[] }) {
   const group = useRef<THREE.Group>(null);
   const body = useRef<THREE.Group>(null);
   const kit = getBusKit();
-  const blind = blindMaterial(arrival.line, arrival.destination);
+  const blind = blindMaterial(bus.line, bus.destination);
+  const shownEta = useRef(bus.eta);
+  const born = useRef(0);
   const phase = place.x * 0.37;
   const [label, setLabel] = useState("");
   const lastLabel = useRef(0);
   const straightYaw = Math.atan2(place.dirX, place.dirZ);
 
-  useFrame(() => {
+  useFrame((_, delta) => {
     const g = group.current;
     if (!g) return;
     const now = Date.now();
-    const rem = remainingSeconds(place.stop, arrival, now);
+    if (!born.current) born.current = now;
+    // A later ETA may only slow the bus (never reverse it); an earlier one at most doubles its pace.
+    const dtMs = Math.min(delta, 0.25) * 1000;
+    const want = (bus.eta - shownEta.current) * (1 - Math.exp(-dtMs / 1000 / ETA_EASE_S));
+    shownEta.current += Math.max(-2 * dtMs, Math.min(0.9 * dtMs, want));
+    const rem = (shownEta.current - now) / 1000;
     const k = Math.min(1, Math.max(0, rem / APPROACH_S));
-    const dist = queuedDistance(place.stop, ahead, rem, now);
+    const dist = queuedDistance(ahead, rem, now);
     const lane = dist >= 0 ? place.path : place.exit;
     let inFrame = true;
     if (lane) {
@@ -141,6 +169,9 @@ function Bus({ place, arrival, ahead }: { place: StopPlace; arrival: BusArrival;
       g.position.set(place.x - place.dirX * dist, ROAD_Y, place.z - place.dirZ * dist);
     }
     g.visible = inFrame;
+    // Scale in on arrival and out at the end of its run, rather than popping.
+    const life = Math.min(1, (now - born.current) / 1000 / FADE_S, (shownEta.current + LIFE_MS - now) / 1000 / FADE_S);
+    g.scale.setScalar(Math.max(1e-3, life));
     const b = body.current;
     if (b) {
       // Speed is proportional to k (the approach is eased as k^2), so every motion fades out as the bus stops.
@@ -178,7 +209,7 @@ function Bus({ place, arrival, ahead }: { place: StopPlace; arrival: BusArrival;
             boxShadow: "0 0 14px rgba(200,16,46,0.5)",
           }}
         >
-          {arrival.line} · {label}
+          {bus.line} · {label}
         </div>
       </Label>
     </group>
@@ -249,26 +280,47 @@ export function Buses() {
     [stops, roads, snap],
   );
 
+  // TfL drops a bus from its predictions as it reaches the stop, so each bus is followed here by
+  // identity across refreshes and plays out its dwell and departure after the feed forgets it.
+  const [tracker] = useState(() => ({ live: new Map<string, TrackedBus>() }));
   const due = useMemo(() => {
     if (!now) return [];
-    const out: { place: StopPlace; arrival: BusArrival; ahead: BusArrival[]; key: string }[] = [];
+    const byStop = new Map(places.map((p) => [p.stop.id, p] as const));
+    const live = tracker.live;
+    const claimed = new Set<string>();
     for (const place of places) {
-      // A stop can list the same line and destination twice (back-to-back buses), so the key counts repeats.
-      const seen = new Map<string, number>();
-      const here: BusArrival[] = [];
-      for (const a of [...place.stop.arrivals].sort((p, q) => p.seconds - q.seconds)) {
-        const rem = remainingSeconds(place.stop, a, now);
-        if (rem < APPROACH_S && rem > -(DWELL_S + DEPART_S)) {
-          const base = `${place.stop.id}:${a.line}:${a.destination}`;
-          const n = seen.get(base) ?? 0;
-          seen.set(base, n + 1);
-          out.push({ place, arrival: a, ahead: [...here], key: `${base}:${n}` });
-          here.push(a);
+      for (const a of place.stop.arrivals) {
+        const eta = etaOf(place.stop, a);
+        let best: TrackedBus | null = null;
+        for (const t of live.values()) {
+          if (claimed.has(t.key) || t.stopId !== place.stop.id || t.line !== a.line || t.destination !== a.destination) continue;
+          if (Math.abs(t.eta - eta) < MATCH_MS && (!best || Math.abs(t.eta - eta) < Math.abs(best.eta - eta))) best = t;
         }
+        if (best) {
+          best.eta = eta;
+          best.seenAt = place.stop.at;
+        } else {
+          best = { key: `${place.stop.id}:${busSeq++}`, stopId: place.stop.id, line: a.line, destination: a.destination, eta, seenAt: place.stop.at };
+          live.set(best.key, best);
+        }
+        claimed.add(best.key);
       }
     }
+    for (const t of [...live.values()]) {
+      const place = byStop.get(t.stopId);
+      const dropped = !claimed.has(t.key) && (!place || place.stop.at > t.seenAt);
+      // Dropped while far off: a cancelled prediction nobody saw. Dropped while close: it has arrived, play it out.
+      if (!place || now > t.eta + LIFE_MS || (dropped && t.eta - now > APPROACH_S * 1000)) live.delete(t.key);
+    }
+    const out: { place: StopPlace; bus: TrackedBus; ahead: number[] }[] = [];
+    for (const place of places) {
+      const here = [...live.values()]
+        .filter((t) => t.stopId === place.stop.id && t.eta - now < APPROACH_S * 1000)
+        .sort((p, q) => p.eta - q.eta);
+      here.forEach((bus, i) => out.push({ place, bus, ahead: here.slice(0, i).map((t) => t.eta) }));
+    }
     return out;
-  }, [places, now]);
+  }, [tracker, places, now]);
 
   return (
     <group>
@@ -276,7 +328,7 @@ export function Buses() {
         <StopMarker key={p.stop.id} place={p} now={now} />
       ))}
       {due.map((d) => (
-        <Bus key={d.key} place={d.place} arrival={d.arrival} ahead={d.ahead} />
+        <Bus key={d.bus.key} place={d.place} bus={d.bus} ahead={d.ahead} />
       ))}
     </group>
   );

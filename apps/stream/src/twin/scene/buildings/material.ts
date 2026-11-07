@@ -326,6 +326,10 @@ export function makeFacadeMaterial() {
     roughness: 0.85,
     metalness: 0,
     vertexColors: true,
+    // Why: pushes the walls back a hair so the outline overlay (makeEdgeMaterial) wins the depth test on every edge.
+    polygonOffset: true,
+    polygonOffsetFactor: 1,
+    polygonOffsetUnits: 1,
   });
   mat.onBeforeCompile = (shader) => {
     Object.assign(shader.uniforms, uniforms);
@@ -341,6 +345,36 @@ export function makeFacadeMaterial() {
       )
       .replace("#include <normal_fragment_maps>", `#include <normal_fragment_maps>\n${NORMAL_TILT}`)
       .replace("#include <emissivemap_fragment>", "#include <emissivemap_fragment>\ntotalEmissiveRadiance += twEmit;");
+  };
+  return mat;
+}
+
+/** Edge fades out between these camera distances so far-off blocks don't turn into a dark line mesh. */
+const EDGE_FADE_START = 450;
+const EDGE_FADE_END = 1900;
+
+/** Soft dark outline for building silhouettes, eaves and corners (the stylised city-builder look). */
+export function makeEdgeMaterial() {
+  const mat = new THREE.LineBasicMaterial({ color: "#141924", transparent: true, opacity: 0.7, depthWrite: false });
+  mat.onBeforeCompile = (shader) => {
+    shader.uniforms.uTwinGlow = uniforms.uTwinGlow;
+    shader.vertexShader = shader.vertexShader
+      .replace("#include <common>", "#include <common>\nvarying float vTwinEdgeFade;")
+      .replace(
+        "#include <fog_vertex>",
+        `#include <fog_vertex>
+vTwinEdgeFade = 1.0 - smoothstep(${EDGE_FADE_START.toFixed(1)}, ${EDGE_FADE_END.toFixed(1)}, -mvPosition.z);`,
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace("#include <common>", "#include <common>\nvarying float vTwinEdgeFade;\nuniform float uTwinGlow;")
+      .replace(
+        "#include <opaque_fragment>",
+        // Night: the walls are already dark, so the lines go lighter and fainter instead of disappearing.
+        `diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.32, 0.38, 0.52), uTwinGlow);
+diffuseColor.a *= vTwinEdgeFade * mix(1.0, 0.45, uTwinGlow);
+outgoingLight = diffuseColor.rgb;
+#include <opaque_fragment>`,
+      );
   };
   return mat;
 }

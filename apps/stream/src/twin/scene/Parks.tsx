@@ -54,6 +54,37 @@ interface TreeSpec {
   color: THREE.Color;
 }
 
+/**
+ * Three overlapping lobes merged into one cloud. Normals point out from the cloud's centre rather than from each lobe,
+ * so it shades as one soft volume, and a vertex tint darkens the underside like cheap ambient occlusion.
+ */
+function canopyGeometry(): THREE.BufferGeometry {
+  const lobes: [number, number, number, number, number][] = [
+    [0, 0.05, 0, 0.82, 2],
+    [0.42, -0.18, 0.2, 0.55, 1],
+    [-0.36, -0.12, -0.28, 0.58, 1],
+  ];
+  const parts = lobes.map(([x, y, z, r, detail]) => {
+    const g = new THREE.IcosahedronGeometry(r, detail);
+    g.translate(x, y, z);
+    return g;
+  });
+  const geo = mergeGeometries(parts);
+  parts.forEach((g) => g.dispose());
+  const pos = geo.attributes.position;
+  const nrm = geo.attributes.normal;
+  const col = new Float32Array(pos.count * 3);
+  const n = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    n.set(pos.getX(i), pos.getY(i) + 0.25, pos.getZ(i)).normalize();
+    nrm.setXYZ(i, n.x, n.y, n.z);
+    const shade = 0.62 + 0.45 * THREE.MathUtils.smoothstep(pos.getY(i), -0.7, 0.75);
+    col[i * 3] = col[i * 3 + 1] = col[i * 3 + 2] = shade;
+  }
+  geo.setAttribute("color", new THREE.BufferAttribute(col, 3));
+  return geo;
+}
+
 /** Seeded dart throwing inside each park ring, one shared spacing grid so neighbouring parks don't overlap. */
 function scatterTrees(parks: Ring[]): TreeSpec[] {
   const areas = parks.map(ringArea);
@@ -105,10 +136,11 @@ function scatterTrees(parks: Ring[]): TreeSpec[] {
         rx: conifer ? r * 0.55 : r,
         ry: conifer ? r * 1.7 : r * (0.8 + rnd() * 0.4),
         yaw: rnd() * Math.PI * 2,
+        // Muted park greens: olive to sage for broadleaf, a cooler blue-green for conifers.
         color: new THREE.Color().setHSL(
-          0.22 + rnd() * 0.12,
-          0.3 + rnd() * 0.2,
-          conifer ? 0.16 + rnd() * 0.06 : 0.22 + rnd() * 0.1,
+          conifer ? 0.36 + rnd() * 0.04 : 0.21 + rnd() * 0.08,
+          conifer ? 0.18 + rnd() * 0.1 : 0.22 + rnd() * 0.14,
+          conifer ? 0.2 + rnd() * 0.05 : 0.27 + rnd() * 0.09,
           THREE.SRGBColorSpace,
         ),
       });
@@ -144,10 +176,10 @@ export function Parks() {
   const trees = useMemo(() => {
     const specs = scatterTrees(parks);
     if (!specs.length) return null;
-    const canopyGeo = new THREE.IcosahedronGeometry(1, 1);
+    const canopyGeo = canopyGeometry();
     const trunkGeo = new THREE.CylinderGeometry(0.12, 0.24, 1, 6);
     trunkGeo.translate(0, 0.5, 0);
-    const canopyMat = new THREE.MeshStandardMaterial({ flatShading: true, roughness: 0.9 });
+    const canopyMat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.95 });
     const trunkMat = new THREE.MeshStandardMaterial({ color: TRUNK_DAY, roughness: 1 });
     const canopy = new THREE.InstancedMesh(canopyGeo, canopyMat, specs.length);
     const trunk = new THREE.InstancedMesh(trunkGeo, trunkMat, specs.length);

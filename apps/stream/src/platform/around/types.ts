@@ -26,6 +26,13 @@ export interface AroundDisruption {
   distanceM: number;
 }
 
+/**
+ * Where camera counts and tracks came from. Live = YOLO answered now; stale = YOLO is down or slow and
+ * these are the last good values (each keeps its own `at`); unavailable = down with nothing ever seen,
+ * which means unknown, not zero.
+ */
+export type YoloStatus = "live" | "stale" | "unavailable";
+
 /** YOLO detections for one camera clip (services/yolo). Peak counts across sampled frames. */
 export interface CamReading {
   camId: string;

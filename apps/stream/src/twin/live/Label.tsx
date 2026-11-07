@@ -77,12 +77,23 @@ function blockerRects(): Rect[] {
   return rects;
 }
 
+interface Candidate {
+  el: HTMLDivElement;
+  rect: Rect;
+  priority: number;
+  px: number;
+  py: number;
+}
+
+/** Candidate boxes reused across frames instead of a fresh object per label per frame. */
+const pool: Candidate[] = [];
+
 /** Mount once inside the Canvas. */
 export function LabelLayer() {
   const { camera, size } = useThree();
   useFrame(() => {
     const placed = blockerRects();
-    const candidates: { el: HTMLDivElement; rect: Rect; priority: number; px: number; py: number }[] = [];
+    let n = 0;
     for (const [id, entry] of useLabels.getState().labels) {
       const el = elements.get(id);
       if (!el) continue;
@@ -91,14 +102,26 @@ export function LabelLayer() {
         el.style.display = "none";
         continue;
       }
-      const px = (_v.x * 0.5 + 0.5) * size.width;
-      const py = (-_v.y * 0.5 + 0.5) * size.height;
       // Why: a hidden label measures 0×0; show it before reading its box so the first frame is right.
       el.style.display = "block";
-      const w = el.offsetWidth;
-      const h = el.offsetHeight;
-      candidates.push({ el, rect: { x: px - w / 2, y: py - h, w, h }, priority: entry.priority, px, py });
+      const c = pool[n] ?? (pool[n] = { el, rect: { x: 0, y: 0, w: 0, h: 0 }, priority: 0, px: 0, py: 0 });
+      c.el = el;
+      c.priority = entry.priority;
+      c.px = (_v.x * 0.5 + 0.5) * size.width;
+      c.py = (-_v.y * 0.5 + 0.5) * size.height;
+      n++;
     }
+    // Why: all style writes above, all size reads here, so the browser lays out once per frame, not once per label.
+    for (let i = 0; i < n; i++) {
+      const c = pool[i];
+      const w = c.el.offsetWidth;
+      const h = c.el.offsetHeight;
+      c.rect.x = c.px - w / 2;
+      c.rect.y = c.py - h;
+      c.rect.w = w;
+      c.rect.h = h;
+    }
+    const candidates = pool.slice(0, n);
     // Why: the camera moves every frame; a deterministic order keeps labels from flickering between winners.
     candidates.sort((a, b) => b.priority - a.priority || a.rect.y - b.rect.y || a.rect.x - b.rect.x);
     for (const c of candidates) {

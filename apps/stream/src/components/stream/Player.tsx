@@ -97,9 +97,9 @@ export function Player({ source, onSourceChange, ctx, positionBadge, sync, remot
         const denied = e instanceof DOMException && e.name === "NotAllowedError";
         setCamError(
           insecure
-            ? "The browser blocks the camera on plain http. Open the https link (tunnel) or localhost."
+            ? "Camera needs https"
             : denied
-              ? "Camera access was denied. Allow it in your browser and try again."
+              ? "Camera blocked"
               : "No camera available.",
         );
         onSourceChange({ kind: "idle" });
@@ -139,7 +139,8 @@ export function Player({ source, onSourceChange, ctx, positionBadge, sync, remot
       className={`relative w-full overflow-hidden bg-black shadow-[0_0_0_1px_rgb(255_255_255/0.08),0_30px_70px_-24px_rgb(0_0_0/0.85)] transition-[height,border-radius] duration-300 ${frame}`}
     >
       {source.kind === "idle" ? (
-        remote && remote.status !== "off" ? (
+        // Why: a phone relaying only its position (no video) must not hide the source picker.
+        remote?.stream ? (
           <PhoneFeed remote={remote} corners={<Corners />} positionBadge={positionBadge} sync={sync} />
         ) : (
           <IdleCard onPick={change} camError={camError} ctx={ctx} now={now} positionBadge={positionBadge} />
@@ -154,7 +155,7 @@ export function Player({ source, onSourceChange, ctx, positionBadge, sync, remot
             muted
             loop
             playsInline
-            onError={() => setError("The stream stopped responding.")}
+            onError={() => setError("Signal lost")}
             className={`size-full ${size === "full" && !walking ? "object-contain" : "object-cover"} ${walking && facing === "user" ? "-scale-x-100" : ""}`}
           />
           <div className="grain scanlines pointer-events-none absolute inset-0" aria-hidden />
@@ -228,8 +229,7 @@ export function Player({ source, onSourceChange, ctx, positionBadge, sync, remot
           {error && (
             <div className="absolute inset-0 grid place-items-center bg-black/80 backdrop-blur-sm">
               <div className="flex flex-col items-center gap-3 text-center">
-                <p className="font-mono text-[11px] tracking-normal text-live">Signal lost</p>
-                <p className="text-sm text-text">{error}</p>
+                <p className="text-sm text-live">{error}</p>
                 <button
                   type="button"
                   onClick={() => {
@@ -271,13 +271,11 @@ function IdleCard({
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_60%_80%_at_50%_120%,var(--ember-soft),transparent)]" aria-hidden />
       <Corners className="border-white/25" />
 
-      <div className="absolute left-6 top-6 flex items-center gap-2 font-mono text-[10px] tracking-normal text-muted">
-        <span className="size-1.5 rounded-full bg-dim" />
-        Standby
-      </div>
-      <div className="absolute right-6 top-6 hidden font-mono text-[10px] tracking-normal text-muted sm:block">
-        {ctx.location.area} · {coords(ctx.location.lat, ctx.location.lon)}
-        {positionBadge ? ` · ${positionBadge}` : ""}
+      <div
+        className="absolute right-6 top-6 hidden font-mono text-[10px] tracking-normal text-muted sm:block"
+        title={`${ctx.location.area} · ${coords(ctx.location.lat, ctx.location.lon)}${positionBadge ? ` · ${positionBadge}` : ""}`}
+      >
+        {ctx.location.name}
       </div>
       {now && (
         <div className="absolute bottom-6 right-6 hidden font-mono text-[10px] tracking-normal text-dim sm:block">
@@ -287,34 +285,25 @@ function IdleCard({
 
       <div className="relative grid size-full place-items-center p-6 sm:p-10">
         <div className="w-full max-w-xl">
-          <p className="font-mono text-[10px] tracking-normal text-ember">No signal</p>
-          <h2 className="mt-2 font-display text-[28px] font-semibold leading-[1.05] tracking-[-0.03em] sm:text-[36px]">
-            Go live from {ctx.location.name}.
-          </h2>
-          <p className="mt-2 max-w-md text-[13px] leading-5 text-muted">
-            Pick a feed. Chat and the city watch the moment you open the signal.
-          </p>
+          <h2 className="font-display text-[28px] font-semibold leading-[1.05] tracking-[-0.03em] sm:text-[36px]">Go live</h2>
 
           <div className="mt-6 grid gap-2 sm:grid-cols-3">
             <SourceButton
-              index="01"
               icon={<Camera className="size-4" />}
-              title="Go live"
+              title="Camera"
               hint="Rear camera + GPS"
               onClick={() => onPick({ kind: "webcam" })}
             />
             <SourceButton
-              index="02"
               icon={<Film className="size-4" />}
-              title="TfL JamCam"
-              hint="Nearest street cam"
+              title="Street cam"
+              hint="Nearest TfL JamCam"
               accent
               onClick={() => {
                 onPick({ kind: "url", url: ctx.location.camera.url, label: ctx.location.camera.label });
               }}
             />
             <SourceButton
-              index="03"
               icon={<Upload className="size-4" />}
               title="Upload"
               hint="IRL recording"
@@ -345,14 +334,12 @@ function IdleCard({
 }
 
 function SourceButton({
-  index,
   icon,
   title,
   hint,
   accent,
   onClick,
 }: {
-  index: string;
   icon: React.ReactNode;
   title: string;
   hint: string;
@@ -363,24 +350,19 @@ function SourceButton({
     <button
       type="button"
       onClick={onClick}
+      title={hint}
       className={`group flex items-center gap-3 rounded-[24px] px-3.5 py-3 text-left transition-transform duration-200 ease-[var(--ease-spring)] hover:-translate-y-0.5 hover:scale-[1.03] active:scale-95 sm:flex-col sm:items-start sm:gap-4 sm:py-4 ${
         accent
           ? "bg-[linear-gradient(135deg,rgb(255_42_149/0.28),rgb(255_148_25/0.22))] shadow-[inset_0_2px_3px_rgb(255_255_255/0.3),inset_0_-4px_8px_rgb(140_0_70/0.3),0_14px_28px_-10px_rgb(236_17_135/0.55)]"
           : "tile"
       }`}
     >
-      <span className="flex w-full items-center justify-between sm:w-auto">
+      <span className="flex shrink-0 items-center">
         <span className={`grid size-9 place-items-center rounded-full ${accent ? "bg-[image:var(--grad-candy)] text-white shadow-[inset_0_2px_3px_rgb(255_255_255/0.5)]" : "bg-white/10 text-text"}`}>
           {icon}
         </span>
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center justify-between gap-2">
-          <span className="text-[13px] font-semibold">{title}</span>
-          <span className="font-mono text-[9px] tracking-normal text-dim">{index}</span>
-        </span>
-        <span className="block text-[11px] text-muted">{hint}</span>
-      </span>
+      <span className="text-[13px] font-semibold">{title}</span>
     </button>
   );
 }

@@ -124,19 +124,30 @@ interface SurfaceOptions {
   paving?: boolean;
   /** Strength of the fine asphalt grain (0 = none). */
   grain?: number;
+  /**
+   * Paint stripe width in metres. When set the layer is a decal: it blends instead of writing depth, and fades as the
+   * stripe shrinks below a pixel so distant dashes thin out smoothly instead of crawling and breaking up.
+   */
+  thin?: number;
 }
 
 /** Vertex-coloured standard material with wet-road reflections and an optional procedural paving or asphalt look. */
-export function makeSurfaceMaterial({ roughness, layer, paving = false, grain = 0 }: SurfaceOptions) {
+export function makeSurfaceMaterial({ roughness, layer, paving = false, grain = 0, thin = 0 }: SurfaceOptions) {
+  const decal = thin > 0;
   const mat = new THREE.MeshStandardMaterial({
     color: "#ffffff",
     roughness,
     metalness: 0.05,
     vertexColors: true,
     polygonOffset: true,
-    polygonOffsetFactor: -layer,
-    polygonOffsetUnits: -layer,
+    // Why: decals sit on real height above the asphalt; a big slope factor at grazing angles pulled them through kerbs.
+    polygonOffsetFactor: decal ? -1 : -layer,
+    polygonOffsetUnits: decal ? -4 : -layer,
+    transparent: decal,
+    depthWrite: !decal,
   });
+  // Why: every variant shares one onBeforeCompile source, which is three's default program cache key.
+  mat.customProgramCacheKey = () => `twin-surface-${paving ? 1 : 0}-${grain}-${thin}`;
   mat.onBeforeCompile = (shader) => {
     shader.uniforms.uTwinWet = wetUniform;
     shader.uniforms.uTwinSky = skyUniform;
@@ -176,7 +187,11 @@ diffuseColor.rgb *= 1.0 + (speck - 0.5) * ${grain.toFixed(2)} * gfade;
       )
       .replace(
         "#include <color_fragment>",
-        `#include <color_fragment>\n${body}\ndiffuseColor.rgb *= mix(1.0, 0.7, uTwinWet);`,
+        `#include <color_fragment>\n${body}\ndiffuseColor.rgb *= mix(1.0, 0.7, uTwinWet);${
+          decal
+            ? `\nfloat twFoot = max(length(fwidth(vWPos.xz)), 1e-4);\ndiffuseColor.a *= clamp(${thin.toFixed(3)} / twFoot, 0.0, 1.0) * 0.92;`
+            : ""
+        }`,
       )
       .replace(
         "#include <roughnessmap_fragment>",

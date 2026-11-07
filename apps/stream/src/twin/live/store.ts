@@ -2,7 +2,8 @@
 
 import { create } from "zustand";
 import { useEffect } from "react";
-import type { AroundBusStop, AroundCam, AroundDisruption, CamClipTracks } from "@/platform/around/types";
+import type { AroundBusStop, AroundCam, AroundDisruption, CamClipTracks, YoloStatus } from "@/platform/around/types";
+import { fetchJson, startPoller, type Poller } from "@/lib/client/poll";
 import { subscribe } from "@/platform/bus";
 import type { LiveState as LiveRelayState } from "@/platform/live/types";
 import { currentOrigin, type TwinGeometry } from "../config";
@@ -26,6 +27,13 @@ export interface LiveState {
   now: number;
   screenMode: "video" | "frame" | null;
   gps: "off" | "on" | "error";
+  /**
+   * YOLO behind `clips`. "loading" until the first answer; "unavailable" means the service is down and
+   * nothing was ever tracked, so camera counts are unknown (show that, not 0). "stale" keeps the last clips.
+   */
+  yolo: "loading" | "live" | "stale" | "unavailable";
+  /** When `clips` last changed from a successful poll, epoch ms; 0 before the first. */
+  clipsAt: number;
 }
 
 export const useLive = create<LiveState>(() => ({
@@ -44,6 +52,8 @@ export const useLive = create<LiveState>(() => ({
   now: 0,
   screenMode: null,
   gps: "off",
+  yolo: "loading",
+  clipsAt: 0,
 }));
 
 let gpsWatch: number | null = null;
@@ -102,42 +112,23 @@ const DISRUPTIONS_MS = 60_000;
 const BUSES_MS = 30_000;
 const TRACKS_MS = 15_000;
 
-interface Poll {
-  stop(): void;
-  /** Re-fetch now (the origin moved). */
-  tick(): void;
+/** Polls a JSON route; a failed poll keeps the last good value (see lib/client/poll). */
+function poll<T>(url: () => string | null, everyMs: number, apply: (data: T) => void): Poller {
+  return startPoller(async (signal) => {
+    const u = url();
+    if (!u) return true;
+    const r = await fetchJson<T>(u, signal);
+    if (!r.ok) return r;
+    apply(r.data);
+    useLive.setState({ updatedAt: Date.now() });
+    return true;
+  }, everyMs);
 }
 
-function poll<T>(url: () => string | null, everyMs: number, apply: (data: T) => void): Poll {
-  let controller: AbortController | null = null;
-  let stopped = false;
-  const tick = async () => {
-    const u = url();
-    if (!u) return;
-    controller?.abort();
-    controller = new AbortController();
-    try {
-      const res = await fetch(u, { signal: controller.signal, cache: "no-store" });
-      if (!res.ok) return;
-      const data = (await res.json()) as T;
-      if (!stopped) {
-        apply(data);
-        useLive.setState({ updatedAt: Date.now() });
-      }
-    } catch {
-      // aborted or network error; the next tick retries
-    }
-  };
-  void tick();
-  const timer = setInterval(() => void tick(), everyMs);
-  return {
-    stop: () => {
-      stopped = true;
-      controller?.abort();
-      clearInterval(timer);
-    },
-    tick: () => void tick(),
-  };
+interface TracksReply {
+  clips: CamClipTracks[];
+  pending: string[];
+  yolo: YoloStatus;
 }
 
 const q = (radius: number) => {
@@ -174,7 +165,7 @@ let refs = 0;
 let stopAll: (() => void) | null = null;
 
 function start() {
-  const areaPolls: Poll[] = [
+  const areaPolls: Poller[] = [
     poll<{ cams: AroundCam[] }>(() => `/api/around/cams?${q(700)}`, CAMS_MS, (d) =>
       useLive.setState({ cams: d.cams ?? [] }),
     ),
@@ -193,25 +184,44 @@ function start() {
       (d) => useLive.setState({ roads: (d.roads ?? []).filter((r) => r.kind === "major" || r.kind === "minor") }),
     ),
   ];
+  const tracks = startPoller(async (signal) => {
+    const ids = useLive.getState().cams.map((c) => c.id);
+    if (!ids.length) return true;
+    const r = await fetchJson<TracksReply>(`/api/around/tracks?ids=${ids.join(",")}`, signal, 45_000);
+    // A 503 still says why ("unavailable"); anything else without a body leaves the last state alone.
+    const body = r.data as Partial<TracksReply> | null;
+    if (!body?.yolo) return r;
+    const prev = useLive.getState();
+    const clips: Record<string, CamClipTracks> = { ...prev.clips };
+    let changed = false;
+    for (const clip of body.clips ?? []) {
+      if (!clip.tracks?.length || prev.clips[clip.camId]?.at === clip.at) continue;
+      clips[clip.camId] = clip;
+      changed = true;
+    }
+    const known = Object.keys(clips).length > 0;
+    // Clips already on screen outlive a YOLO outage: they are the last thing the cameras saw.
+    const yolo = body.yolo === "unavailable" && known ? "stale" : body.yolo;
+    useLive.setState({
+      ...(changed ? { clips, clipsAt: Date.now() } : {}),
+      yolo,
+      ...(r.ok ? { updatedAt: Date.now() } : {}),
+    });
+    return r.ok ? true : r;
+  }, TRACKS_MS);
+  // Cams arrive after the first tracks tick; ask for their tracks as soon as the list is known.
+  const unsubCams = useLive.subscribe((s, prev) => {
+    if (s.cams !== prev.cams && s.cams.length && !prev.cams.length) tracks.tick();
+  });
   const stops: (() => void)[] = [
     ...areaPolls.map((p) => p.stop),
+    unsubCams,
     useOrigin.subscribe((s, prev) => {
       if (s.version === prev.version) return;
-      useLive.setState({ cams: [], clips: {}, stops: [], disruptions: [] });
+      useLive.setState({ cams: [], clips: {}, stops: [], disruptions: [], yolo: "loading", clipsAt: 0 });
       for (const p of areaPolls) p.tick();
     }),
-    poll<{ clips: CamClipTracks[] }>(
-      () => {
-        const ids = useLive.getState().cams.map((c) => c.id);
-        return ids.length ? `/api/around/tracks?ids=${ids.join(",")}` : null;
-      },
-      TRACKS_MS,
-      (d) => {
-        const clips: Record<string, CamClipTracks> = { ...useLive.getState().clips };
-        for (const clip of d.clips ?? []) if (clip.tracks?.length) clips[clip.camId] = clip;
-        useLive.setState({ clips });
-      },
-    ).stop,
+    tracks.stop,
     subscribe((e) => {
       if (e.type !== "stream.location") return;
       if (e.location.id !== "gps") {

@@ -27,22 +27,29 @@ export function Score() {
   return (
     <div style={card}>
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <span style={{ fontWeight: 600, flex: 1 }}>Prediction vs reality</span>
+        <span
+          style={{ fontWeight: 600, flex: 1 }}
+          title="Compares the forecast step that has just arrived with the latest camera counts: direction (busier / quieter vs now) first, size second. Re-scores every 2 min."
+        >
+          Vs reality
+        </span>
         <Button small disabled={scoring} onClick={() => void scoreLatest()}>
           {scoring ? "Scoring…" : score ? "Re-score" : "Score"}
         </Button>
       </div>
-      {!score && (
-        <div style={label}>Compares the forecast step that has just arrived with the latest camera counts: direction (busier / quieter vs now) first, size second. Re-scores every 2 min.</div>
-      )}
       {score?.error && <div style={{ fontSize: 12, color: "var(--warn)" }}>{score.error.replace(/; first due at \d+/, "")}</div>}
       {s && score?.compared === 0 && !score.error && (
-        <div style={{ fontSize: 12, color: "var(--warn)" }}>No camera has a reading newer than the +{score.forecastMinute} min step yet; re-scores every 2 min.</div>
+        <div
+          style={{ fontSize: 12, color: "var(--warn)" }}
+          title={`No camera has a reading newer than the +${score.forecastMinute} min step yet; re-scores every 2 min.`}
+        >
+          Waiting for cameras
+        </div>
       )}
       {s && (score?.compared ?? 0) > 0 && (
         <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
           <Chip color={s.zonesRight >= s.zonesWrong ? "var(--ok)" : "var(--warn)"}>
-            direction right in {s.zonesRight} of {s.zonesRight + s.zonesWrong} zones
+            {s.zonesRight}/{s.zonesRight + s.zonesWrong} zones right
           </Chip>
           <span style={label}>
             MAE {s.meanAbsError === null || s.meanAbsError === undefined ? "—" : Math.round(s.meanAbsError)} people · +{score?.forecastMinute} min step ·{" "}

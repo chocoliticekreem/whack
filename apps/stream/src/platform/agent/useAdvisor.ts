@@ -80,7 +80,10 @@ export function useAdvisor(location: StreamLocation, live: boolean) {
   useEffect(() => {
     if (!live) return;
     const first = setTimeout(() => void assess(DEFAULT_QUESTION, true), LOCATION_DEBOUNCE_MS);
-    const id = setInterval(() => void assess(DEFAULT_QUESTION, true), REFRESH_MS);
+    // Each assessment is a VSS search plus a W&B call; a hidden tab has nobody reading it.
+    const id = setInterval(() => {
+      if (!document.hidden) void assess(DEFAULT_QUESTION, true);
+    }, REFRESH_MS);
     return () => {
       clearTimeout(first);
       clearInterval(id);

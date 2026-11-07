@@ -131,11 +131,14 @@ function Ghosts({ step, byId, on, keys }: { step: TimelineStep | null; byId: Map
         const dz = f.b[1] - f.a[1];
         const len = Math.hypot(dx, dz) || 1;
         for (let k = 0; k < count && n < MAX_GHOSTS; k++) {
-          const u = hash(n * 3 + 1);
-          const side = (hash(n * 3 + 2) - 0.5) * 4;
+          // Seeded by segment and rank, not the running index: a ghost keeps its spot as the minute
+          // changes instead of every ghost in the city reshuffling.
+          const seed = f.id * 97 + k * 4;
+          const u = hash(seed + 1);
+          const side = (hash(seed + 2) - 0.5) * 4;
           _p.set(f.a[0] + dx * u - (dz / len) * side, 0, f.a[1] + dz * u + (dx / len) * side);
-          _q.setFromAxisAngle(UP, hash(n * 3 + 3) * Math.PI * 2);
-          const h = 0.9 + hash(n) * 0.2;
+          _q.setFromAxisAngle(UP, hash(seed + 3) * Math.PI * 2);
+          const h = 0.9 + hash(seed) * 0.2;
           _s.set(1, h, 1);
           m.setMatrixAt(n++, _m.compose(_p, _q, _s));
         }
@@ -247,7 +250,7 @@ function Player() {
   useFrame((_, dt) => {
     const s = usePredict.getState();
     if (!s.playing) return;
-    acc.current += dt;
+    acc.current += Math.min(dt, 0.25);
     if (acc.current < 0.2) return;
     const next = s.minute + PLAY_MIN_PER_S * acc.current;
     acc.current = 0;

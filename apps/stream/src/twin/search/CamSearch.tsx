@@ -70,7 +70,8 @@ export function CamSearch() {
         <input
           value={text}
           onChange={(e) => setText(e.target.value)}
-          placeholder="Search the cameras: red bus, crowd…"
+          placeholder="Search cameras"
+          title="e.g. red bus, crowd, white van"
           aria-label="Search the live cameras"
           style={{
             width: 220,
@@ -119,15 +120,14 @@ export function CamSearch() {
           }}
         >
           {busy ? (
-            <div style={{ padding: "8px 10px", fontSize: 12, color: "var(--muted)" }}>Reading every camera…</div>
+            <div style={{ padding: "8px 10px", fontSize: 12, color: "var(--muted)" }}>Searching…</div>
           ) : result && (
             <>
-              <div style={{ padding: "6px 10px 4px", fontSize: 11, color: "var(--muted)" }}>
-                {result.matches.length
-                  ? `${result.query.label} on ${result.matches.length} camera${result.matches.length === 1 ? "" : "s"}`
-                  : `No camera shows ${result.query.label} right now`}
-                {" · "}
-                {result.source === "keywords" ? "keyword match" : "parsed by Nemotron on W&B"}
+              <div
+                style={{ padding: "6px 10px 4px", fontSize: 11, color: "var(--muted)" }}
+                title={`${result.query.label} · ${result.source === "keywords" ? "keyword match" : "parsed by Nemotron on W&B"}`}
+              >
+                {result.matches.length ? `${result.matches.length} camera${result.matches.length === 1 ? "" : "s"}` : "No matches"}
               </div>
               {result.matches.map((m) => (
                 <button

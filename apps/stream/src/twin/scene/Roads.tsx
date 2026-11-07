@@ -188,7 +188,7 @@ export function Roads() {
     [net],
   );
   const materials = useMemo(() => {
-    const paint = makeSurfaceMaterial({ roughness: 0.55, layer: 5 });
+    const paint = makeSurfaceMaterial({ roughness: 0.55, layer: 5, thin: 0.14 });
     paint.emissive.set("#ffffff");
     paint.emissiveIntensity = 0.12;
     return { asphalt: makeSurfaceMaterial({ roughness: 0.92, layer: 3, grain: 0.35 }), paint };
@@ -213,7 +213,7 @@ export function Roads() {
   return (
     <>
       <mesh geometry={asphalt} material={materials.asphalt} receiveShadow />
-      <mesh geometry={markings} material={materials.paint} />
+      <mesh geometry={markings} material={materials.paint} renderOrder={1} receiveShadow />
       {showNodes && <NodeDebug net={net} />}
     </>
   );

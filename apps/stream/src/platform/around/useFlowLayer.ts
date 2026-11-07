@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useState, type RefObject } from "react";
+import { useEffect, useMemo, useState, type RefObject } from "react";
 import type { GeoJSONSource, Map as MapLibreMap } from "maplibre-gl";
+import { fetchJson, startPoller } from "@/lib/client/poll";
 import { camHeading, flowFrame, viewCone } from "./flows";
-import type { AroundCam, CamClipTracks } from "./types";
+import type { AroundCam, CamClipTracks, CamReading } from "./types";
 
 const POLL_MS = 15_000;
 // ~10fps is smooth enough for walking pace and keeps the map responsive.
@@ -88,7 +89,9 @@ function ensureLayers(map: MapLibreMap) {
 
 /**
  * Animates real YOLO tracks from nearby JamCam clips: people as dots (groups merged, with a count)
- * and vehicles as car icons pointing the way they move. Returns the totals currently on the map.
+ * and vehicles as car icons pointing the way they move. Returns totals summed from the latest YOLO
+ * count per nearby camera (live or stale), the same readings the camera card shows, so the two agree
+ * even when no clip is animating.
  */
 export function useFlowLayer(
   mapRef: RefObject<MapLibreMap | null>,
@@ -97,23 +100,61 @@ export function useFlowLayer(
   centre: { lat: number; lon: number },
 ) {
   const [clips, setClips] = useState<CamClipTracks[]>([]);
-  const [totals, setTotals] = useState({ people: 0, vehicles: 0 });
+  const [readings, setReadings] = useState<ReadonlyMap<string, CamReading>>(() => new Map());
   const ids = cams.map((c) => c.id).join(",");
 
   useEffect(() => {
     if (!ids) return;
-    const ctrl = new AbortController();
-    const load = () =>
-      fetch(`/api/around/tracks?ids=${encodeURIComponent(ids)}`, { signal: ctrl.signal })
-        .then((r) => (r.ok ? r.json() : { clips: [] }))
-        .then((d: { clips?: CamClipTracks[] }) => setClips(d.clips ?? []))
-        .catch(() => {});
-    load();
-    const id = setInterval(load, POLL_MS);
-    return () => {
-      ctrl.abort();
-      clearInterval(id);
-    };
+    // Same merge as the card's useCamCounts: each cam keeps its last reading until a newer one lands.
+    const poller = startPoller(async (signal) => {
+      const r = await fetchJson<{ readings?: CamReading[] }>(`/api/around/counts?ids=${encodeURIComponent(ids)}`, signal);
+      if (!r.ok) return r;
+      const got = r.data.readings ?? [];
+      if (got.length) {
+        setReadings((prev) => {
+          const next = new Map(prev);
+          for (const reading of got) next.set(reading.camId, reading);
+          return next;
+        });
+      }
+      return true;
+    }, POLL_MS);
+    return () => poller.stop();
+  }, [ids]);
+
+  const totals = useMemo(() => {
+    const sum = { people: 0, vehicles: 0 };
+    for (const id of ids.split(",")) {
+      const r = readings.get(id);
+      if (!r) continue;
+      sum.people += r.people;
+      sum.vehicles += r.vehicles;
+    }
+    return sum;
+  }, [ids, readings]);
+
+  useEffect(() => {
+    if (!ids) return;
+    // A failed or empty poll keeps the clips already animating; the server keeps each cam's last good clip too.
+    const poller = startPoller(async (signal) => {
+      const r = await fetchJson<{ clips?: CamClipTracks[] }>(`/api/around/tracks?ids=${encodeURIComponent(ids)}`, signal, 45_000);
+      if (!r.ok) return r;
+      const got = (r.data.clips ?? []).filter((c) => c.tracks?.length);
+      if (got.length) {
+        setClips((prev) => {
+          const byId = new Map(prev.map((c) => [c.camId, c]));
+          let changed = false;
+          for (const c of got) {
+            if (byId.get(c.camId)?.at === c.at) continue;
+            byId.set(c.camId, c);
+            changed = true;
+          }
+          return changed ? [...byId.values()] : prev;
+        });
+      }
+      return true;
+    }, POLL_MS);
+    return () => poller.stop();
   }, [ids]);
 
   const { lat, lon } = centre;
@@ -128,7 +169,6 @@ export function useFlowLayer(
     let raf = 0;
     let last = 0;
     let conesDrawn = false;
-    let lastTotals = "";
     const draw = (now: number) => {
       raf = requestAnimationFrame(draw);
       if (now - last < FRAME_MS || !map.isStyleLoaded()) return;
@@ -144,11 +184,6 @@ export function useFlowLayer(
       const frame = flowFrame(placed, Date.now());
       (map.getSource("flow-people") as GeoJSONSource).setData(frame.people);
       (map.getSource("flow-vehicles") as GeoJSONSource).setData(frame.vehicles);
-      const key = `${frame.totals.people}/${frame.totals.vehicles}`;
-      if (key !== lastTotals) {
-        lastTotals = key;
-        setTotals(frame.totals);
-      }
     };
     raf = requestAnimationFrame(draw);
     return () => cancelAnimationFrame(raf);

@@ -57,6 +57,12 @@ function containBox(boxW: number, boxH: number, aspect: number) {
 export function CompareOverlay() {
   const camId = useCompare((s) => s.camId);
   const cam = useLive((s) => s.cams.find((c) => c.id === camId));
+  const camsLoaded = useLive((s) => s.cams.length > 0);
+  // The compared camera left the list (new origin, or out of range): without this the twin stays in
+  // compare mode with no panel and no Exit button, the HUD and ambient crowd hidden.
+  useEffect(() => {
+    if (camId && camsLoaded && !cam) useCompare.getState().close();
+  }, [camId, camsLoaded, cam]);
   if (!cam) return null;
   return <ComparePanel key={cam.id} cam={cam} />;
 }
@@ -65,9 +71,11 @@ export function CompareOverlay() {
 function ComparePanel({ cam }: { cam: AroundCam }) {
   const close = useCompare((s) => s.close);
   const clip = useLive((s) => s.clips[cam.id]);
+  const yolo = useLive((s) => s.yolo);
   const [failed, setFailed] = useState(false);
   const [ended, setEnded] = useState(false);
   const [frameAt, setFrameAt] = useState(0);
+  const [frameFailedAt, setFrameFailedAt] = useState(-1);
   const [clipT, setClipT] = useState(0);
   const video = useRef<HTMLVideoElement>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -143,11 +151,16 @@ function ComparePanel({ cam }: { cam: AroundCam }) {
       }}
     >
       <div style={{ ...panel, pointerEvents: "auto" }}>
-        {failed ? (
+        {failed && frameFailedAt === frameAt ? (
+          <div style={{ color: "var(--muted)", fontSize: 14, textAlign: "center", padding: 24 }}>
+            <span title="TfL's clip and the YOLO frame are both unavailable. Retrying every 15 s.">No picture</span>
+          </div>
+        ) : failed ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
             alt={`${cam.name} latest frame`}
             src={`/api/around/frame?id=${encodeURIComponent(cam.id)}&t=${frameAt}`}
+            onError={() => setFrameFailedAt(frameAt)}
             style={{ width: "100%", height: "100%", objectFit: "contain" }}
           />
         ) : (
@@ -182,17 +195,19 @@ function ComparePanel({ cam }: { cam: AroundCam }) {
             <LiveClock />
           </div>
         </div>
-        <div style={{ ...caption, left: 72 }}>
-          <Dot color="var(--live)" />
-          Real CCTV
-          <span style={{ color: "var(--muted)", fontWeight: 500 }}>
-            · {cam.name}
-            {failed
+        <div
+          style={{ ...caption, left: 72, pointerEvents: "auto" }}
+          title={`${cam.name}${
+            failed
               ? " · latest frame (clip blocked)"
               : ended
                 ? " · newest TfL clip played · the next one plays when TfL publishes it (every few min)"
-                : ` · ${clipT.toFixed(1)} s${clip ? " · newest clip, as YOLO tracked it" : ""}`}
-          </span>
+                : ` · ${clipT.toFixed(1)} s${clip ? " · newest clip, as YOLO tracked it" : ""}`
+          }`}
+        >
+          <Dot color="var(--live)" />
+          Real
+          <span style={{ color: "var(--muted)", fontWeight: 500 }}>· {cam.name}</span>
         </div>
       </div>
 
@@ -218,14 +233,19 @@ function ComparePanel({ cam }: { cam: AroundCam }) {
         <AlignBar key={fit ? "fit" : "model"} cam={cam} overlay={overlay} setOverlay={setOverlay} />
       </div>
 
-      <div style={{ ...caption, left: "calc(50% + 20px)" }}>
+      <div
+        style={{ ...caption, left: "calc(50% + 20px)", pointerEvents: "auto" }}
+        title={`Simulated from real tracks${
+          clip ? ` · ${clip.duration.toFixed(1)} s clip` : yolo === "unavailable" ? " · YOLO offline, no tracks" : " · analysing…"
+        }${failed ? " · wall clock" : " · synced to the clip"}${
+          fit && fit.afterM < fit.beforeM ? ` · auto-aligned to the roads (${fit.beforeM.toFixed(1)} → ${fit.afterM.toFixed(1)} m)` : ""
+        }`}
+      >
         <Dot color="var(--ember)" />
-        Simulated from real tracks
+        Twin
         <span style={{ color: "var(--muted)", fontWeight: 500 }}>
-          · <span style={{ color: "#ffb37a" }}>{people} people</span>, <span style={{ color: "#9fd3ff" }}>{vehicles} vehicles</span>
-          {clip ? ` · ${clip.duration.toFixed(1)} s clip` : " · analysing…"}
-          {failed ? " · wall clock" : " · synced to the clip"}
-          {fit && fit.afterM < fit.beforeM ? ` · auto-aligned to the roads (${fit.beforeM.toFixed(1)} → ${fit.afterM.toFixed(1)} m)` : ""}
+          · <span style={{ color: "#ffb37a" }}>{people} people</span> · <span style={{ color: "#9fd3ff" }}>{vehicles} vehicles</span>
+          {!clip && (yolo === "unavailable" ? " · offline" : " · analysing…")}
         </span>
       </div>
 
@@ -251,12 +271,13 @@ function ComparePanel({ cam }: { cam: AroundCam }) {
             fontSize: 13,
           }}
         >
-          <span style={{ fontWeight: 600 }}>Compare CCTV</span>
-          <span style={{ color: "var(--muted)" }}>
-            {" · "}
-            {cal
+          <span
+            style={{ fontWeight: 600 }}
+            title={cal
               ? `pose from ${cal.source?.startsWith("auto-fit") ? "Nemotron 3.5 Super VL, fitted to the real cars' lanes" : cal.source?.startsWith("aligned by hand") ? "Nemotron 3.5 Super VL + hand alignment" : "Nemotron 3.5 Super VL"}: facing ${Math.round(cal.headingDeg)}°, tilted ${cal.pitchDeg.toFixed(1)}°, ${cal.heightM.toFixed(1)} m up, ${Math.round(cal.hfovDeg)}° lens`
               : `uncalibrated: default ${Math.round((Math.atan(frame.tanH) * 360) / Math.PI)}° lens, ${frame.heightM} m up`}
+          >
+            Compare CCTV
           </span>
         </div>
         <button
@@ -274,7 +295,7 @@ function ComparePanel({ cam }: { cam: AroundCam }) {
             fontFamily: "inherit",
           }}
         >
-          Exit compare
+          Exit
         </button>
       </div>
     </div>

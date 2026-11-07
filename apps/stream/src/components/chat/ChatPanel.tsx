@@ -216,7 +216,7 @@ export function ChatPanel({ messages, onSend, viewers, live, onCollapse }: ChatP
           {!live && messages.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 text-center text-muted">
               <MessageSquareOff className="size-5 text-dim" />
-              <p className="text-[13px]">Chat opens when you go live</p>
+              <p className="text-[13px]">Go live to start</p>
             </div>
           ) : (
             <div className="flex flex-col gap-px">
@@ -246,7 +246,7 @@ export function ChatPanel({ messages, onSend, viewers, live, onCollapse }: ChatP
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
             onKeyDown={onKeyDown}
-            placeholder="Say something to chat"
+            placeholder="Say something"
             className="h-10 min-w-0 flex-1 bg-transparent text-[13px] text-text outline-none placeholder:text-dim"
           />
           <button

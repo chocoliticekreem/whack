@@ -2,10 +2,11 @@
 
 import { useFrame } from "@react-three/fiber";
 import { useEffect, useMemo, useRef } from "react";
-import type * as THREE from "three";
+import * as THREE from "three";
 import { getNetwork } from "../network/useNetwork";
 import { RoadIndex } from "./buildings/clearance";
-import { makeFacadeMaterial, updateFacadeUniforms } from "./buildings/material";
+import { setEyeFootprints } from "./buildings/eye";
+import { makeEdgeMaterial, makeFacadeMaterial, updateFacadeUniforms } from "./buildings/material";
 import { buildBuildingChunks } from "./buildings/massing";
 import { perf } from "./perf";
 import { useGeometry } from "./useGeometry";
@@ -15,6 +16,8 @@ const MID_RANGE_M = 450;
 const FINE_RANGE_M = 220;
 const TIER_RANGE: Record<typeof perf.tier, number> = { high: 1, medium: 0.7, low: 0.45 };
 const REFRESH_FRAMES = 6;
+/** Crease angle for the outline overlay: wall corners, eaves and roof ridges, not the curved-footprint facets. */
+const EDGE_ANGLE_DEG = 28;
 
 interface DetailSlot {
   mid: THREE.Mesh | null;
@@ -38,7 +41,13 @@ export function Buildings() {
   const geometry = useGeometry();
   const chunks = useMemo(() => buildBuildingChunks(geometry.buildings, roadIndexFor(geometry)), [geometry]);
   const material = useMemo(() => makeFacadeMaterial(), []);
+  const edges = useMemo(() => chunks.map((chunk) => new THREE.EdgesGeometry(chunk.core, EDGE_ANGLE_DEG)), [chunks]);
+  const edgeMaterial = useMemo(() => makeEdgeMaterial(), []);
   const meshes = useRef<DetailSlot[]>([]);
+  useEffect(() => {
+    setEyeFootprints(geometry.buildings);
+    return () => setEyeFootprints([]);
+  }, [geometry]);
   const frame = useRef(0);
 
   useFrame(({ clock, camera }) => {
@@ -66,12 +75,20 @@ export function Buildings() {
     },
     [chunks, material],
   );
+  useEffect(
+    () => () => {
+      edges.forEach((g) => g.dispose());
+      edgeMaterial.dispose();
+    },
+    [edges, edgeMaterial],
+  );
 
   return (
     <>
       {chunks.map((chunk, i) => (
         <group key={i}>
           <mesh geometry={chunk.core} material={material} />
+          <lineSegments geometry={edges[i]} material={edgeMaterial} renderOrder={1} />
           {chunk.mid && <mesh ref={(m) => void (slotOf(meshes.current, i).mid = m)} geometry={chunk.mid} material={material} />}
           {chunk.fine && <mesh ref={(m) => void (slotOf(meshes.current, i).fine = m)} geometry={chunk.fine} material={material} />}
         </group>

@@ -132,14 +132,16 @@ const TIME_LOOKS: Record<TimeOfDay, TimeLook> = {
     sunColor: "#fff0cf",
     hemiSky: "#b4d4f2",
     hemiGround: "#9a8b73",
-    sunIntensity: 4.2,
+    sunIntensity: 4.6,
     sunDisc: 1,
-    hemiIntensity: 3.4,
+    // Less sky fill and a little more sun: walls facing away read darker, so the massing has form.
+    hemiIntensity: 2.8,
     stars: 0,
     windowGlow: 0.02,
     bloom: 0.7,
     brightness: 0.03,
-    saturation: 0.38,
+    // Near-neutral grade: a strong boost pushed parks and trees to neon green.
+    saturation: 0.06,
     // Crisp daylight: the city stays sharp to the horizon on a clear day.
     fogNear: 800,
     fogFar: 4200,

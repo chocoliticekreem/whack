@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { ExternalLink, Maximize, RectangleHorizontal } from "lucide-react";
+import { ExternalLink, Maximize, Minimize, RectangleHorizontal } from "lucide-react";
 import { useChatCrowd } from "@/agents/chat-crowd/useChatCrowd";
 import { normalizePlace } from "@/agents/chat-crowd/scene";
 import { useSceneChat } from "@/agents/chat-crowd/useSceneChat";
@@ -60,8 +60,12 @@ export function StreamShell() {
   const desktop = useIsDesktop();
   const [copilotOpen, setCopilotOpen] = useCopilotOpen(desktop);
   const live = source.kind !== "idle";
-  const link = useLiveLink({ live, viewers, demo: demoLocation });
-  const location = link.location;
+  // Why: a laptop on stage has a real GPS fix, which would otherwise make the demo picker a no-op.
+  const [pinned, setPinned] = useState(false);
+  const link = useLiveLink({ live, viewers, demo: demoLocation, pinned });
+  const location = pinned ? demoLocation : link.location;
+  const positionSource = pinned ? "demo" : link.source;
+  const positionBadge = pinned ? "Demo" : link.badge;
   const session = useMemo(() => sessionFromUrl(), []);
   const phone = usePhoneVideo(session, link.followPhone);
   useWakeLock(live);
@@ -82,7 +86,7 @@ export function StreamShell() {
 
   const ctx: StreamContext = {
     streamer: "sonion",
-    title: "IRL London walk — Tower Hill to Tower Bridge, pull up?",
+    title: "Tower Hill → Tower Bridge",
     location,
     viewers: link.viewers,
     live,
@@ -120,12 +124,18 @@ export function StreamShell() {
   }, []);
 
   function changeLocation(next: StreamLocation) {
+    setPinned(true);
     setDemoLocation(next);
     if (source.kind === "url") {
       setSource({ kind: "url", url: next.camera.url, label: next.camera.label });
     }
     setRevealedAt(null);
     publish({ type: "stream.location", location: next });
+  }
+
+  function followGps() {
+    setPinned(false);
+    setRevealedAt(null);
   }
 
   function reveal() {
@@ -225,22 +235,33 @@ export function StreamShell() {
           </div>
           {/* The player stays mounted across tabs so the stream never drops. */}
           <div className={tab === "live" ? "flex flex-col gap-4 lg:gap-5" : "hidden"}>
-            <div ref={playerRef}>
+            <div ref={playerRef} className="relative">
               <Player
                 source={source}
                 onSourceChange={changeSource}
                 ctx={ctx}
-                positionBadge={link.badge}
+                positionBadge={positionBadge}
                 sync={link.sync}
                 remote={phone}
                 size={playerFs.active ? "full" : wide ? "wide" : "default"}
                 onCamStream={setCamStream}
               />
+              {playerFs.active && (
+                <button
+                  type="button"
+                  onClick={playerFs.toggle}
+                  className="pill glass absolute left-1/2 top-4 z-30 -translate-x-1/2 sm:top-6"
+                >
+                  <Minimize className="size-4" aria-hidden />
+                  Exit full screen
+                </button>
+              )}
             </div>
             <StreamerBar
               ctx={ctx}
-              positionSource={link.source}
+              positionSource={positionSource}
               onLocationChange={changeLocation}
+              onFollowGps={pinned && link.source !== "demo" ? followGps : undefined}
               onReveal={reveal}
               onSimulate={mirror}
             />
@@ -300,7 +321,7 @@ function TwinView({ src, feed, newTabInStage }: { src: string; feed: ReactNode |
       corner="bottom-right"
       size="S"
       bottomInset={TWIN_BAR_CLEARANCE}
-      toolbarAlign="center"
+      toolbarAlign={newTabInStage ? "right" : "center"}
       primaryLabel="3D mirror"
       secondaryLabel="stream"
       secondary={feed}

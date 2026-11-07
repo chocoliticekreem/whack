@@ -1,6 +1,6 @@
 "use client";
 
-import { Bell, Search } from "lucide-react";
+import { Bell } from "lucide-react";
 
 export function TopBar({ live }: { live: boolean }) {
   return (
@@ -13,21 +13,6 @@ export function TopBar({ live }: { live: boolean }) {
         <span className="font-display text-[17px] font-semibold leading-none tracking-[-0.02em]">
           Mirror<span className="text-muted">verse</span>
         </span>
-        <span className="hidden items-center gap-1.5 border-l border-line pl-3 font-mono text-[10px] tracking-normal text-dim lg:flex">
-          London
-          <span className="size-0.5 rounded-full bg-dim" />
-          IRL
-        </span>
-      </div>
-
-      <div className="mx-auto hidden w-full max-w-sm items-center gap-2 rounded-full bg-bg px-3.5 py-2 shadow-[inset_0_2px_4px_rgb(0_0_0/0.5),0_0_0_1px_rgb(255_255_255/0.07)] transition-shadow focus-within:shadow-[inset_0_2px_4px_rgb(0_0_0/0.5),0_0_0_2px_rgb(255_141_16/0.6)] md:flex">
-        <Search className="size-3.5 text-dim" aria-hidden />
-        <input
-          type="search"
-          placeholder="Search streams, places, people"
-          className="w-full bg-transparent text-[13px] text-text placeholder:text-dim focus:outline-none"
-        />
-        <kbd className="rounded border border-line px-1 font-mono text-[10px] text-dim">/</kbd>
       </div>
 
       <div className="ml-auto flex items-center gap-2">

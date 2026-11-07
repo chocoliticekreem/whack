@@ -71,6 +71,8 @@ export function endFrame() {
   if (v > motionStats.maxVehicleOverlap) motionStats.maxVehicleOverlap = v;
   if (p > motionStats.maxPeopleOverlap) motionStats.maxPeopleOverlap = p;
   motionStats.entities = n;
+  // Only last frame's slots are compared against; keeping every key ever drawn grows without bound.
+  prev.clear();
   for (let i = 0; i < n; i++) prev.set(keys[i] as string, i);
 }
 

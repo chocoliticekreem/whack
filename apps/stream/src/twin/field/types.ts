@@ -1,3 +1,4 @@
+import type { YoloStatus } from "@/platform/around/types";
 import type { TwinGeometry } from "@/twin/config";
 
 export type SegmentKind = TwinGeometry["roads"][number]["kind"];
@@ -32,9 +33,22 @@ export interface FieldCam {
   at: number;
 }
 
+/**
+ * How much of the field comes from cameras. `status` is YOLO's: "unavailable" means the camera
+ * counts are missing (service down), so every segment is inferred, not that the streets are empty.
+ */
+export interface FieldCameras {
+  inRange: number;
+  observed: number;
+  status: YoloStatus;
+  /** Newest reading used, epoch ms; 0 when none. */
+  newestAt: number;
+}
+
 export interface FieldResponse {
   at: number;
   segments: FieldSegment[];
   anchors: FieldAnchor[];
   cams: FieldCam[];
+  cameras?: FieldCameras;
 }

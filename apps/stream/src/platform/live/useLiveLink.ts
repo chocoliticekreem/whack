@@ -6,7 +6,7 @@ import { distanceM } from "@/platform/around/geo";
 import { publish } from "@/platform/bus";
 import { gpsLocation, labelFor } from "./nearest";
 import { PUBLISH_MS, type LiveState } from "./types";
-import { ageLabel, postLiveState, sessionFromUrl, useRemoteLive } from "./useRemoteLive";
+import { postLiveState, sessionFromUrl, useRemoteLive } from "./useRemoteLive";
 import { useStreamerGps } from "./useStreamerGps";
 
 const MOVE_M = 8;
@@ -18,15 +18,17 @@ export type PositionSource = "gps" | "phone" | "demo";
 interface Args {
   live: boolean;
   viewers: number;
-  /** The picker's location, used only when no GPS (local or relayed) is available. */
+  /** The picker's location, used when no GPS (local or relayed) is available, or always when `pinned`. */
   demo: StreamLocation;
+  /** The streamer picked `demo` by hand: it wins over GPS and is what goes out as `stream.location`. */
+  pinned?: boolean;
 }
 
 /**
  * Ties the real position into the stream page. Phone: GPS drives the location and is relayed
  * every 2 s while live. Laptop: follows the phone's relayed state when it is not streaming itself.
  */
-export function useLiveLink({ live, viewers, demo }: Args) {
+export function useLiveLink({ live, viewers, demo, pinned = false }: Args) {
   const gps = useStreamerGps();
   const session = useMemo(() => sessionFromUrl(), []);
   const remote = useRemoteLive(session);
@@ -46,28 +48,29 @@ export function useLiveLink({ live, viewers, demo }: Args) {
   const peer = remote.state && remote.state.streamer !== CLIENT_ID ? remote.state : null;
   const followPhone = !fix && !live && !!peer && peer.live && now - peer.ts < 60_000;
 
-  const source: PositionSource = fix ? "gps" : followPhone ? "phone" : "demo";
+  const source: PositionSource = pinned ? "demo" : fix ? "gps" : followPhone ? "phone" : "demo";
 
   // Keyed on primitives: every relay push is a new `peer` object and must not churn the location.
   const fixLat = fix?.lat, fixLon = fix?.lon, fixAcc = fix?.accuracyM;
   const peerLat = peer?.lat, peerLon = peer?.lon, peerAcc = peer?.accuracyM, peerLabel = peer?.label;
   const location = useMemo<StreamLocation>(() => {
+    if (pinned) return demo;
     if (fixLat !== undefined && fixLon !== undefined)
       return gpsLocation(fixLat, fixLon, labelFor(fixLat, fixLon), `GPS ±${fixAcc} m`);
     if (followPhone && peerLat !== undefined && peerLon !== undefined)
       return gpsLocation(peerLat, peerLon, peerLabel ?? "Phone", `Phone ±${peerAcc} m`);
     return demo;
-  }, [fixLat, fixLon, fixAcc, followPhone, peerLat, peerLon, peerAcc, peerLabel, demo]);
+  }, [pinned, fixLat, fixLon, fixAcc, followPhone, peerLat, peerLon, peerAcc, peerLabel, demo]);
 
   // Re-broadcast on the in-browser bus only when the dot really moved.
   const lastPublished = useRef<{ lat: number; lon: number } | null>(null);
   useEffect(() => {
-    if (source === "demo") return;
+    if (source === "demo" && !pinned) return;
     const last = lastPublished.current;
     if (last && distanceM(last.lat, last.lon, location.lat, location.lon) < MOVE_M) return;
     lastPublished.current = { lat: location.lat, lon: location.lon };
     publish({ type: "stream.location", location });
-  }, [source, location]);
+  }, [source, pinned, location]);
 
   const latest = useRef({ live, viewers, fix, location });
   useEffect(() => {
@@ -121,26 +124,27 @@ export function useLiveLink({ live, viewers, demo }: Args) {
     wasLive.current = live;
   }, [live, gps.fix, session, location.name]);
 
-  const badge =
-    source === "gps" && fix
-      ? `Phone GPS · ±${fix.accuracyM} m · ${ageLabel(fix.at, now)}`
+  const badge = pinned
+    ? "Demo location"
+    : source === "gps" && fix
+      ? `GPS ±${fix.accuracyM} m`
       : source === "phone" && peer
-        ? `Phone GPS · ±${peer.accuracyM} m · ${ageLabel(peer.ts, now)}`
+        ? `GPS ±${peer.accuracyM} m`
         : gps.status === "searching"
-          ? "GPS · searching…"
+          ? "GPS…"
           : gps.status === "denied"
-            ? "GPS denied · demo location"
+            ? "Demo"
             : "Demo location";
 
   const sync =
     remote.status === "connected"
       ? live && fix
         ? relayOk === false
-          ? "Sync: relay error"
-          : "Sync: connected"
+          ? "Relay error"
+          : "Connected"
         : followPhone
           ? "Sync: following phone"
-          : "Sync: connected"
+          : "Connected"
       : remote.status === "offline"
         ? "Sync: offline"
         : "Sync: connecting…";

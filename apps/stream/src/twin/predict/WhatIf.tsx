@@ -76,7 +76,7 @@ export function WhatIf() {
     <div style={card}>
       <div style={{ display: "flex", gap: 8, alignItems: "baseline" }}>
         <span style={{ fontWeight: 600, flex: 1 }}>What if…</span>
-        <span style={label}>{placing ? "Click the map to place it" : "Pick a type, then click the map"}</span>
+        {placing && <span style={{ ...label, color: "var(--ember)" }}>Click the map</span>}
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         {KINDS.map((k) => (
@@ -107,7 +107,8 @@ export function WhatIf() {
           </div>
           <input
             value={iv.note}
-            placeholder="Note, e.g. burst water main"
+            placeholder="Note"
+            title="e.g. burst water main"
             onChange={(e) => updateIntervention(i, { note: e.target.value })}
             style={{ background: "rgba(255,255,255,0.05)", color: "var(--text)", border: "1px solid var(--border)", borderRadius: 8, padding: "5px 8px", fontSize: 12, fontFamily: "inherit" }}
           />
@@ -115,10 +116,10 @@ export function WhatIf() {
       ))}
       {interventions.length > 0 && (
         <Button primary disabled={loading || !baseline} onClick={() => void runForecast("whatIf", origin, areaName(origin))}>
-          Re-run with {interventions.length} intervention{interventions.length === 1 ? "" : "s"}
+          Run what-if
         </Button>
       )}
-      {interventions.length > 0 && !baseline && <div style={label}>Run the baseline first so there is something to diff against.</div>}
+      {interventions.length > 0 && !baseline && <div style={label} title="The what-if is compared against the baseline">Run baseline first</div>}
     </div>
   );
 }

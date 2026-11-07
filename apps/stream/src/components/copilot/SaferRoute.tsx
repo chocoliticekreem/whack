@@ -7,6 +7,9 @@ import type { AdviceLevel } from "@/platform/agent/types";
 import { publish } from "@/platform/bus";
 import { DESTINATIONS, type RouteResponse } from "@/platform/route/types";
 
+const ROUTE_TIMEOUT_MS = 10_000;
+const ARRIVED_M = 30;
+
 /** Where the calmer route goes when the advisor says the spot is busy: the next stop of the walk. */
 function nextStop(location: StreamLocation) {
   return location.id === "tower-bridge" ? "Tower Hill station" : "Tower Bridge";
@@ -29,10 +32,14 @@ export function SaferRoute({ location, level }: SaferRouteProps) {
   useEffect(() => {
     if (!to) return;
     const ctrl = new AbortController();
-    fetch(`/api/route?from=${location.lat},${location.lon}&to=${encodeURIComponent(to)}&mode=calm`, { signal: ctrl.signal })
+    let cancelled = false;
+    // Why: a hung or failed request must end in "No route found", never an endless "Working out…".
+    const signal = AbortSignal.any([ctrl.signal, AbortSignal.timeout(ROUTE_TIMEOUT_MS)]);
+    fetch(`/api/route?from=${location.lat},${location.lon}&to=${encodeURIComponent(to)}&mode=calm`, { signal })
       .then((r) => (r.ok ? (r.json() as Promise<RouteResponse>) : null))
+      .catch(() => null)
       .then((r) => {
-        if (ctrl.signal.aborted) return;
+        if (cancelled) return;
         setResult({ to, route: r });
         if (!r) return;
         publish({
@@ -45,9 +52,11 @@ export function SaferRoute({ location, level }: SaferRouteProps) {
           extraMin: r.extraMin,
           lessCrowd: r.lessCrowd,
         });
-      })
-      .catch(() => {});
-    return () => ctrl.abort();
+      });
+    return () => {
+      cancelled = true;
+      ctrl.abort();
+    };
   }, [location, to]);
 
   return (
@@ -71,22 +80,24 @@ export function SaferRoute({ location, level }: SaferRouteProps) {
         })}
       </div>
       {to ? (
-        route ? (
+        route && route.calmest.lengthM < ARRIVED_M ? (
+          <p className="text-[12px] text-dim">You&apos;re here</p>
+        ) : route ? (
           <div className="flex items-start gap-2.5 rounded-lg border border-ember/30 bg-ember-soft px-3 py-2.5">
             <Route className="mt-0.5 size-4 shrink-0 text-ember" aria-hidden />
-            <p className="text-[13px] leading-5 text-text">
-              <span className="font-semibold">Calmer way</span> to {route.to.name}: {route.calmest.lengthM} m,{" "}
-              {Math.round(route.calmest.etaMin)} min
-              {route.extraMin > 0 ? ` (+${route.extraMin} min)` : ""}
-              {route.lessCrowd > 0 ? `, ${Math.round(route.lessCrowd * 100)}% less crowd` : ", same crowd either way"}
-              {route.avoids.length > 0 ? ` · avoids ${route.avoids.join(", ")}` : ""}
+            <p
+              className="text-[13px] leading-5 text-text"
+              title={`${route.calmest.lengthM} m${route.extraMin > 0 ? ` · +${route.extraMin} min` : ""}${route.avoids.length > 0 ? ` · avoids ${route.avoids.join(", ")}` : ""}`}
+            >
+              <span className="font-semibold">{route.to.name}</span> · {Math.round(route.calmest.etaMin)} min
+              {route.lessCrowd > 0 ? ` · −${Math.round(route.lessCrowd * 100)}% crowd` : ""}
             </p>
           </div>
         ) : (
-          <p className="text-[12px] text-dim">{loading ? "Working out the calmer way…" : "No route found."}</p>
+          <p className="text-[12px] text-dim">{loading ? "Routing…" : "No route"}</p>
         )
       ) : (
-        <p className="text-[12px] text-dim">Pick a destination. The advisor suggests one on its own when it gets busy.</p>
+        <p className="text-[12px] text-dim" title="The advisor picks one when it gets busy">Pick a spot</p>
       )}
     </div>
   );

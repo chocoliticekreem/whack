@@ -252,6 +252,7 @@ function placeVehicle(scene: Scene, model: Model, cls: TrackedClass, x: number, 
 
 function trailSegment(scene: Scene, isPerson: boolean, x0: number, z0: number, x1: number, z1: number, a0: number, a1: number) {
   const { pos, col } = scene;
+  if ((scene.seg + 1) * 6 > pos.length) return;
   const base = isPerson ? PERSON : CAR;
   const dim = isPerson ? PERSON_DIM : CAR_DIM;
   const o = scene.seg * 6;
@@ -578,7 +579,8 @@ export function Agents() {
     _pv.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     _frustum.setFromProjectionMatrix(_pv);
     sim.step(performance.now() / 1000, Math.min(dt, 0.1), snap, (e) => inView(e.x, e.z, e.length, e.frame.x, e.frame.z));
-    drawEntities(sc, sim.ents, performance.now() / 1000, syncClock.camId);
+    // With the compared clip blocked there is no video clock; its camera falls back to the wall-clock sim.
+    drawEntities(sc, sim.ents, performance.now() / 1000, syncClock.video ? syncClock.camId : null);
     if (syncT >= 0) drawSynced(sc, synced, syncT, clock.elapsedTime, replay, blds);
     if (SNAP_STATS && snap) auditVehicles(snap, sim.retired, syncT);
     endFrame();

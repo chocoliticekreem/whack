@@ -15,25 +15,25 @@ const ROWS: Row[] = [
   { kind: null, label: "You", swatch: <span className="size-3 rounded-full bg-ember ring-2 ring-bg" /> },
   {
     kind: "cam",
-    label: "JamCam · YOLO count",
+    label: "Street cam",
     swatch: <span className="size-3.5 rounded-full border-2 border-line-strong bg-surface-2 shadow-[0_0_0_3px_rgba(255,176,32,0.3)]" />,
   },
-  { kind: "livecam", label: "HD live cam", swatch: <span className="size-3.5 rounded-full border-2 border-[#b388ff] bg-[#2a1f45]" /> },
+  { kind: "livecam", label: "HD cam", swatch: <span className="size-3.5 rounded-full border-2 border-[#b388ff] bg-[#2a1f45]" /> },
   {
     kind: "station",
-    label: "Station · % of usual crowd",
+    label: "Station",
     swatch: (
       <span className="grid size-3.5 place-items-center rounded-full border-2 border-ok/70 bg-bg text-ok">
         <span className="block h-[2px] w-2 rounded-sm bg-current" />
       </span>
     ),
   },
-  { kind: "bus", label: "Bus stop · next bus", swatch: <span className="size-3 rounded-[3px] bg-[#e0352b]" /> },
-  { kind: "closure", label: "Road works / closure", swatch: <span className="h-0 w-4 border-t-2 border-dashed border-warn" /> },
-  { kind: "crime", label: "Crime, last month", swatch: <span className="size-3.5 rounded-full bg-[radial-gradient(circle,rgba(255,120,60,0.8),rgba(255,45,85,0))]" /> },
+  { kind: "bus", label: "Bus stop", swatch: <span className="size-3 rounded-[3px] bg-[#e0352b]" /> },
+  { kind: "closure", label: "Closure", swatch: <span className="h-0 w-4 border-t-2 border-dashed border-warn" /> },
+  { kind: "crime", label: "Crime", swatch: <span className="size-3.5 rounded-full bg-[radial-gradient(circle,rgba(255,120,60,0.8),rgba(255,45,85,0))]" /> },
   {
     kind: null,
-    label: "People · vehicles on cam",
+    label: "People · cars",
     swatch: (
       <span className="flex items-center gap-0.5">
         <span className="size-2 rounded-full bg-[#ffd166]" />

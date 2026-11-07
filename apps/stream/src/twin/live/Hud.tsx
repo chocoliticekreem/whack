@@ -25,7 +25,7 @@ function useMobile() {
   return mobile;
 }
 
-function StreamerStatus() {
+function useStreamerStatus() {
   const streamer = useLive((s) => s.streamer);
   const source = useLive((s) => s.streamerSource);
   const accuracy = useLive((s) => s.streamerAccuracyM);
@@ -44,27 +44,12 @@ function StreamerStatus() {
         ? `This device GPS · ±${accuracy ?? "?"} m · ${age}`
         : "Demo position";
   const pace = speed !== null && speed > 0.3 ? ` · ${(speed * 3.6).toFixed(1)} km/h` : "";
-  return (
-    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px solid var(--border)", fontSize: 11 }}>
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <Swatch color="var(--ember)" glow />
-        <span style={{ color: "var(--muted)", flex: 1 }}>Streamer</span>
-        <span style={{ fontWeight: 600 }}>
-          {label}
-          {pace}
-        </span>
-      </div>
-      {pending ? (
-        <div style={{ marginTop: 6, color: "var(--muted)", fontWeight: 600 }}>Re-centring on {areaName(pending)}…</div>
-      ) : (
-        outside && (
-          <div style={{ marginTop: 6, color: "var(--warn)", fontWeight: 600 }}>
-            Outside the mirrored area ({(away / 1000).toFixed(1)} km from {areaName(origin)})
-          </div>
-        )
-      )}
-    </div>
-  );
+  const warning = pending
+    ? { text: "Re-centring…", tip: `Re-centring on ${areaName(pending)}` }
+    : outside
+      ? { text: "Out of area", tip: `${(away / 1000).toFixed(1)} km from ${areaName(origin)}` }
+      : null;
+  return { tip: `Streamer: ${label}${pace}`, warning };
 }
 
 function CrowdChip({ crowd }: { crowd: number }) {
@@ -109,6 +94,8 @@ export function Hud() {
   const disruptions = useLive((s) => s.disruptions);
   const updatedAt = useLive((s) => s.updatedAt);
   const screenMode = useLive((s) => s.screenMode);
+  const yolo = useLive((s) => s.yolo);
+  const clipsAt = useLive((s) => s.clipsAt);
   const now = useNow();
   const comparing = useCompare((s) => s.camId !== null);
   const field = useFieldStore();
@@ -117,6 +104,7 @@ export function Hud() {
   const origin = useOrigin((s) => s.origin);
   const mobile = useMobile();
   const [expanded, setExpanded] = useState(false);
+  const streamerStatus = useStreamerStatus();
   if (comparing) return null;
 
   let people = 0;
@@ -136,18 +124,45 @@ export function Hud() {
   }
   const uniqueDisruptions = new Set(disruptions.map((d) => JSON.stringify(d.line))).size;
   const analysed = cams.filter((c) => clips[c.id]).length;
+  // No tracks ever arrived: the camera counts are unknown, not zero.
+  const unknown = yolo === "unavailable" || (yolo === "loading" && analysed === 0);
+  const staleFor = yolo === "stale" && clipsAt && now ? Math.max(1, Math.round((now - clipsAt) / 60_000)) : 0;
+  const camCount = (n: number) =>
+    yolo === "unavailable" ? "offline" : unknown ? "—" : staleFor ? `${n} · ${staleFor}m ago` : String(n);
+  const camStatus = !cams.length
+    ? "loading…"
+    : yolo === "unavailable"
+      ? `${cams.length} · YOLO offline`
+      : yolo === "loading"
+        ? `${cams.length} · analysing…`
+        : `${analysed}/${cams.length} with tracks${yolo === "stale" ? " · YOLO offline" : ""}`;
 
-  const rows: { label: string; value: string; color: string }[] = [
-    { label: "People (real, cameras)", value: String(people), color: "#ffb37a" },
-    { label: "Vehicles (real, cameras)", value: String(vehicles), color: "#9fd3ff" },
-    { label: "Cameras", value: cams.length ? `${analysed}/${cams.length} analysed` : "loading…", color: "var(--live)" },
-    { label: "Buses (TfL), due < 5 min", value: String(busesDue), color: "#c8102e" },
-    { label: "Disruptions (TfL)", value: String(uniqueDisruptions), color: "var(--warn)" },
+  const rows: { label: string; value: string; color: string; tip: string }[] = [
+    { label: "People", value: camCount(people), color: "#ffb37a", tip: "Real, YOLO on live cameras" },
+    { label: "Vehicles", value: camCount(vehicles), color: "#9fd3ff", tip: "Real, YOLO on live cameras" },
+    { label: "Buses", value: String(busesDue), color: "#c8102e", tip: "TfL buses due in under 5 min" },
+    { label: "Disruptions", value: String(uniqueDisruptions), color: "var(--warn)", tip: "TfL disruptions" },
   ];
   const estimate = field
     ? `${Math.round(field.people * field.crowd)} people · ${Math.round(field.vehicles * field.crowd)} vehicles`
     : "estimating…";
-  const basis = field ? `${field.observed} observed segments, ${field.inferred} inferred` : "";
+  const basis = !field
+    ? ""
+    : field.observed === 0
+      ? `Model only, no camera counts yet (${field.inferred} streets inferred)`
+      : `${field.observed} observed segments, ${field.inferred} inferred`;
+  const camColor = yolo === "unavailable" ? "var(--live)" : yolo === "live" ? "var(--ok)" : "var(--warn)";
+  const panelTip = [
+    `Cameras: ${camStatus}`,
+    updatedAt ? `Updated ${new Date(updatedAt).toLocaleTimeString("en-GB")}` : "Connecting…",
+    screenMode ? `Screens: ${screenMode}` : "",
+    `City estimate: ${estimate}${basis ? ` (${basis})` : ""}`,
+    streamerStatus.tip,
+    "Ember beacon: streamer · Ember cone: camera view, YOLO tracks move inside it · Red road: closed · Amber: works",
+    settings.boats ? "Boats: illustrative river traffic, not live data" : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
   const crowd = field?.crowd ?? settings.crowd;
 
   if (mobile && !expanded) {
@@ -180,7 +195,7 @@ export function Hud() {
         }}
       >
         <Swatch color="var(--live)" glow />
-        Live · {people} people · {vehicles} vehicles
+        {unknown ? (yolo === "unavailable" ? "Cameras offline" : "Analysing…") : `${people} people · ${vehicles} vehicles`}
         {crowd !== 1 && <CrowdChip crowd={crowd} />}
       </button>
     );
@@ -208,80 +223,49 @@ export function Hud() {
         fontFamily: "var(--font-figtree), system-ui, sans-serif",
         fontSize: 13,
         lineHeight: 1.35,
-        pointerEvents: mobile ? "auto" : "none",
+        pointerEvents: "auto",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: 14 }}>
+      <div title={panelTip} style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 600, fontSize: 14 }}>
         <Swatch color="var(--live)" glow />
-        <span style={{ flex: 1 }}>Live · {areaName(origin)}</span>
+        <span style={{ flex: 1 }}>{areaName(origin)}</span>
         {crowd !== 1 && <CrowdChip crowd={crowd} />}
+        <span title={`Cameras: ${camStatus}`}>
+          <Swatch color={camColor} />
+        </span>
         {mobile && <span style={{ color: "var(--muted)", fontSize: 11, fontWeight: 500 }}>hide</span>}
-      </div>
-      <div style={{ color: "var(--muted)", fontSize: 11, marginTop: 2 }}>
-        {updatedAt ? `Updated ${new Date(updatedAt).toLocaleTimeString("en-GB")}` : "Connecting…"}
-        {screenMode ? ` · screens: ${screenMode}` : ""}
       </div>
       <div style={{ display: "grid", gap: 5, marginTop: 10 }}>
         {rows.map((r) => (
-          <div key={r.label} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div key={r.label} title={r.tip} style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <Swatch color={r.color} />
             <span style={{ color: "var(--muted)", flex: 1 }}>{r.label}</span>
             <span style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums" }}>{r.value}</span>
           </div>
         ))}
       </div>
-      <div style={{ marginTop: 10, paddingTop: 8, borderTop: "1px solid var(--border)", fontSize: 12 }}>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <Swatch color="#e8d6c2" />
-          <span style={{ color: "var(--muted)" }}>City estimate</span>
-        </div>
-        <div style={{ fontWeight: 600, fontVariantNumeric: "tabular-nums", paddingLeft: 17 }}>{estimate}</div>
-        {basis && <div style={{ color: "var(--muted)", fontSize: 11, paddingLeft: 17 }}>{basis}</div>}
-      </div>
       {scenario && (
         <div
+          title={scenario.label}
           style={{
-            marginTop: 10,
-            paddingTop: 8,
-            borderTop: "1px solid var(--border)",
+            display: "flex",
+            gap: 8,
+            alignItems: "center",
+            marginTop: 8,
             fontSize: 12,
+            fontWeight: 600,
             color: scenario.source === "demo" ? "var(--warn)" : "var(--text)",
           }}
         >
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <Swatch color={scenario.source === "demo" ? "var(--warn)" : "#4f7cff"} glow />
-            <span style={{ fontWeight: 600 }}>{scenario.source === "demo" ? "Demo scenario" : "Responding to real incident"}</span>
-          </div>
-          <div style={{ paddingLeft: 17 }}>{scenario.label}</div>
+          <Swatch color={scenario.source === "demo" ? "var(--warn)" : "#4f7cff"} glow />
+          {scenario.source === "demo" ? "Demo scenario" : "Live incident"}
         </div>
       )}
-      <StreamerStatus />
-      <div
-        style={{
-          marginTop: 10,
-          paddingTop: 8,
-          borderTop: "1px solid var(--border)",
-          color: "var(--muted)",
-          fontSize: 11,
-          display: "grid",
-          gap: 3,
-        }}
-      >
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <Swatch color="var(--ember)" glow /> Streamer beacon
+      {streamerStatus.warning && (
+        <div title={streamerStatus.warning.tip} style={{ marginTop: 8, fontSize: 12, fontWeight: 600, color: "var(--warn)" }}>
+          {streamerStatus.warning.text}
         </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <Swatch color="var(--ember)" /> Camera view cone · YOLO tracks move inside it
-        </div>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <Swatch color="var(--live)" /> Closed road · <Swatch color="var(--warn)" /> works
-        </div>
-        {settings.boats && (
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <Swatch color="#9fd3ff" /> Boats · illustrative river traffic, not live data
-          </div>
-        )}
-      </div>
+      )}
     </div>
   );
 }

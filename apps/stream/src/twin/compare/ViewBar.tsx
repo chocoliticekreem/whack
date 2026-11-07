@@ -23,11 +23,12 @@ const pill: CSSProperties = {
   pointerEvents: "auto",
 };
 
-function Chip({ active, onClick, children }: { active?: boolean; onClick: () => void; children: React.ReactNode }) {
+function Chip({ active, onClick, title, children }: { active?: boolean; onClick: () => void; title?: string; children: React.ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      title={title}
       className="twin-chip"
       style={{
         borderRadius: 999,
@@ -77,13 +78,15 @@ export function ViewBar() {
         <Chip active={!cctv && !cinematic && preset === "streamer"} onClick={() => fly("streamer")}>
           {PRESETS.streamer.label}
         </Chip>
-        <Chip active={gps === "on"} onClick={toggleGps}>
-          {gps === "on" ? "GPS live" : gps === "error" ? "GPS unavailable" : "Use my GPS"}
-        </Chip>
+        {gps !== "error" && (
+          <Chip active={gps === "on"} onClick={toggleGps} title={gps === "on" ? "GPS live" : "Use my GPS"}>
+            GPS
+          </Chip>
+        )}
       </div>
       <div style={{ position: "relative" }}>
         <div style={pill}>
-          <Chip active={picking} onClick={() => setPicking((p) => !p)}>
+          <Chip active={picking} onClick={() => setPicking((p) => !p)} title="Real JamCam on the left, the twin from the same pose on the right">
             Compare CCTV
           </Chip>
         </div>
@@ -106,14 +109,18 @@ export function ViewBar() {
               pointerEvents: "auto",
             }}
           >
-            <div style={{ padding: "6px 10px 4px", fontSize: 11, color: "var(--muted)" }}>
-              Real JamCam on the left, the twin from the same pose on the right
-            </div>
-            {cams.length === 0 && <div style={{ padding: "6px 10px", fontSize: 12, color: "var(--muted)" }}>Loading cameras…</div>}
+            {cams.length === 0 && <div style={{ padding: "6px 10px", fontSize: 12, color: "var(--muted)" }}>Loading…</div>}
             {cams.map((c) => (
               <button
                 key={c.id}
                 type="button"
+                title={
+                  calibrationFor(c.id)
+                    ? `facing ${Math.round(camHeadingDeg(c))}°, calibrated`
+                    : c.heading === null
+                      ? "facing Tower Hill"
+                      : `${c.heading}°`
+                }
                 onClick={() => {
                   setPicking(false);
                   open(c.id);
@@ -133,14 +140,6 @@ export function ViewBar() {
                 onMouseLeave={(e) => (e.currentTarget.style.background = "transparent")}
               >
                 {c.name}
-                <span style={{ color: "var(--muted)", fontSize: 11 }}>
-                  {" · "}
-                  {calibrationFor(c.id)
-                    ? `facing ${Math.round(camHeadingDeg(c))}°, calibrated`
-                    : c.heading === null
-                      ? "facing Tower Hill"
-                      : `${c.heading}°`}
-                </span>
               </button>
             ))}
           </div>

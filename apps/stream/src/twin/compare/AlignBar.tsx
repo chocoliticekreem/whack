@@ -113,9 +113,9 @@ export function AlignBar({ cam, overlay, setOverlay }: { cam: AroundCam; overlay
   };
 
   return (
-    <div style={bar}>
+    <div style={bar} title="←→ heading · ↑↓ tilt · [ ] lens · −/= height · Shift ×5 · O overlay">
       <button type="button" style={{ ...btn, padding: "0 10px", background: overlay ? "var(--text)" : "transparent", color: overlay ? "var(--bg)" : "var(--text)" }} onClick={() => setOverlay(!overlay)} title="Show the real CCTV over the twin (O)">
-        Overlay real
+        Overlay
       </button>
       {(Object.keys(STEP) as Field[]).map((f) => (
         <span key={f} style={{ display: "inline-flex", alignItems: "center", gap: 4 }}>
@@ -133,9 +133,8 @@ export function AlignBar({ cam, overlay, setOverlay }: { cam: AroundCam; overlay
         </span>
       ))}
       <button type="button" style={{ ...btn, padding: "0 12px", background: "var(--text)", color: "var(--bg)", fontWeight: 600 }} onClick={save} disabled={status === "saving"}>
-        {status === "saving" ? "Saving…" : status === "saved" ? "Saved" : status === "error" ? "Save failed" : "Save pose"}
+        {status === "saving" ? "Saving…" : status === "saved" ? "Saved" : status === "error" ? "Save failed" : "Save"}
       </button>
-      <span style={{ color: "var(--muted)", fontSize: 11 }}>←→ heading · ↑↓ tilt · [ ] lens · −/= height · Shift ×5 · O overlay</span>
     </div>
   );
 }

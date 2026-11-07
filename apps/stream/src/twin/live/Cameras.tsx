@@ -88,6 +88,12 @@ function useScreenTexture(cam: AroundCam, clipAt: number) {
   }, [cam.id, cam.videoUrl, clipAt]);
 
   useEffect(() => () => previous?.dispose(), [previous]);
+  // The live texture is only released by the next swap; a camera leaving the list must free its own.
+  const current = useRef<THREE.Texture | null>(null);
+  useEffect(() => {
+    current.current = texture;
+  }, [texture]);
+  useEffect(() => () => current.current?.dispose(), []);
 
   return { texture, previous, mode, clearPrevious: () => setPrevious(null) };
 }
@@ -140,6 +146,7 @@ function clipAge(now: number, at: number) {
 
 function Camera({ cam }: { cam: AroundCam }) {
   const clip = useLive((s) => s.clips[cam.id]);
+  const yolo = useLive((s) => s.yolo);
   const now = useNow();
   const { texture, previous, mode, clearPrevious } = useScreenTexture(cam, clip?.at ?? 0);
   const poseVersion = usePoseVersion((s) => s.v);
@@ -212,6 +219,9 @@ function Camera({ cam }: { cam: AroundCam }) {
           <div
             role="button"
             onClick={() => open(cam.id)}
+            title={`Click to compare with real CCTV${mode === "frame" ? " · frame" : mode === "video" ? " · video" : ""}${
+              clip && now > 0 ? ` · updated ${clipAge(now, clip.at)}, TfL refreshes every few min` : ""
+            }`}
             style={{
               pointerEvents: "auto",
               cursor: "pointer",
@@ -247,16 +257,10 @@ function Camera({ cam }: { cam: AroundCam }) {
                   <span style={{ color: "#9fd3ff" }}>{counts.vehicles} vehicles</span>
                 </>
               ) : (
-                "analysing clip…"
+                yolo === "unavailable" ? "Offline" : "Analysing…"
               )}
-              {mode === "frame" ? " · frame" : mode === "video" ? " · video" : ""}
             </div>
-            {clip && now > 0 && (
-              <div style={{ color: "var(--dim)", fontSize: 11 }}>Updated {clipAge(now, clip.at)} · TfL refreshes every few min</div>
-            )}
-            <div style={{ color: comparing ? "var(--ember)" : "var(--dim)", fontSize: 11, marginTop: 2 }}>
-              {comparing ? "Comparing" : "Click to compare with real CCTV"}
-            </div>
+            {comparing && <div style={{ color: "var(--ember)", fontSize: 11, marginTop: 2 }}>Comparing</div>}
           </div>
         </Label>
       </group>

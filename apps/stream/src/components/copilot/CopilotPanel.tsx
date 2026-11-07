@@ -99,7 +99,7 @@ export function CopilotPanel({ location, live, desktop, open, onOpenChange }: Co
       <Section icon={Sparkles} title="Advisor" meta={loading ? <span className="animate-pulse text-muted">Assessing…</span> : null}>
         <Advisor assessment={assessment} error={error} loading={loading} live={live} onAsk={(q) => void assess(q)} />
       </Section>
-      <Section icon={Compass} title="Around you" meta={surroundings ? <Dot level={surroundings.level} /> : null}>
+      <Section icon={Compass} title="Around you" defaultOpen={false} meta={surroundings ? <Dot level={surroundings.level} /> : null}>
         <AroundYou location={location} live={live} />
       </Section>
       <Section icon={Route} title="Safer route" defaultOpen={level === "busy" || level === "danger"}>
@@ -164,7 +164,12 @@ export function CopilotPanel({ location, live, desktop, open, onOpenChange }: Co
             {level ? LEVEL[level].label : "Copilot"}
           </span>
           <span className="block truncate text-[13px] text-text/85">
-            {assessment?.advice ?? (live ? "Reading the cameras around you…" : "Go live to start the advisor")}
+            {assessment?.advice ??
+              (!live
+                ? "Go live to start"
+                : error
+                  ? (surroundings?.summary ?? "Offline")
+                  : "Reading cameras…")}
           </span>
         </span>
         <ChevronDown className="size-4 rotate-180 text-muted" />
@@ -203,7 +208,7 @@ function PanelHeader({
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-4">
       <span className={`size-2 rounded-full ${level ? `${LEVEL[level].dot} animate-live` : "bg-dim"}`} aria-hidden />
       <h2 className="text-[14px] font-extrabold tracking-[-0.01em] text-text">Copilot</h2>
-      <span className="text-[11px] text-dim">{assessment ? `${assessment.liveCams} live cams` : "VAST agent"}</span>
+      {assessment && <span className="text-[11px] text-dim">{assessment.liveCams} cams</span>}
       <button
         type="button"
         onClick={onCollapse}

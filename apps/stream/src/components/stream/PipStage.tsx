@@ -41,6 +41,8 @@ export const StageToolbarSlot = createContext<HTMLElement | null>(null);
 interface StageState {
   swapped: boolean;
   fullscreen: boolean;
+  /** Where the small stream sits, so an overlay can keep clear of it; null when no PiP of the stream is shown. */
+  pipCorner: Corner | null;
 }
 
 interface PipStageProps {
@@ -294,7 +296,7 @@ export function PipStage({
       {showPip && layer("secondary", !swapped, secondary, secondaryLabel, true)}
 
       <div className="pointer-events-none absolute inset-0 z-10">
-        {overlay?.({ swapped: swapped && showPip, fullscreen: fullscreen })}
+        {overlay?.({ swapped: swapped && showPip, fullscreen: fullscreen, pipCorner: showPip && !swapped && !drag ? corner : null })}
       </div>
 
       {toolbarInSlot ? (

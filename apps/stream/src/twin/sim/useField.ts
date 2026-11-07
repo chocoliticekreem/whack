@@ -2,8 +2,9 @@
 
 import { useEffect } from "react";
 import { create } from "zustand";
+import { fetchJson, startPoller } from "@/lib/client/poll";
 import { useDemoSettings } from "@/platform/demo";
-import type { FieldResponse } from "@/twin/field/types";
+import type { FieldCameras, FieldResponse } from "@/twin/field/types";
 import { camFrame, type CamFrame } from "@/twin/live/project";
 import { useLive } from "@/twin/live/store";
 import { currentOrigin } from "@/twin/config";
@@ -20,6 +21,8 @@ export interface FieldSummary {
   vehicles: number;
   /** Crowd multiplier applied on top of the estimate (1 in live mode). */
   crowd: number;
+  /** Camera coverage behind `observed`; null from a server that predates it. */
+  cameras: FieldCameras | null;
 }
 
 export const useFieldStore = create<FieldSummary | null>(() => null);
@@ -37,7 +40,7 @@ function summarise(f: FieldResponse, crowd: number): FieldSummary {
     vehicles += s.vehicles * len;
     if (s.source === "observed") observed++;
   }
-  return { at: f.at, observed, inferred: f.segments.length - observed, people, vehicles, crowd };
+  return { at: f.at, observed, inferred: f.segments.length - observed, people, vehicles, crowd, cameras: f.cameras ?? null };
 }
 
 let refs = 0;
@@ -51,35 +54,26 @@ export function getLastField() {
 }
 
 function start() {
-  let ctrl: AbortController | null = null;
-  let stopped = false;
-  const tick = async () => {
-    ctrl?.abort();
-    ctrl = new AbortController();
-    try {
-      const o = currentOrigin();
-      const res = await fetch(`/api/twin/field?lat=${o.lat}&lon=${o.lon}`, { signal: ctrl.signal, cache: "no-store" });
-      if (!res.ok) return;
-      const f = (await res.json()) as FieldResponse;
-      if (stopped || !Array.isArray(f.segments)) return;
-      lastField = f;
-      useFieldStore.setState(summarise(f, crowdNow));
-    } catch {
-      // aborted or offline; next tick retries
-    }
-  };
-  void tick();
-  const timer = setInterval(() => void tick(), FIELD_MS);
+  // A failed poll keeps the last field on screen; only a new origin clears it.
+  const poller = startPoller(async (signal) => {
+    const o = currentOrigin();
+    const r = await fetchJson<FieldResponse>(`/api/twin/field?lat=${o.lat}&lon=${o.lon}`, signal, 30_000);
+    if (!r.ok) return r;
+    if (!Array.isArray(r.data.segments)) return false;
+    // The server caches the field; an unchanged one must not re-seed the movers.
+    if (lastField?.at === r.data.at) return true;
+    lastField = r.data;
+    useFieldStore.setState(summarise(r.data, crowdNow));
+    return true;
+  }, FIELD_MS);
   const unsub = useOrigin.subscribe((s, prev) => {
     if (s.version === prev.version) return;
     lastField = null;
     useFieldStore.setState(null);
-    void tick();
+    poller.tick();
   });
   return () => {
-    stopped = true;
-    ctrl?.abort();
-    clearInterval(timer);
+    poller.stop();
     unsub();
   };
 }

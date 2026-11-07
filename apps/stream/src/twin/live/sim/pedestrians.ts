@@ -261,7 +261,8 @@ export class PedSim {
     const peds = this.peds;
     const rng = this.rng;
     const near2 = NEAR_M * NEAR_M;
-    this.easeCount(dt);
+    // A tab switch hands over seconds of dt; spawning that backlog at once pops a burst of figures.
+    this.easeCount(Math.min(dt, 0.1));
     for (let i = 0; i < this.active; i++) {
       const p = peds[i];
       p.acc += Math.min(dt, 0.1);

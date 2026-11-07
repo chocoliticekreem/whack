@@ -8,6 +8,7 @@ import type { MapControls as MapControlsImpl } from "three-stdlib";
 import { toLocal } from "../config";
 import { forwardOf } from "../live/project";
 import { useLive } from "../live/store";
+import { clearOfBuildings } from "./buildings/eye";
 import { PRESETS, useCameraStore, type CctvPose } from "./cameraStore";
 
 const DEFAULT_FOV = 50;
@@ -20,6 +21,7 @@ const TRAVEL_MIN_M = 1.5;
 const goalPos = new THREE.Vector3();
 const goalTarget = new THREE.Vector3();
 const streamerGoal = new THREE.Vector3();
+const eyeGoal = new THREE.Vector3();
 const _look = new THREE.Vector3();
 
 /**
@@ -167,7 +169,8 @@ export function CameraRig() {
     if (firstPerson) {
       const f = fp.current;
       const k = 1 - Math.exp(-3 * step);
-      camera.position.lerp(streamerGoal, k);
+      const [ex, ez] = clearOfBuildings(streamerGoal.x, streamerGoal.z);
+      camera.position.lerp(eyeGoal.set(ex, EYE_HEIGHT_M, ez), k);
       const [bx, bz] = toLocal(TOWER_BRIDGE.lat, TOWER_BRIDGE.lon);
       const baseYaw = f.hasTravel ? f.travelYaw : bearingRad(camera.position.x, camera.position.z, bx, bz);
       f.yaw = lerpAngle(f.yaw, baseYaw, 1 - Math.exp(-2 * step));
@@ -195,11 +198,13 @@ export function CameraRig() {
     }
   });
 
+  // Why: drei's MapControls calls update() every frame even when disabled, and its minDistance clamp lifted the
+  // first-person eye from 1.7 m to ~10.6 m, so the streamer view looked down on the roofs around it.
+  if (firstPerson) return null;
   return (
     <MapControls
       ref={controls}
       makeDefault
-      enabled={!firstPerson}
       enableDamping
       dampingFactor={0.08}
       maxPolarAngle={Math.PI / 2.05}

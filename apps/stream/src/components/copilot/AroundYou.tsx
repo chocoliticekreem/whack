@@ -7,6 +7,7 @@ import { LEVEL } from "./Advisor";
 
 type Level = "calm" | "busy" | "danger";
 const REFRESH_MS = 60_000;
+const UNKNOWN = { label: "Unknown", text: "text-dim", dot: "bg-dim" };
 const STATION_RADIUS_M = 900;
 const DISRUPTION_RADIUS_M = 800;
 
@@ -19,11 +20,11 @@ const AIR_TONE: Record<AroundAir["band"], string> = {
 };
 
 export function useSurroundingsStatus() {
-  const [status, setStatus] = useState<{ summary: string; level: Level } | null>(null);
+  const [status, setStatus] = useState<{ summary: string; level: Level | null } | null>(null);
   useEffect(
     () =>
       subscribe((e) => {
-        if (e.type === "surroundings.update") setStatus({ summary: e.summary, level: e.level });
+        if (e.type === "surroundings.update") setStatus({ summary: e.summary, level: e.level === "unknown" ? null : e.level });
       }),
     [],
   );
@@ -87,7 +88,7 @@ function crowdingTone(c: number | null) {
 export function AroundYou({ location, live }: { location: { lat: number; lon: number }; live: boolean }) {
   const status = useSurroundingsStatus();
   const { stations, disruptions, air, tide } = useNearby(location, live);
-  const level = status ? LEVEL[status.level] : null;
+  const level = status ? (status.level ? LEVEL[status.level] : UNKNOWN) : null;
 
   return (
     <div className="flex flex-col gap-3">
@@ -100,7 +101,7 @@ export function AroundYou({ location, live }: { location: { lat: number; lon: nu
           </p>
         </div>
       ) : (
-        <p className="text-[13px] leading-5 text-muted">{live ? "Counting people on the nearest cameras…" : "Go live to read the street around you."}</p>
+        <p className="text-[13px] leading-5 text-muted">{live ? "Counting…" : "Go live to start"}</p>
       )}
 
       {stations.length > 0 && (

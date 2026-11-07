@@ -31,7 +31,7 @@ export function FeedPreview({
   viewers: number;
 }) {
   return (
-    <div className="relative size-full bg-black">
+    <div className="@container relative size-full bg-black">
       {stream ? (
         <StreamVideo stream={stream} className="size-full object-cover" />
       ) : (
@@ -43,7 +43,8 @@ export function FeedPreview({
           <span className="animate-live size-1.5 rounded-full bg-white" />
           Live
         </span>
-        <span className="flex h-[1.6rem] items-center rounded-full bg-black/55 px-2.5 text-[11px] font-bold text-white backdrop-blur-sm">
+        {/* Why: in a phone-sized PiP the viewer count runs under the PiP's resize/hide buttons. */}
+        <span className="flex h-[1.6rem] items-center rounded-full bg-black/55 px-2.5 text-[11px] font-bold text-white backdrop-blur-sm @max-[13rem]:hidden">
           {viewers.toLocaleString("en-GB")}
         </span>
       </div>
@@ -58,7 +59,7 @@ export function phoneChip(remote: PhoneVideo) {
   if (remote.status === "connected" && remote.stream) {
     return remote.latencyS === null ? "Live from phone" : `Live from phone · ${remote.latencyS.toFixed(1)} s`;
   }
-  return remote.status === "failed" ? "Phone video unavailable" : "Connecting to phone…";
+  return remote.status === "failed" ? "No phone video" : "Connecting…";
 }
 
 /** Laptop view of the phone's camera: the Live tab shows this while following the phone. */
@@ -96,7 +97,7 @@ export function PhoneFeed({
           <span className={`size-1.5 rounded-full bg-white ${connected ? "animate-live" : ""}`} />
           {phoneChip(remote)}
         </span>
-        <span className="flex h-6 items-center rounded-[4px] border border-white/15 bg-black/50 px-2 tracking-normal text-white/70 backdrop-blur-sm">
+        <span className="hidden h-6 items-center rounded-[4px] border border-white/15 bg-black/50 px-2 tracking-normal text-white/70 backdrop-blur-sm sm:flex">
           WebRTC · {remote.status}
         </span>
       </div>
@@ -116,7 +117,7 @@ export function PhoneFeed({
       {!remote.stream && (
         <div className="absolute inset-0 grid place-items-center">
           <p className="font-mono text-[11px] tracking-normal text-muted">
-            {remote.status === "failed" ? "Phone video unavailable (state only)" : "Waiting for the phone's camera…"}
+            {remote.status === "failed" ? "No phone video" : "Waiting for phone…"}
           </p>
         </div>
       )}

@@ -86,7 +86,7 @@ export function CamCard({ cam, reading, isYourFeed, onClose }: CamCardProps) {
             onClick={() => setView("live")}
             className={`rounded-full px-2.5 py-1 transition-colors ${view === "live" ? "bg-white text-black" : "text-white/70 hover:text-white"}`}
           >
-            Live clip
+            Live
           </button>
           <button
             type="button"
@@ -97,20 +97,18 @@ export function CamCard({ cam, reading, isYourFeed, onClose }: CamCardProps) {
               showAi ? "bg-[image:var(--grad-candy)] text-white" : "text-white/70 hover:text-white"
             }`}
           >
-            AI view
+            AI
           </button>
         </div>
       </div>
       <div className="px-3 py-2.5">
         <p className="truncate text-[13px] font-semibold text-text">{cam.name}</p>
         <p className="mt-0.5 flex items-center gap-1.5 text-[12px] text-muted">
-          <span className="font-mono">{formatDistance(cam.distanceM)} away</span>
-          <span className="text-dim">·</span>
-          <span>TfL JamCam</span>
+          <span className="font-mono" title="TfL JamCam">{formatDistance(cam.distanceM)}</span>
           {isYourFeed && (
             <span className="ml-auto flex items-center gap-1 rounded-md bg-ember-soft px-1.5 py-0.5 text-[10px] font-semibold text-ember">
               <Radio className="size-3" />
-              Your feed
+              You
             </span>
           )}
         </p>
@@ -124,7 +122,7 @@ export function CamCard({ cam, reading, isYourFeed, onClose }: CamCardProps) {
               <span className={`ml-auto capitalize ${CROWD_TONE[level]}`}>{level}</span>
             </>
           ) : (
-            <span className="text-muted">Counting people and vehicles…</span>
+            <span className="text-muted">Counting…</span>
           )}
         </p>
       </div>
@@ -156,13 +154,13 @@ export function BusStopCard({ stop, now, fetchedAt, onClose }: BusStopCardProps)
         </span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-semibold text-text">{stop.name}</p>
-          <p className="font-mono text-[11px] text-muted">{formatDistance(stop.distanceM)} away</p>
+          <p className="font-mono text-[11px] text-muted">{formatDistance(stop.distanceM)}</p>
         </div>
         <CloseButton label="Close stop" onClick={onClose} />
       </div>
       <ul className="border-t border-line">
         {arrivals.length === 0 && (
-          <li className="px-3 py-2 text-[12px] text-muted">No buses due in the next 30 minutes.</li>
+          <li className="px-3 py-2 text-[12px] text-muted" title="None in the next 30 minutes">No buses</li>
         )}
         {arrivals.map((a, i) => (
           <li key={`${a.line}-${a.destination}-${i}`} className="flex items-center gap-2 px-3 py-1.5 text-[12px]">
@@ -195,19 +193,22 @@ export function StationCard({ station, onClose }: StationCardProps) {
         <TrainFront className="mt-0.5 size-4 shrink-0 text-muted" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-[13px] font-semibold text-text">{station.name}</p>
-          <p className="font-mono text-[11px] text-muted">{formatDistance(station.distanceM)} away</p>
+          <p className="font-mono text-[11px] text-muted">{formatDistance(station.distanceM)}</p>
         </div>
         <CloseButton label="Close station" onClick={onClose} />
       </div>
       <div className="border-t border-line px-3 py-2 text-[12px]">
         {crowd && station.crowding !== null ? (
-          <p className="flex items-center gap-2 font-mono text-text/90">
+          <p
+            className="flex items-center gap-2 font-mono text-text/90"
+            title={`% of a normal ${new Date().toLocaleDateString("en-GB", { weekday: "long" })}`}
+          >
             <User className="size-3.5 text-muted" />
-            {Math.round(station.crowding * 100)}% of a normal {new Date().toLocaleDateString("en-GB", { weekday: "long" })}
+            {Math.round(station.crowding * 100)}%
             <span className={`ml-auto capitalize ${STATION_TONE[crowd]}`}>{crowd}</span>
           </p>
         ) : (
-          <p className="text-muted">No live crowding from TfL for this station.</p>
+          <p className="text-muted" title="No live crowding from TfL">No data</p>
         )}
       </div>
       {station.lines.length > 0 && (
@@ -249,9 +250,9 @@ export function LiveCamCard({ cam, onClose }: LiveCamCardProps) {
       <div className="px-3 py-2.5">
         <p className="truncate text-[13px] font-semibold text-text">{cam.name}</p>
         <p className="mt-0.5 flex items-center gap-1.5 text-[12px] text-muted">
-          <span className="font-mono">{formatDistance(cam.distanceM)} away</span>
-          <span className="text-dim">·</span>
-          <span>HD public stream{cam.precision === "approx" ? ", approximate spot" : ""}</span>
+          <span className="font-mono" title={`HD public stream${cam.precision === "approx" ? ", approximate spot" : ""}`}>
+            {formatDistance(cam.distanceM)}
+          </span>
         </p>
       </div>
     </article>

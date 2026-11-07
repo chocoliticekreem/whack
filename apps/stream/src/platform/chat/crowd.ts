@@ -82,7 +82,9 @@ export function useSurroundingsRef(): RefObject<SceneRequest["surroundings"]> {
   useEffect(
     () =>
       subscribe((e) => {
-        if (e.type === "surroundings.update") ref.current = { summary: e.summary, level: e.level };
+        // Why: an "unknown" street gives the crowd nothing true to echo, so it gets no surroundings at all.
+        if (e.type === "surroundings.update")
+          ref.current = e.level === "unknown" ? undefined : { summary: e.summary, level: e.level };
       }),
     [],
   );

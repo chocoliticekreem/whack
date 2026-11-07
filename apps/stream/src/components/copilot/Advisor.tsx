@@ -92,19 +92,19 @@ export function Advisor({ assessment, error, loading, live, onAsk }: AdvisorProp
             </p>
           </div>
           <p className="mt-3 text-[15px] font-medium leading-6 text-text">{assessment.advice}</p>
-          {loading && <p className="mt-1.5 animate-pulse text-[11px] text-muted">Re-assessing…</p>}
+          {loading && <p className="mt-1.5 animate-pulse text-[11px] text-muted">Updating…</p>}
         </div>
       ) : (
         <div className="rounded-lg border border-line bg-surface-2 px-4 py-3.5">
           <p className="text-[14px] leading-6 text-muted">
             {error ? (
-              <>
-                <span className="font-semibold text-text">Advisor offline.</span> {error}
-              </>
+              <span title={`VAST agent unreachable: ${error}`} className="font-semibold text-text">
+                Offline
+              </span>
             ) : live ? (
-              <span className="animate-pulse">Reading the cameras around you…</span>
+              <span className="animate-pulse">Reading cameras…</span>
             ) : (
-              "Go live and the advisor reads the cameras around you."
+              "Go live to start"
             )}
           </p>
         </div>
@@ -136,7 +136,7 @@ export function Advisor({ assessment, error, loading, live, onAsk }: AdvisorProp
           {open && (
             <ul className="mt-2 flex flex-col gap-2">
               {assessment.evidence.length === 0 && (
-                <li className="text-[12px] text-dim">No VSS clips in this answer; it rests on live camera counts only.</li>
+                <li className="text-[12px] text-dim" title="No VSS clips; live camera counts only">No clips</li>
               )}
               {assessment.evidence.map((ev) => (
                 <Evidence key={`${ev.video}-${ev.start_s}`} ev={ev} />
@@ -145,13 +145,17 @@ export function Advisor({ assessment, error, loading, live, onAsk }: AdvisorProp
           )}
         </div>
       )}
-      {assessment && error && <p className="text-[12px] text-warn">Last refresh failed: {error}</p>}
+      {assessment && error && (
+        <p className="text-[12px] text-warn" title={`Last refresh failed, showing the previous verdict: ${error}`}>
+          Stale
+        </p>
+      )}
 
       <form onSubmit={ask} className="flex items-center gap-2">
         <input
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
-          placeholder="Ask, e.g. is the bridge crowded right now?"
+          placeholder="Ask anything"
           className="h-9 min-w-0 flex-1 rounded-lg border border-line-strong bg-surface-2 px-3 text-[13px] text-text placeholder:text-dim focus:border-text/40 focus:outline-none"
         />
         <button

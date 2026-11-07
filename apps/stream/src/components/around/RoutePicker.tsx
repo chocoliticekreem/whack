@@ -118,7 +118,7 @@ export function RoutePicker({ mapRef, ready, from, stations, fitPadding }: Route
           Walk to
         </span>
         {destinations.length === 0 && !to && (
-          <span className="text-[12px] font-semibold text-white/45">No stations within {REACH_M} m yet</span>
+          <span className="text-[12px] font-semibold text-white/45" title={`None within ${REACH_M} m yet`}>No stations</span>
         )}
         {(to && !destinations.some((d) => d.name === to.name) ? [to, ...destinations] : destinations).map((d) => {
           const active = to?.name === d.name;
@@ -136,24 +136,25 @@ export function RoutePicker({ mapRef, ready, from, stations, fitPadding }: Route
           );
         })}
       </div>
-      {to && loading && !route && <p className="text-[13px] font-semibold text-white/60">Planning on live crowd density…</p>}
+      {to && loading && !route && <p className="text-[13px] font-semibold text-white/60">Routing…</p>}
       {to && error && <p className="text-[13px] font-semibold text-warn">{error}</p>}
       {route && (
         <div className="flex flex-col gap-2 rounded-[22px] bg-white/[0.06] px-3.5 py-3 text-[13px] font-semibold shadow-[inset_0_2px_3px_rgb(255_255_255/0.1)]">
-          <p className="flex items-center gap-2.5 text-white/60">
+          <p
+            className="flex items-center gap-2.5 text-white/60"
+            title={`${route.fastest.lengthM} m · passes ~${Math.round(route.fastest.exposure)} people`}
+          >
             <span className="h-0 w-5 shrink-0 border-t-2 border-dashed border-[#9a99a6]" aria-hidden />
-            Fastest: {route.fastest.lengthM} m · {Math.round(route.fastest.etaMin)} min · passes ~{Math.round(route.fastest.exposure)}{" "}
-            people
+            Fastest · {Math.round(route.fastest.etaMin)} min
           </p>
-          <p className="flex items-center gap-2.5 text-text">
+          <p
+            className="flex items-center gap-2.5 text-text"
+            title={`${route.calmest.lengthM} m${route.extraMin > 0 ? ` · +${route.extraMin} min` : ""}${route.avoids.length > 0 ? ` · avoids ${route.avoids.join(", ")}` : ""}`}
+          >
             <span className="h-0 w-5 shrink-0 border-t-[3px] border-ember" aria-hidden />
-            Calmer: {route.calmest.lengthM} m · {Math.round(route.calmest.etaMin)} min
-            {route.extraMin > 0 ? ` (+${route.extraMin} min)` : ""} ·{" "}
-            {route.lessCrowd > 0 ? `${Math.round(route.lessCrowd * 100)}% less crowd` : "same crowd either way"}
+            Calmer · {Math.round(route.calmest.etaMin)} min
+            {route.lessCrowd > 0 ? ` · −${Math.round(route.lessCrowd * 100)}% crowd` : ""}
           </p>
-          {route.avoids.length > 0 && (
-            <p className="text-[12px] text-white/45">Steers around {route.avoids.join(", ")}</p>
-          )}
         </div>
       )}
     </div>

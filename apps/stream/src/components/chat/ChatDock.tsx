@@ -11,7 +11,7 @@ interface ChatDockProps {
   viewers: number;
   live: boolean;
   desktop: boolean;
-  /** Leaves room for the copilot's collapsed bar on phones. */
+  /** Phones: true while the copilot is folded to its bar (the bubble sits above it); false hides the bubble under the open sheet. */
   raised: boolean;
 }
 
@@ -79,14 +79,14 @@ export function ChatDock({ messages, onSend, viewers, live, desktop, raised }: C
       </div>
     );
   }
+  // Why: with the copilot sheet up the bubble would float over its content.
+  if (!raised) return null;
   return (
     <button
       type="button"
       onClick={() => setOpen(true)}
       aria-label="Open chat"
-      className={`pill glass absolute right-3 z-30 !h-11 !w-11 !px-0 ${
-        raised ? "bottom-[100px]" : "bottom-16"
-      }`}
+      className="pill glass absolute bottom-[100px] right-3 z-30 !h-11 !w-11 !px-0"
     >
       <MessageSquare className="size-4" />
       {live && <span className="animate-live absolute right-2 top-2 size-1.5 rounded-full bg-live" />}

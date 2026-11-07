@@ -296,7 +296,7 @@ export function AroundMe({ location, activeCamUrl, feed }: AroundMeProps) {
   const busNow = useNow(BUS_TICK_MS);
   useStopMarkers(refs, { items: stops, selectedId: stopId, onSelect: selectStop, visible: !hidden.has("bus"), now: busNow });
 
-  const place = geo.active && geo.fix ? "Your real position" : `${location.name} · ${location.area}`;
+  const place = geo.active && geo.fix ? "My location" : location.name;
 
   return (
     <PipStage
@@ -311,10 +311,17 @@ export function AroundMe({ location, activeCamUrl, feed }: AroundMeProps) {
           className="absolute inset-0 h-full w-full [&_.maplibregl-ctrl-attrib]:!bg-bg/70 [&_.maplibregl-ctrl-attrib]:!text-[10px] [&_.maplibregl-ctrl-attrib_a]:!text-muted"
         />
       }
-      overlay={({ swapped }) =>
+      overlay={({ swapped, pipCorner }) =>
         swapped ? null : (
           <>
-            <aside className="glass pointer-events-auto absolute left-3 top-3 flex max-h-[calc(100%-1.5rem)] w-[min(360px,calc(100%-1.5rem))] max-sm:top-14 max-sm:max-h-[calc(100%-4.25rem)] flex-col overflow-hidden rounded-[28px]">
+            {/* Why: on phones the panel spans the stage, so it drops below a PiP parked in a top corner (PiP height = 46cqw × 9/16). */}
+            <aside
+              className={`glass pointer-events-auto absolute left-3 top-3 flex max-h-[calc(100%-1.5rem)] w-[min(360px,calc(100%-1.5rem))] flex-col overflow-hidden rounded-[28px] ${
+                pipCorner?.startsWith("top")
+                  ? "max-sm:top-[calc(72px+26cqw)] max-sm:max-h-[calc(100%-84px-26cqw)]"
+                  : "max-sm:top-14 max-sm:max-h-[calc(100%-4.25rem)]"
+              }`}
+            >
               <header className="flex items-center gap-3 px-4 pb-3 pt-3.5">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
@@ -324,7 +331,7 @@ export function AroundMe({ location, activeCamUrl, feed }: AroundMeProps) {
                       Live
                     </span>
                   </div>
-                  <p className="truncate text-[13px] font-semibold text-white/60">{place}</p>
+                  <p className="truncate text-[13px] font-semibold text-white/60" title={location.area}>{place}</p>
                 </div>
                 {!infoOpen && (
                   <span className="flex items-center gap-2 text-[14px] font-extrabold text-text">
@@ -352,10 +359,7 @@ export function AroundMe({ location, activeCamUrl, feed }: AroundMeProps) {
                 }`}
               >
                 <div className="scrollbar-thin min-h-0 overflow-y-auto">
-                  <p className="px-4 pb-2 text-[12px] font-semibold text-white/50">
-                    from {plural(flow.clips, "live camera")}
-                  </p>
-                  <div className="grid grid-cols-2 gap-2 px-3 pb-3">
+                  <div className="grid grid-cols-2 gap-2 px-3 pb-3" title={`From ${plural(flow.clips, "live camera")}`}>
                     <Tile
                       icon={<User className="size-5 text-[#3a2600]" aria-hidden />}
                       orb="bg-[#ffd166]"
@@ -393,8 +397,8 @@ export function AroundMe({ location, activeCamUrl, feed }: AroundMeProps) {
                         icon={<ShieldAlert className="size-5 text-[#3d0010]" aria-hidden />}
                         orb="bg-[#ff6b8a]"
                         value={crime.total}
-                        label={`crimes within 600 m, ${monthLabel(crime.month)}`}
-                        title={crime.streets.map((s) => `${s.name}: ${s.count}`).join("\n")}
+                        label="crimes"
+                        title={[`Within 600 m, ${monthLabel(crime.month)}`, ...crime.streets.map((s) => `${s.name}: ${s.count}`)].join("\n")}
                       />
                     )}
                   </div>
@@ -407,7 +411,7 @@ export function AroundMe({ location, activeCamUrl, feed }: AroundMeProps) {
                       className={`pill pill-sm ${geo.active ? "pill-candy" : "glass"}`}
                     >
                       <LocateFixed className={`size-3.5 ${geo.active && !geo.fix ? "animate-pulse" : ""}`} aria-hidden />
-                      {geo.active ? (geo.fix ? "Using my location" : "Locating…") : "Use my location"}
+                      {geo.active && !geo.fix ? "Locating…" : "My location"}
                     </button>
                     {geo.active && geo.fix && (
                       <span className="rounded-full bg-ok/15 px-2.5 py-1 text-[12px] font-bold text-ok">
@@ -415,8 +419,8 @@ export function AroundMe({ location, activeCamUrl, feed }: AroundMeProps) {
                       </span>
                     )}
                     {updatedAt && (
-                      <span className="ml-auto text-[12px] font-semibold text-white/45">
-                        Updated {updatedAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
+                      <span className="ml-auto text-[12px] font-semibold text-white/45" title="Updated">
+                        {updatedAt.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" })}
                       </span>
                     )}
                   </div>
@@ -462,7 +466,7 @@ export function AroundMe({ location, activeCamUrl, feed }: AroundMeProps) {
 
             {failed && (
               <p className="glass absolute bottom-3 left-1/2 -translate-x-1/2 rounded-full px-4 py-1.5 text-[12px] font-bold text-white/70">
-                Live data unavailable
+                Offline
               </p>
             )}
           </>

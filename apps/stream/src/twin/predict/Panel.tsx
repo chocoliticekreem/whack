@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useCompare } from "../compare/store";
 import { areaName, useOrigin } from "../origin";
-import { useFieldStore } from "../sim/useField";
 import { startReplay, useReplay } from "./replay";
 import { ModeChip } from "./Report";
 import { Score } from "./Score";
@@ -22,8 +21,6 @@ const CSS = `
 .predict-spin { width: 12px; height: 12px; border-radius: 999px; border: 2px solid rgba(255,255,255,0.35); border-top-color: #fff;
   animation: predict-spin 0.8s linear infinite; display: inline-block; vertical-align: -2px; margin-right: 6px; }
 @keyframes predict-spin { to { transform: rotate(360deg); } }
-.predict-ready { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 700;
-  color: var(--ok); border: 1px solid color-mix(in srgb, var(--ok) 45%, transparent); background: color-mix(in srgb, var(--ok) 12%, transparent); }
 .predict-stages { display: grid; gap: 3px; font-size: 11px; color: var(--muted); }
 .predict-stages .on { color: var(--text); font-weight: 600; }
 .predict-stages .done { color: var(--ok); }
@@ -34,8 +31,8 @@ const CSS = `
 
 /** Rough wall-clock split of a run: the service does not stream progress, so stages are timed. */
 const STAGES: { at: number; text: string }[] = [
-  { at: 0, text: "Seeding from live field" },
-  { at: 7, text: "Walking 80 persona groups" },
+  { at: 0, text: "Seeding" },
+  { at: 7, text: "Simulating" },
   { at: 40, text: "Writing report" },
 ];
 
@@ -50,7 +47,9 @@ function Progress({ startedAt }: { startedAt: number }) {
     <div style={card}>
       <Row>
         <span className="predict-spin" />
-        <span style={{ fontWeight: 600 }}>Forecasting · {elapsed} s</span>
+        <span style={{ fontWeight: 600 }} title={`Usually 20–60 s · gives up at ${FORECAST_TIMEOUT_MS / 1000} s`}>
+          {elapsed} s
+        </span>
         <span style={{ marginLeft: "auto" }}>
           <Button small onClick={cancelForecast}>
             Cancel
@@ -67,7 +66,6 @@ function Progress({ startedAt }: { startedAt: number }) {
           </span>
         ))}
       </div>
-      <span style={label}>Usually 20–60 s · gives up at {FORECAST_TIMEOUT_MS / 1000} s</span>
     </div>
   );
 }
@@ -87,7 +85,7 @@ function Scrubber() {
     <div style={card}>
       <Row>
         <span style={{ fontWeight: 600, color: m > 0 ? "#ff6a3d" : "var(--text)" }}>{m === 0 ? "Now" : `Predicted +${m} min`}</span>
-        <span style={label}>{at} · {step.walking} groups walking</span>
+        <span style={label} title={`${step.walking} persona groups walking`}>{at}</span>
         <span style={{ marginLeft: "auto" }}>
           <Button small onClick={() => usePredict.setState({ playing: !playing, minute: !playing && minute >= 30 ? 0 : minute })}>
             {playing ? "Pause" : "Play"}
@@ -108,8 +106,7 @@ function Scrubber() {
         }}
       />
       <Row>
-        <span style={label}>Key zones only: ember busier than now, blue quieter</span>
-        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }}>
+        <span style={{ marginLeft: "auto", display: "flex", gap: 6 }} title="Key zones only: ember busier than now, blue quieter">
           {whatIf && (
             <>
               <Button small active={shown === "baseline"} onClick={() => usePredict.setState({ shown: "baseline" })}>
@@ -141,7 +138,6 @@ export function PredictPanel() {
   const whatIf = usePredict((s) => s.whatIf);
   const run = usePredict(shownRun);
   const origin = useOrigin((s) => s.origin);
-  const field = useFieldStore();
   const area = areaName(origin);
   useEffect(() => {
     // Why: a run's ghosts are in the frame it was seeded in; a new origin empties them.
@@ -155,7 +151,7 @@ export function PredictPanel() {
       <div className={`predict-panel${open ? "" : " closed"}`}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "10px 12px" }}>
           <span style={{ width: 9, height: 9, borderRadius: 999, background: "#ff6a3d", boxShadow: "0 0 8px #ff6a3d" }} />
-          <span style={{ fontWeight: 600, fontSize: 14, flex: 1, whiteSpace: "nowrap" }}>Predict · {area} · 30 min</span>
+          <span style={{ fontWeight: 600, fontSize: 14, flex: 1, whiteSpace: "nowrap" }}>Predict 30 min</span>
           {run && <ModeChip run={run} />}
           <button
             type="button"
@@ -171,13 +167,12 @@ export function PredictPanel() {
             {!loading && (
               <Row>
                 <Button primary onClick={() => void runForecast("baseline", origin, area)}>
-                  {baseline ? "Re-run baseline" : "Predict next 30 min"}
+                  {baseline ? "Re-run" : "Run"}
                 </Button>
                 {run && (
                   <>
-                    <span className="predict-ready">● Report ready</span>
                     <Button small onClick={() => usePredict.setState({ reportOpen: true })}>
-                      Open report
+                      Report
                     </Button>
                     <Button small onClick={startReplay}>
                       ▶ Replay
@@ -189,12 +184,6 @@ export function PredictPanel() {
             {startedAt !== null && <Progress key={startedAt} startedAt={startedAt} />}
             {error && <div style={{ ...card, color: "var(--live)", fontSize: 12 }}>{error}</div>}
             {notice && <div style={{ ...card, color: "var(--warn)", fontSize: 12 }}>{notice}</div>}
-            {!run && !loading && !error && (
-              <div style={label}>
-                Seeds a parallel {area} from the live field, lets persona groups walk it forward and reports what changes.
-                {field ? ` Observed ${field.observed} street segments from cameras, inferred the rest.` : ""}
-              </div>
-            )}
             <Scrubber />
             {baseline && whatIf && <Diff baseline={baseline} whatIf={whatIf} />}
             <WhatIf />

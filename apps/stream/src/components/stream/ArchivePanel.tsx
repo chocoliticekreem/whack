@@ -137,14 +137,14 @@ export function ArchivePanel() {
   return (
     <section>
       <p className="mb-2 text-[12px] text-dim">
-        {loading ? <span className="animate-pulse text-muted">Searching VSS…</span> : result ? `${result.latency_ms} ms` : "VSS search over the city cameras"}
+        {loading ? <span className="animate-pulse text-muted">Searching VSS…</span> : result ? `${result.latency_ms} ms` : "Search cameras"}
       </p>
       <div>
         <form onSubmit={submit} className="flex items-center gap-2">
           <input
             value={draft}
             onChange={(e) => setDraft(e.target.value)}
-            placeholder="e.g. is anyone following me?"
+            placeholder="Ask anything"
             className="h-9 min-w-0 flex-1 rounded-lg border border-line-strong bg-surface-2 px-3 text-[13px] text-text placeholder:text-dim focus:border-text/40 focus:outline-none"
           />
           <button
@@ -165,10 +165,14 @@ export function ArchivePanel() {
             ))}
           </p>
         )}
-        {error && <p className="mt-2 text-[12px] text-warn">{error}</p>}
+        {error && (
+          <p className="mt-2 text-[12px] text-warn" title={`Archive search offline: ${error}`}>
+            Offline
+          </p>
+        )}
         {result && (
           <ul className="mt-3 flex flex-col gap-2">
-            {result.moments.length === 0 && <li className="text-[12px] text-dim">No moments matched “{result.query}”.</li>}
+            {result.moments.length === 0 && <li className="text-[12px] text-dim" title={`No moments matched “${result.query}”`}>No matches</li>}
             {result.moments.map((m) => (
               <Moment key={`${m.source}-${m.start_s}`} m={m} />
             ))}
@@ -179,7 +183,7 @@ export function ArchivePanel() {
           <p className="flex flex-wrap items-center gap-x-2 text-[12px] text-text">
             <Database className="size-3.5 text-ember" aria-hidden />
             <span className="font-semibold">Recent verdicts</span>
-            <span className="text-dim">VastDB · {verdicts.data ? verdicts.data.table : "…"}</span>
+            <span className="text-dim">VastDB · {verdicts.data ? verdicts.data.table : verdicts.error ? "offline" : "…"}</span>
             {byLevel && (
               <span className="ml-auto text-dim">
                 last hour: <span className={LEVEL_TEXT.calm}>{byLevel.calm} calm</span> ·{" "}
@@ -188,9 +192,13 @@ export function ArchivePanel() {
               </span>
             )}
           </p>
-          {verdicts.error && <p className="mt-1 text-[12px] text-warn">{verdicts.error}</p>}
+          {verdicts.error && (
+            <p className="mt-1 text-[12px] text-dim" title={`VastDB offline: ${verdicts.error}`}>
+              Offline
+            </p>
+          )}
           {verdicts.data && verdicts.data.verdicts.length === 0 && (
-            <p className="mt-1 text-[12px] text-dim">No verdicts stored yet. The first assessment writes one.</p>
+            <p className="mt-1 text-[12px] text-dim" title="The first assessment writes one">None yet</p>
           )}
           <ul className="mt-1.5 flex flex-col gap-1 text-[12px]">
             {verdicts.data?.verdicts.map((v) => (
