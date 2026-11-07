@@ -23,6 +23,9 @@ and the mechanism comes after.
 **Rule:** lead with the stock-market image. Say TOPS once, after it lands. Betting is how
 judges touch it, not the point. Points only, never real money.
 
+**The rules as built** (contracts, pricing, settlement, the AI traders and known gaps) are in
+[market.md](market.md).
+
 **The upgrade that makes the market real (adopted):**
 1. **Brokers are data sources, not personalities.** This is alpha capture done properly: TOPS
    works because each broker has *different information*. Each AI broker reads ONE

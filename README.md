@@ -9,6 +9,7 @@ stock is a possible future of London, and reality is the market.* Pitch in docs/
 | Doc | Read it for |
 |---|---|
 | [docs/idea.md](docs/idea.md) | **Start here.** The current idea, what "novel" means here, the ranked shortlist, how we decide |
+| [docs/market.md](docs/market.md) | How the markets work, as built: contracts, pricing (futures + LMSR), settlement, the AI traders, known gaps |
 | [docs/marshall-wace.md](docs/marshall-wace.md) | The sponsor: brief, judging, who MW are, past winners and why they won |
 | [docs/event.md](docs/event.md) | Logistics: rules, timetable, every track and prize, submission |
 | [docs/data-sources.md](docs/data-sources.md) | Every data source: live vs history, auth, alternative data, city comparison |

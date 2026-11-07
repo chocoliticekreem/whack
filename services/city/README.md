@@ -30,7 +30,8 @@ the settled count per market kind (real reading vs void) plus a calibration tabl
 | yesno | Rain in central London before 17:25? | Open-Meteo | any reading > 0.1 mm in [open, T] |
 
 The exchange keeps 3–5 markets open at all times. At least one closes within 2 min, and a new market opens as an old one
-closes. Horizons are 2–10 min. Crowding and rain markets settle just after TfL's or Open-Meteo's 5-min publish, so the
+closes. Horizons are 2 min for quick markets and 5–15 min for the rest. The full market rules are in
+[docs/market.md](../../docs/market.md). Crowding and rain markets settle just after TfL's or Open-Meteo's 5-min publish, so the
 settling reading is fresh. Trading closes 60 s before T (90 s for cameras). A market halts on a stale feed (3 min; 6 min
 for the 5-minutely crowding and rain) or on a 3σ jump in its own series, and resumes after 2 clean ticks. With no
 reading by T+3 min, "by T" yes/no markets resolve No and the others void with a refund.
