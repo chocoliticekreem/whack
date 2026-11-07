@@ -86,3 +86,13 @@ class SourcesTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SeedCamsTest(unittest.TestCase):
+    def test_reads_the_market_seed_cameras(self):
+        ids = record.seed_cam_ids()
+        self.assertEqual(len(ids), 8)
+        self.assertTrue(all(i.startswith("JamCams_") for i in ids))
+
+    def test_missing_seed_means_count_every_camera(self):
+        self.assertEqual(record.seed_cam_ids(Path("/nonexistent/seed.json")), set())
