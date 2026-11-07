@@ -31,6 +31,8 @@ Vercel's `CITY_URL` to the tunnel URL.
 | [docs/build.md](docs/build.md) | What's shipped (by PR), what's in progress, ranked gaps, how to run it |
 | [services/city/README.md](services/city/README.md) | The markets backend: series, pricing, integrity rules, wallet, endpoints |
 | [docs/questions.md](docs/questions.md) | Why each market question was chosen, measured on Saturday's data |
+| [docs/market-structure.md](docs/market-structure.md) | How the market works today: the LMSR house, how prices form, the AI traders, the points economy, integrity, and the economy simulation |
+| [docs/exchange-design.md](docs/exchange-design.md) | Where it goes: a Kalshi-style order book with no house, where one player trades against thousands of AI market makers, hedge funds and retail |
 | [docs/business.md](docs/business.md) | Fairness principle, market integrity, the path from game to exchange |
 | [docs/marshall-wace.md](docs/marshall-wace.md) | The sponsor: brief, judging, who MW are, past winners |
 | [docs/event.md](docs/event.md) | Logistics: rules, timetable, tracks and prizes, submission |
