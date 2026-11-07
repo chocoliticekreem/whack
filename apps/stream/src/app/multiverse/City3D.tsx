@@ -13,9 +13,9 @@ import type { Hotspot } from "./city-types";
 /** The twin's own OSM square (1.75 km) is centred between Oxford Circus and Piccadilly; farther hubs load as extra patches. */
 export const CITY_ORIGIN = snapOrigin(51.5115, -0.1285);
 
-const MAGENTA = new THREE.Color("#ff2d8a");
+const ACCENT = new THREE.Color("#d6246e");
 const WHITE = new THREE.Color("#ffffff");
-const GOLD = new THREE.Color("#ffd23d");
+const GREEN = new THREE.Color("#00865a");
 const BEAM_H = 420;
 
 export interface Pop {
@@ -148,25 +148,26 @@ function Marker({
   const beam = useRef<THREE.MeshBasicMaterial>(null);
   const ring = useRef<THREE.Mesh>(null);
   const ring2 = useRef<THREE.Mesh>(null);
-  const color = win ? GOLD : active ? MAGENTA : WHITE;
+  const color = win ? GREEN : WHITE;
+  const ringColor = win ? GREEN : ACCENT;
 
   useFrame(({ clock }) => {
     const t = clock.elapsedTime;
-    const speed = win ? 1.6 : 0.6;
+    const speed = win ? 1.2 : 0.45;
     [ring.current, ring2.current].forEach((m, i) => {
       if (!m) return;
       const p = (t * speed + i * 0.5) % 1;
-      m.scale.setScalar(1 + p * (win ? 6 : active ? 3.5 : 2.5));
-      (m.material as THREE.MeshBasicMaterial).opacity = (1 - p) * (active || win ? 0.9 : 0.55);
-      (m.material as THREE.MeshBasicMaterial).color.copy(color);
+      m.scale.setScalar(1 + p * (win ? 4 : 2.5));
+      (m.material as THREE.MeshBasicMaterial).opacity = active || win ? (1 - p) * 0.7 : 0;
+      (m.material as THREE.MeshBasicMaterial).color.copy(ringColor);
     });
     if (beam.current) {
       beam.current.color.copy(color);
-      beam.current.opacity = (win ? 0.85 : active ? 0.75 : 0.5) + Math.sin(t * 3) * 0.1;
+      beam.current.opacity = win || active ? 0.95 : 0.5;
     }
   });
 
-  const width = win ? 30 : active ? 22 : 12;
+  const width = win ? 7 : active ? 6 : 3;
   return (
     <group position={[x, 0, z]}>
       <mesh position={[0, BEAM_H / 2, 0]}>
