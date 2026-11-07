@@ -7,7 +7,7 @@ import { createPortal } from "react-dom";
 const SEEN_KEY = "overwatch.howItWorks.v1";
 
 const STEPS = [
-  "Pick a question about London's next 5 minutes.",
+  "Pick a question about London's next 5 minutes, or click any spot on the map.",
   "Back an answer with points. The less likely it is, the more it pays.",
   "Real TfL data decides. Winners get paid.",
 ];

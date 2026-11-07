@@ -415,7 +415,6 @@ export function MarketCard({
         </div>
       )}
 
-      {canBet && !drafted && <p className="tl-hint">Tap an answer, choose your points, then confirm.</p>}
 
       {canBet && drafted && (
         <div className="tl-stake" onClick={(e) => e.stopPropagation()}>
