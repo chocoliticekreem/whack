@@ -10,10 +10,10 @@ sources:
 
 # Market structure
 
-The rules our markets follow, as built. Two venues share one idea: **simulated futures set the
-price, and real London data settles it.** The pitch is in [idea.md](idea.md).
+The rules OverWatch's markets follow, as built. Two venues share one idea: **simulated futures
+set the price, and real London data settles it.** The pitch is in [idea.md](idea.md).
 
-| | **Trade London** (the city exchange) | **The Oxford Circus multiverse** |
+| | **The city exchange** (titled "Trade London" in the UI) | **The Oxford Circus multiverse** |
 |---|---|---|
 | Page | `/multiverse` | `/multiverse/oxford` (game), `/multiverse/board` |
 | Service | `services/city` (:8051) | `services/multiverse` (:8049) |
@@ -22,7 +22,7 @@ price, and real London data settles it.** The pitch is in [idea.md](idea.md).
 | The AI | 6 rule-based traders, one feed each | 10 Claude Haiku brokers, one feed each (TOPS) |
 | Headline number | Odds per option | The London VIX |
 
-## 1. Trade London: the city exchange
+## 1. The city exchange
 
 ### 1.1 Participants
 - **Players** start with 1,000 points.
@@ -81,6 +81,9 @@ steps minute by minute, with step sizes fitted from today's data and any single 
   today's real counts at those stops;
 - Tube lines: worsening and recovery hazards, fitted from today's status changes;
 - rain: one wet/dry draw per 15-min slot, with odds from that slot's nowcast.
+
+These are small statistical models fitted per feed, not the Predict agent simulation that the
+multiverse runs (§2).
 
 Each new reading rules out the futures that disagree with it, never more than 60% (30) over the
 market's life. **Model probability = share of surviving futures**, with half a future added to each
@@ -191,7 +194,7 @@ from data**, and the AI brokers only decide which futures get explored.
    slippage: at 50% it says 190, and the bet pays 183.
 3. **AI traders don't size their bets.** A fixed 100 points, with no conviction, no bankroll or
    position cap, and no learning from their record.
-4. **The pitch says Haiku brokers trade.** In Trade London the traders are rule-based. The Haiku
+4. **The pitch says Haiku brokers trade.** On the city exchange the traders are rule-based. The Haiku
    brokers and the London VIX are only in the Oxford Circus multiverse.
 5. **The house's loss isn't strictly bounded.** With a fixed base, LMSR loses at most
    b · ln(1 / p_min), about 4,200 points per market at the 3% floor. Here the base moves, so that
