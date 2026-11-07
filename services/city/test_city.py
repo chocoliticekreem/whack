@@ -704,6 +704,57 @@ class SignalsTest(CityCase):
         json.dumps(strip)
 
 
+# ---------------------------------------------------------------- futures fan
+
+
+class FuturesFanTest(CityCase):
+    def setUp(self):
+        super().setUp()
+        city(self.raw, T0 + 70 * MIN)
+
+    def assert_fan(self, f: dict, m: dict):
+        self.assertEqual(f["n"], 50)
+        self.assertEqual(f["alive"] + f["ruledOut"], 50)
+        self.assertEqual(set(f["byOption"]), {o["id"] for o in m["options"]})
+        self.assertEqual(sum(f["byOption"].values()), f["alive"], m["id"])
+        self.assertEqual(len(f["paths"]), 50)
+        self.assertEqual(sum(f["alivePaths"]), f["alive"])
+        for path in f["paths"] + [f["real"]]:
+            self.assertLessEqual(len(path), 12)
+            for ts, v in path:
+                self.assertIsInstance(ts, int)
+                self.assertIsInstance(v, (int, float))
+
+    def test_every_market_carries_its_futures_and_by_option_sums_to_alive(self):
+        ex = self.exchange()
+        ex.store.refresh(T0 - mk.HISTORY_MS, T0)
+        ex.store.ingest_vix(vix_payload(T0 - 2 * 3_600_000, T0 + 70 * MIN))
+        for t in range(T0, T0 + 8 * MIN, 12_000):
+            ex.tick(t)
+        js = ex.markets_json(T0 + 8 * MIN)
+        subs = {m["series"] for m in js["markets"]}
+        self.assertTrue({"hub_surge", "city_pulse", "london_vix", "hub_hour"} <= subs, subs)
+        for m in js["markets"]:
+            self.assert_fan(m["futures"], m)
+            self.assertGreaterEqual(len(m["futures"]["real"]), 1, m["id"])
+        vix = next(m for m in js["markets"] if m["series"] == "london_vix")
+        self.assertIn("50 simulated futures of Oxford Circus", vix["futures"]["about"])
+        self.assertLess(len(json.dumps(js)), 150_000)
+
+    def test_a_settled_market_returns_the_realised_value_and_the_closest_future(self):
+        ex = self.exchange()
+        for t in range(T0, T0 + 7 * MIN, 12_000):
+            ex.tick(t)
+        m = ex.markets["city_pulse-1505"]
+        self.assertIsNotNone(m.result)
+        f = ex.market_json(m, T0 + 7 * MIN)["futures"]
+        self.assert_fan(f, ex.market_json(m, T0 + 7 * MIN))
+        self.assertAlmostEqual(f["realised"]["value"], m.result["settlement"]["value"], places=1)
+        self.assertEqual(f["real"][-1][0], m.result["settlement"]["fetchedAt"])
+        self.assertIn(f["realised"]["closest"], range(50))
+        self.assertTrue(f["alivePaths"][f["realised"]["closest"]])
+
+
 # ---------------------------------------------------------------- traders
 
 

@@ -35,6 +35,27 @@ export interface AiBet {
   why: string;
 }
 
+/** A market's simulated futures as paths of the number it settles on (services/city/fan.py). */
+export interface Futures {
+  n: number;
+  alive: number;
+  ruledOut: number;
+  /** Alive futures landing on each option; sums to `alive`. */
+  byOption: Record<string, number>;
+  /** One path per future, [ts, value] points from open to settle. */
+  paths: [number, number][][];
+  /** 1 when that path's future is still alive. */
+  alivePaths: number[];
+  /** Real readings since open. */
+  real: [number, number][];
+  /** The over/under line or the bracket edges. */
+  lines: number[];
+  label: string;
+  unit: string;
+  about: string;
+  realised?: { value: number | null; closest: number | null };
+}
+
 export type MarketStatus = "open" | "closed" | "halted" | "settled" | "void";
 
 export interface Market {
@@ -44,7 +65,8 @@ export interface Market {
   hotspots: string[];
   closesAt: number;
   settlesAt: number;
-  futures: number;
+  /** The simulated futures behind the price; missing in demo data. */
+  futures?: Futures;
   options: MarketOption[];
   aiBets: AiBet[];
   /** Feed, place and settle time, e.g. "TfL Crowding API · Oxford Circus · settles 17:50:00 Europe/London". */
