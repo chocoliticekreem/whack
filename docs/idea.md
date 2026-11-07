@@ -22,6 +22,28 @@ and the mechanism comes after.
 **Rule:** lead with the stock-market image. Say TOPS once, after it lands. Betting is how
 judges touch it, not the point. Points only, never real money.
 
+**100 words (the startup framing: London is market #1, the world is the vision):**
+> Prediction markets like Polymarket and Kalshi price the questions someone thought to ask. **We
+> price the world itself, starting with London.**
+>
+> The Exchange of Worlds forks the city into parallel futures. They're simulated live from TfL
+> cameras and buses and drawn in 3D as ghost cities over the real one. Every future is a stock.
+> A **market maker**, our reality-tracking engine, quotes each world's probability. AI brokers
+> bet with conviction, TOPS-style. Every real camera frame settles the trades, and wrong worlds
+> shatter.
+>
+> The result: **a live price for every possible next hour of a city.** London is our first
+> market. **The world is the exchange.**
+
+- **Why no problem statement is needed:** it borrows a trajectory judges already believe in
+  (prices beat pundits, which Polymarket and Kalshi made mainstream) and extends it from
+  questions people write to every state of a physical system, generated automatically.
+- **The market maker is the rigour:** a slice of worlds no broker owns, which only tracks
+  reality. Brokers can be wrong; the market maker keeps prices honest.
+- **Q&A:** *"Real betting?"* No, points only; the product is the forecast. *"Why not one
+  model?"* One model is one guess; a market of worlds is the whole distribution, plus which
+  assumptions reality is rejecting, live.
+
 **10 s** (technical · presentation · creativity):
 "50 parallel Londons, **simulated live from TfL data**, **drawn in 3D**, and **traded like
 stocks**. Reality is the market."

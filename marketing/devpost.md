@@ -21,9 +21,12 @@ Copy each section below into the matching Devpost field.
 [FILL: group name]
 
 ## Tagline (≤ 200 chars)
-50 parallel Londons, simulated live from TfL data, drawn in 3D and traded like stocks. Reality is the market.
+We price the world itself, starting with London: parallel futures simulated live from TfL data, drawn in 3D and traded like stocks. Reality is the market.
 
 ## Inspiration
+Prediction markets like Polymarket and Kalshi price the questions someone thought to ask. We
+wanted to price the world itself, starting with London.
+
 Every city runs one timeline. We wanted to see the others.
 
 Marshall Wace built **TOPS** in 2002, the first alpha capture system: collect ideas from many
@@ -86,6 +89,9 @@ The "new world" in the brief is the one nobody can see: the London that hasn't h
 - [FILL]
 
 ## What's next
+- **London is our first market. The world is the exchange.** The engine only needs a street graph
+  and live observations, and public CCTV and transit feeds exist for dozens of cities (NYC, Hong
+  Kong, Norway, Helsinki…). After cities: ports, power grids, supply chains.
 - A null-model check (shuffle reality and show no world wins), to prove the pricing isn't luck.
 - More cities and more alternative data: aircraft holding patterns over Heathrow, grid demand,
   Wikipedia attention as a leading indicator.
