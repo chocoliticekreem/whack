@@ -68,9 +68,14 @@ class Series:
     series may settle later than the round (an hourly headline) and name its market itself.
     settle(market, store, now) -> ('wait', ms) | ('done', winner, reading, settlement) | ('void', reading,
     settlement) | ('missing',) (→ void, "No data").
+        The exchange also calls it while bets are open: return 'done' only when the answer is final, and the market
+        closes at once. It is called on markets rebuilt after a restart too (see Restored), so read only
+        market.id/kind/closes_at/settles_at/opened_at/spec/options/label()/option_ids().
     skip(market) -> a reason to leave this round's market unlisted, or None (beyond the 85% bracket rule).
     due(round_settles_at) -> whether this round lists the series at all (None = every round).
     settles_early: settle() is also asked before settlesAt (a clean sheet resolves NO the moment a line breaks).
+        Without it, a final answer found while bets are open still closes the market, which then settles at
+        settlesAt.
     enabled=False keeps a series registered (buildable, settleable, testable) but out of the default lineup.
     """
 
@@ -119,6 +124,7 @@ class Market:
         self.close_model: dict[str, float] | None = None
         self.result: dict | None = None
         self.settled_at: int | None = None
+        self.locked: tuple | None = None
 
     def prices(self) -> dict[str, float]:
         return self.book.prices(self.futures.probs())
@@ -128,6 +134,26 @@ class Market:
 
     def label(self, oid: str) -> str:
         return next(o["label"] for o in self.options if o["id"] == oid)
+
+
+def record_of(m: Market) -> dict:
+    """What the ledger keeps of a market so it can still be settled from recorded data after a restart."""
+    return {"id": m.id, "series": m.sub, "kind": m.kind, "openedAt": m.opened_at, "closesAt": m.closes_at,
+            "settlesAt": m.settles_at, "spec": m.spec, "options": m.options}
+
+
+class Restored:
+    """A market rebuilt from its ledger record: enough to settle it, not to trade it."""
+
+    def __init__(self, rec: dict):
+        self.id, self.sub, self.kind = rec["id"], rec["series"], rec["kind"]
+        self.opened_at, self.closes_at, self.settles_at = rec["openedAt"], rec["closesAt"], rec["settlesAt"]
+        self.spec, self.options = rec["spec"], rec["options"]
+        self.feed = REGISTRY[self.sub].feed
+        self.locked: tuple | None = None
+
+    label = Market.label
+    option_ids = Market.option_ids
 
 
 # ---------------------------------------------------------------- bracket ladders
@@ -609,8 +635,11 @@ register(Series("oxford-busy", "crowding", build_oxford_busy, settle_oxford_busy
 
 
 def try_settle(m: Market, store: Store, now: int):
-    """('wait', ms) | ('done', winner, reading, settlement) | ('void', reading, settlement)."""
+    """('wait', ms) | ('done', winner, reading, settlement) | ('void', reading, settlement). A market locked on a
+    final answer settles on it at settlesAt, or at once for a settles_early series."""
     series = REGISTRY[m.sub]
+    if m.locked is not None and (now >= m.settles_at or series.settles_early):
+        return m.locked
     if now < m.settles_at and not series.settles_early:
         return ("wait", m.settles_at - now)
     got = series.settle(m, store, now)

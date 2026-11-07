@@ -1,13 +1,16 @@
 """The exchange: 5-minute rounds of recurring city series, AI traders, player bets (LMSR), settlement, scores."""
 from __future__ import annotations
 
+import sys
 import time
+import uuid
 
 import markets as mk
 import pricing
 import signals
 import traders
 from data import SOURCES, Store, load_hotspots, local_time
+from ledger import Ledger, WalletError, as_points
 from pricing import MIN_MS
 
 ROUND_MS = 5 * MIN_MS
@@ -42,8 +45,9 @@ class Clock:
 
 
 class Exchange:
-    def __init__(self, store: Store, clock: Clock, hotspots: list[dict] | None = None):
+    def __init__(self, store: Store, clock: Clock, hotspots: list[dict] | None = None, ledger: Ledger | None = None):
         self.store, self.clock = store, clock
+        self.ledger = ledger or Ledger()  # wallet hook: player points live in the ledger, not here
         self.spots = hotspots or load_hotspots()
         self.by_id = {h["id"]: h for h in self.spots}
         self.markets: dict[str, mk.Market] = {}
@@ -51,7 +55,7 @@ class Exchange:
         self.rounds: dict[int, dict] = {}
         self.rejected = 0
         self.record = {t["id"]: {"won": 0, "lost": 0, "points": DEFAULT_BANKROLL} for t in traders.TRADERS}
-        self.scores: dict[str, dict] = {}
+        self.restored: list[tuple[mk.Restored, list[str]]] = []
         self.stats = {s: {"real": 0, "void": 0} for s in mk.SERIES}
         self.open_favourites: dict[str, list[float]] = {s: [] for s in mk.SERIES}
         self.calibration: dict[str, list[tuple[float, bool]]] = {"price": [], "model": []}
@@ -65,13 +69,54 @@ class Exchange:
         self.store.refresh(now - mk.HISTORY_MS, now)
         for m in self.active():
             mk.observe(m, self.store, now)
-            if m.close_prices is None and now >= m.closes_at:
+            self.lock_if_decided(m, now)
+            if m.close_prices is None and (now >= m.closes_at or m.locked):
                 m.close_prices, m.close_model = m.prices(), m.futures.probs()
-            self.settle(m, now)
+            try:
+                self.settle(m, now)
+            except Exception as exc:  # noqa: BLE001 - the market stays unsettled and the next tick retries it
+                print(f"settle {m.id} failed, will retry: {type(exc).__name__}: {exc}", file=sys.stderr)
+        self.settle_restored(now)
         self.open_round(now)
         for m in self.active():
             if self.status(m, now) == "open":
                 self.ai_bets(m, now)
+
+    def lock_if_decided(self, m: mk.Market, now: int) -> None:
+        """Ask the series' settle function about the data so far. A final answer while bets are still open closes
+        the market at once, so a sure thing can never be bought."""
+        if m.locked is not None or m.result is not None or now >= m.closes_at:
+            return
+        got = mk.REGISTRY[m.sub].settle(m, self.store, now)
+        if got[0] == "done":
+            m.locked = got
+
+    # ------------------------------------------------------------ restart
+
+    def recover(self) -> dict:
+        """After a restart: bets on a recorded market are settled from recorded data by the next ticks, like any
+        other; only bets that cannot be settled (no record, or a series that no longer exists) are refunded now."""
+        refunded = 0
+        for g in self.ledger.open_markets():
+            rec = g["record"]
+            if rec is None or rec.get("series") not in mk.REGISTRY:
+                refunded += self.ledger.settle_bets(
+                    g["bets"], None, "Exchange restarted and this market cannot be settled from data; stake refunded")
+                continue
+            self.restored.append((mk.Restored(rec), g["bets"]))
+        return {"refunded": refunded, "pending": sum(len(b) for _, b in self.restored)}
+
+    def settle_restored(self, now: int) -> None:
+        keep = []
+        for m, bets in self.restored:
+            got = mk.try_settle(m, self.store, now)
+            if got[0] == "wait":
+                keep.append((m, bets))
+            elif got[0] == "done":
+                self.ledger.settle_bets(bets, got[1], got[2])
+            else:
+                self.ledger.settle_bets(bets, None, got[1])
+        self.restored = keep
 
     def active(self) -> list[mk.Market]:
         return [self.markets[i] for i in self.order if self.markets[i].result is None]
@@ -112,7 +157,7 @@ class Exchange:
     def status(self, m: mk.Market, now: int) -> str:
         if m.result is not None:
             return "void" if m.result["winner"] is None else "settled"
-        if now >= m.closes_at:
+        if now >= m.closes_at or m.locked is not None:
             return "closed"
         return "halted" if self.halt_reason(m, now) else "open"
 
@@ -127,37 +172,63 @@ class Exchange:
             out[b["option"]] += b["stake"]
         return out
 
-    def place(self, m: mk.Market, option: str, stake: float) -> tuple[float, float, float]:
-        """(shares, new price, locked odds). The payout multiple is held to the displayed 1.05..20 range, so a
-        bet on a 97% favourite never pays back less than its stake."""
-        shares = m.book.buy(m.futures.probs(), option, stake)
-        return shares, m.prices()[option], max(1.05, min(20.0, round(shares / stake, 2)))
+    @staticmethod
+    def quote(m: mk.Market, option: str, stake: float) -> tuple[float, float]:
+        """(shares, locked odds) for a stake, without touching the book. Odds never exceed the shares bought, so no
+        price gives a bettor more than the market maker's own payout."""
+        shares = m.book.quote(m.futures.probs(), option, stake)
+        odds = pricing.locked_odds(shares, stake)
+        if odds is None:
+            raise WalletError("price_too_short", f"Price too short: {m.label(option)} pays under "
+                                                 f"{pricing.MIN_ODDS}x right now")
+        return shares, odds
 
     def bet(self, body: dict, now: int | None = None) -> dict:
+        """Places a player's bet. `body['player']` must already be authenticated by the caller (the HTTP layer)."""
         now = self.clock.now() if now is None else now
         m = self.markets.get(str(body.get("market")))
         if m is None:
             raise LookupError("unknown market")
-        option, player = str(body.get("option")), str(body.get("player") or "")
+        option = str(body.get("option"))
         if option not in m.option_ids():
             raise ValueError(f"option must be one of {m.option_ids()}")
-        if not player:
-            raise ValueError("player is required")
-        stake = body.get("stake")
-        if not isinstance(stake, (int, float)) or isinstance(stake, bool) or stake <= 0:
+        stake = as_points(body.get("stake"))
+        if stake <= 0:
             raise ValueError("stake must be a positive number")
+        player = self.ledger.require(body.get("player"))
+        # wallet hook (ledger.py): a replayed idempotency_key returns the original bet before anything moves.
+        key = str(body.get("idempotency_key") or uuid.uuid4().hex)
+        prior = self.ledger.find_bet(player, key, m.id, m.settles_at, option, stake)
+        if prior:
+            return self.bet_reply(m, prior)
         status = self.status(m, now)
         if status != "open":
             raise PermissionError(f"market {status}")
-        bankroll = self.scores.get(player, {}).get("points", DEFAULT_BANKROLL)
+        bankroll = self.ledger.equity(player)  # wallet hook: cash + escrow from the ledger
         cap = max(0.0, POSITION_CAP * bankroll)
         held = sum(b["stake"] for b in m.bets if b["player"] == player)
         if held + stake > cap:
             raise PermissionError(f"position cap: max {cap:g} points in this market ({held:g} already staked)")
-        shares, price, odds = self.place(m, option, float(stake))
-        m.bets.append({"player": player, "option": option, "stake": float(stake), "odds": odds, "at": now})
-        return {"ok": True, "price": round(price, 4), "shares": round(shares, 1), "odds": odds,
-                "options": self.options_json(m)}
+        # wallet hook: checks, the quote and cash -> escrow run in one transaction; the book moves only after commit.
+        quoted: dict[str, float] = {}
+
+        def priced() -> tuple[float, float]:
+            quoted["shares"], odds = self.quote(m, option, stake)
+            return quoted["shares"], odds
+
+        booked = self.ledger.place_bet(player, key, stake, market=m.id, question=m.question, option=option,
+                                       label=m.label(option), settles_at=m.settles_at, price=priced,
+                                       commit=lambda: m.book.commit(option, quoted["shares"]),
+                                       confirm_token=body.get("confirm_token"), record=mk.record_of(m))
+        m.bets.append({"player": player, "option": option, "stake": float(stake), "odds": booked["odds"], "at": now,
+                       "bet_id": booked["betId"]})
+        return self.bet_reply(m, booked)
+
+    def bet_reply(self, m: mk.Market, booked: dict) -> dict:
+        return {"ok": True, "price": round(m.prices()[booked["option"]], 4), "shares": round(booked["shares"], 1),
+                "odds": booked["odds"], "options": self.options_json(m), "betId": booked["betId"],
+                "payout": booked["payout"], "balance": booked["balance"], "escrow": booked["escrow"],
+                "replayed": booked["replayed"]}
 
     def ai_bets(self, m: mk.Market, now: int) -> None:
         ctx = {"spots": self.by_id}
@@ -177,7 +248,11 @@ class Exchange:
                 self.sat_out[tid] = (m.settles_at, traders.sit_out(tid, self.store, now, round_markets))
                 continue
             option, why = pick
-            _, _, odds = self.place(m, option, traders.STAKE)
+            try:
+                shares, odds = self.quote(m, option, traders.STAKE)
+            except WalletError:
+                continue
+            m.book.commit(option, shares)
             m.ai_bets.append({"trader": tid, "option": option, "why": why, "stake": traders.STAKE, "odds": odds})
 
     # ------------------------------------------------------------ settlement
@@ -189,6 +264,8 @@ class Exchange:
         if got[0] == "wait":
             return {"settled": False, "waitMs": int(got[1])}
         winner, reading, snap = (got[1], got[2], got[3]) if got[0] == "done" else (None, got[1], got[2])
+        # wallet hook: player bets settle first, so if the ledger fails nothing below has run and the market retries.
+        self.ledger.settle_bets([b["bet_id"] for b in m.bets if "bet_id" in b], winner, reading)
         results = []
         for b in m.ai_bets:
             rec = self.record[b["trader"]]
@@ -294,15 +371,9 @@ class Exchange:
             out["previous"] = {"round": local_time(prev), "settlesAt": prev, "results": results}
         return out
 
-    def score(self, body: dict) -> dict:
-        player, points = str(body.get("player") or ""), body.get("points")
-        if not player or not isinstance(points, (int, float)) or isinstance(points, bool):
-            raise ValueError("player and numeric points are required")
-        self.scores[player] = {"name": str(body.get("name") or player)[:32], "points": int(points)}
-        return {"ok": True}
-
     def leaderboard(self) -> dict:
-        rows = [{"name": s["name"], "points": s["points"], "kind": "human"} for s in self.scores.values()]
+        """Human points are each player's equity from the ledger; nothing a client posts can change them."""
+        rows = self.ledger.leaderboard()
         rows += [{"name": t["name"], "points": self.record[t["id"]]["points"], "kind": "ai"} for t in traders.TRADERS]
         return {"rows": sorted(rows, key=lambda r: -r["points"])}
 

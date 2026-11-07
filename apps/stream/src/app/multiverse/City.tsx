@@ -1,6 +1,6 @@
 "use client";
 
-import { Flame, Trophy, X } from "lucide-react";
+import { Flame, Trophy, WalletIcon, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CityMapGL, flyToHotspots, type Pop } from "./CityMapGL";
 import {
@@ -16,6 +16,7 @@ import {
 } from "./city-store";
 import type { BetResponse, Hotspot, LeaderRow, Market, MarketsResponse, SettleResponse, Trader } from "./city-types";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
+import { WalletPanel, createPlayer, setNickname, useServerWallet, useStakeConfirm } from "./Wallet";
 
 const POLL_MS = 3000;
 const SETTLE_POLL_MS = 2500;
@@ -33,10 +34,10 @@ const FEED_NAMES: Record<string, string> = {
 
 const forcedMock = () => new URLSearchParams(window.location.search).get("mock") === "1";
 
-async function call<T>(mock: boolean, path: string, body?: unknown): Promise<{ ok: boolean; status: number; data: T }> {
+async function call<T>(mock: boolean, path: string, body?: unknown, token?: string | null): Promise<{ ok: boolean; status: number; data: T }> {
   const res = await fetch(`/api/city/${path}${mock ? "?mock=1" : ""}`, {
     method: body === undefined ? "GET" : "POST",
-    headers: { "content-type": "application/json" },
+    headers: { "content-type": "application/json", ...(token ? { "x-player-token": token } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body),
     cache: "no-store",
   });
@@ -124,6 +125,36 @@ export function City() {
   const [betError, setBetError] = useState<string | null>(null);
   const [book, setBook] = useState<Book>({ markets: {}, hist: {} });
   const settling = useRef(new Set<string>());
+  // Wallet hook: the server ledger owns the balance; wallet.points mirrors it outside the demo mock.
+  const [walletOpen, setWalletOpen] = useState(false);
+  const mirrorCash = useCallback((cash: number) => setWallet((w) => (w.points === cash ? w : { ...w, points: cash })), []);
+  const dropToken = useCallback(() => setWallet((w) => (w.token ? { ...w, token: null } : w)), []);
+  const { wallet: server, refresh: refreshWallet } = useServerWallet(wallet.player, wallet.token, !mock && !!wallet.token, mirrorCash, dropToken);
+  const [askStake, stakeDialog] = useStakeConfirm();
+
+  const nameRef = useRef(wallet.name);
+  useEffect(() => {
+    nameRef.current = wallet.name;
+  }, [wallet.name]);
+
+  // The server issues the player id and token once; both live in localStorage from then on.
+  useEffect(() => {
+    if (mock || wallet.token) return;
+    let live = true;
+    void createPlayer().then((r) => {
+      if (!live) return;
+      if ("error" in r) {
+        setBetError(r.error);
+        return;
+      }
+      setBetError(null);
+      if (nameRef.current) void setNickname(r.player, r.token, nameRef.current);
+      setWallet((w) => ({ ...w, player: r.player, token: r.token, streak: 0, bets: {} }));
+    });
+    return () => {
+      live = false;
+    };
+  }, [mock, wallet.token]);
 
   useEffect(() => saveWallet(wallet), [wallet]);
 
@@ -176,13 +207,6 @@ export function City() {
     if (hotspots.length && !selected) frame(hotspots);
   }, [hotspots, selected]);
 
-  const postScore = useCallback(
-    (w: Wallet) => {
-      void call(mock, "score", { player: w.player, name: w.name ?? defaultName(w.player), points: Math.round(w.points) }).catch(() => undefined);
-    },
-    [mock],
-  );
-
   const applyResult = useCallback(
     (m: Market, res: Settled) => {
       setResults((r) => ({ ...r, [m.id]: { ...res, at: Date.now() } }));
@@ -200,7 +224,7 @@ export function City() {
         const done: MyBet["done"] = isVoid ? "void" : won ? "won" : "lost";
         const next: Wallet = {
           ...w,
-          points: w.points + (isVoid ? bet.stake : won ? bet.payout : 0),
+          points: mock ? w.points + (isVoid ? bet.stake : won ? bet.payout : 0) : w.points,
           streak: isVoid ? w.streak : won ? w.streak + 1 : 0,
           bets: { ...w.bets, [m.id]: { ...bet, done } },
         };
@@ -214,11 +238,11 @@ export function City() {
         });
         window.setTimeout(() => setToast((t) => (t?.key === key ? null : t)), 4500);
         if (winHub) setPop({ key, hotspot: winHub, text: won ? `+${fmtPts(bet.payout)}` : `−${fmtPts(bet.stake)}`, good: won });
-        postScore(next);
         return next;
       });
+      if (!mock) void refreshWallet();
     },
-    [postScore],
+    [mock, refreshWallet],
   );
 
   const due = useMemo(
@@ -289,15 +313,29 @@ export function City() {
       if (!m || !opt) return;
       const amount = Math.round(stake === "all" ? w.points : Math.min(stake, w.points));
       if (amount <= 0) return;
+      if (!mock && !w.token) {
+        setBetError("Setting up your player. Try again in a moment.");
+        return;
+      }
       setBetError(null);
       try {
-        const r = await call<BetResponse>(mock, "bet", { player: w.player, market: m.id, option: opt.id, stake: amount });
+        const body = { player: w.player, market: m.id, option: opt.id, stake: amount, idempotency_key: crypto.randomUUID() };
+        let r = await call<BetResponse>(mock, "bet", body, w.token);
+        if (r.data.code === "confirm_required") {
+          if (!(await askStake(r.data.error ?? "Confirm this stake."))) return;
+          r = await call<BetResponse>(mock, "bet", { ...body, confirm_token: r.data.confirmToken }, w.token);
+        }
+        if (r.status === 401) {
+          dropToken();
+          setBetError("Your player was not recognised. A new one is being set up.");
+          return;
+        }
         if (!r.ok || !r.data.ok) {
           setBetError(r.data.error ?? "Bet rejected");
           return;
         }
         const odds = r.data.odds ?? opt.odds;
-        const payout = Math.round(r.data.shares ?? amount * odds);
+        const payout = r.data.payout ?? Math.floor(amount * odds);
         if (r.data.options) {
           const updated: Market = {
             ...m,
@@ -310,7 +348,7 @@ export function City() {
         }
         setWallet((cur) => ({
           ...cur,
-          points: cur.points - amount,
+          points: r.data.balance ?? cur.points - amount,
           bets: { ...cur.bets, [m.id]: { market: m.id, option: opt.id, label: opt.label, stake: amount, payout } },
         }));
         setDraft(null);
@@ -318,7 +356,7 @@ export function City() {
         setBetError("Could not reach the exchange");
       }
     },
-    [draft, stake, mock, book],
+    [draft, stake, mock, book, askStake, dropToken],
   );
 
   const confirm = () => {
@@ -335,7 +373,7 @@ export function City() {
     const w = { ...wallet, name };
     setWallet(w);
     setAskName(false);
-    postScore(w);
+    if (!mock && w.token) void setNickname(w.player, w.token, name);
     void placeBet(w);
   };
 
@@ -372,9 +410,9 @@ export function City() {
   const boardRows = useMemo(() => {
     const myName = wallet.name ?? defaultName(wallet.player);
     const rows = (board ?? []).filter((r) => !(r.kind === "human" && r.name === myName));
-    rows.push({ name: myName, points: wallet.points, kind: "human" });
+    rows.push({ name: myName, points: server?.total ?? wallet.points, kind: "human" });
     return rows.sort((a, b) => b.points - a.points);
-  }, [board, wallet]);
+  }, [board, wallet, server]);
 
   return (
     <div className="tl" onClick={() => setTip(null)}>
@@ -405,7 +443,7 @@ export function City() {
             <Flame size={14} strokeWidth={2.5} />
             <span className="tl-data">{wallet.streak}</span>
           </span>
-          {broke && (
+          {broke && mock && (
             <button type="button" className="tl-refill" onClick={() => setWallet((w) => ({ ...w, points: START_POINTS, streak: 0 }))}>
               Refill
             </button>
@@ -425,6 +463,10 @@ export function City() {
           >
             <span className="tl-health-dot" />
             <span className="tl-desk">Data</span>
+          </button>
+          <button type="button" className="wl-open" onClick={() => setWalletOpen(true)}>
+            <WalletIcon size={16} />
+            <span className="tl-desk">Wallet</span>
           </button>
           <button type="button" className="tl-board-btn" onClick={() => setBoardOpen(true)}>
             <Trophy size={16} />
@@ -539,6 +581,9 @@ export function City() {
           <div className="tl-muted">{tipTrader.style}</div>
         </div>
       )}
+
+      <WalletPanel player={wallet.player} token={wallet.token} wallet={server} open={walletOpen} onClose={() => setWalletOpen(false)} refresh={() => void refreshWallet()} />
+      {stakeDialog}
 
       {toast && (
         <div key={toast.key} className="tl-toast" data-good={toast.good || undefined}>

@@ -24,6 +24,19 @@ round's results. Every market carries `signals` (1–2 visible clues, shapes in 
 strip: the 5-hub vs-usual strip with the laggard flagged, the Tube line board with reasons, the latest football
 result and the VIX line.
 
+Wallet: `POST /player/new` (5 per hour per client IP) is the only way to get a player: it returns a server-made id, a
+random token (stored hashed) and the 1000-point grant. `GET /wallet /ledger /positions /history ?player=`,
+`POST /bet /limits {dailyLoss} /break {hours} /player/name {name}` all need `X-Player-Token`; reads never create a
+player. `ledger.py` keeps player points in an append-only, double-entry SQLite ledger (`CITY_LEDGER_DB`, default
+`services/city/data/ledger.db`, gitignored, one server per file via a lock file; `--replay-from` uses an in-memory
+ledger). Balances are sums of entries. `/bet` takes an `idempotency_key` (scoped to the market round), a minimum stake
+of 10, and moves the stake from cash to escrow; a payout never exceeds the market maker's shares (odds under 1.05 are
+refused) and rounds down. A daily gross-loss limit, a server-issued 60 s confirm token above 25% of the balance, a
+1 h / 24 h break and a house worst-case exposure cap (`CITY_HOUSE_BANKROLL`, `CITY_EXPOSURE_CAP`, 100000 each) are
+enforced on the server. After a restart, bets on recorded markets settle from data; only unresolvable ones are
+refunded. `/leaderboard` ranks players by ledger equity. The server binds 127.0.0.1 (`CITY_HOST`) and refuses bodies
+over 16 KB. `Ledger.audit()` re-checks every invariant from the raw entries.
+
 ## Rounds and series
 
 Markets come in rounds on a fixed 5-minute wall clock (:00, :05 … Europe/London), Kalshi-style. Every market in round

@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 import random
 import statistics
+from decimal import ROUND_FLOOR, Decimal
 
 N_FUTURES = 50
 RULED_OUT_CAP = 0.6
@@ -17,10 +18,18 @@ P_FLOOR, P_CEIL = 0.03, 0.97
 LMSR_B = 1200.0
 FEE = 0.05
 MIN_MS = 60_000
+MIN_ODDS, MAX_ODDS = 1.05, 20.0
 
 
 def odds_of(prob: float) -> float:
     return max(1.05, min(20.0, round(0.95 / prob, 1)))
+
+
+def locked_odds(shares: float, stake: float) -> float | None:
+    """The payout multiple a bet locks: shares per point staked, rounded down to 2 dp and capped at 20, so a bet never
+    pays more than the market maker's shares. None when that is under 1.05: the price is too short to bet."""
+    odds = min(Decimal(str(MAX_ODDS)), Decimal(shares / stake).quantize(Decimal("0.01"), rounding=ROUND_FLOOR))
+    return float(odds) if odds >= Decimal(str(MIN_ODDS)) else None
 
 
 def capped_gauss(rng: random.Random) -> float:
@@ -321,12 +330,18 @@ class Book:
         s = sum(w.values())
         return {o: v / s for o, v in w.items()}
 
-    def buy(self, model: dict[str, float], option: str, stake: float) -> float:
-        """Spend `stake` (5% house fee) on `option`; returns the shares bought."""
+    def quote(self, model: dict[str, float], option: str, stake: float) -> float:
+        """Shares that `stake` (5% house fee) buys on `option`. Does not touch the book; `commit` books them."""
         spend = stake * (1 - FEE)
         w = {o: model[o] * math.exp(self.q[o] / self.b) for o in self.q}
         s = sum(w.values())
         new_wi = w[option] + s * (math.exp(spend / self.b) - 1)
-        shares = self.b * math.log(new_wi / w[option])
+        return self.b * math.log(new_wi / w[option])
+
+    def commit(self, option: str, shares: float) -> None:
         self.q[option] += shares
+
+    def buy(self, model: dict[str, float], option: str, stake: float) -> float:
+        shares = self.quote(model, option, stake)
+        self.commit(option, shares)
         return shares
