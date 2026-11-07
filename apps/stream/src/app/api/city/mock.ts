@@ -216,7 +216,6 @@ function open(now: number, lockIn: number) {
     hotspots: d.hotspots,
     closesAt: settlesAt - LOCK_MS,
     settlesAt,
-    futures: 50,
     source: d.source,
     rule: d.rule,
     status: "open",

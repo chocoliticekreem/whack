@@ -237,7 +237,8 @@ class Store:
         spawn = max(spawns) if spawns else None
         for e in hist:
             self.add("vix", int(e["ts"]), {"vix": float(e["vix"]), "driver": e.get("driver") or "",
-                                           "driverDelta": num(e.get("driverDelta")) or 0.0, "spawnTs": spawn})
+                                           "driverDelta": num(e.get("driverDelta")) or 0.0, "spawnTs": spawn,
+                                           "area": payload.get("area")})
         return len(hist)
 
     def hour_paths(self, source: str, start_ms: int, end_ms: int) -> list[Path]:

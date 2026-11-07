@@ -5,6 +5,7 @@ import sys
 import time
 import uuid
 
+import fan
 import markets as mk
 import pricing
 import signals
@@ -304,7 +305,7 @@ class Exchange:
 
     def market_json(self, m: mk.Market, now: int) -> dict:
         out = {"id": m.id, "kind": m.kind, "question": m.question, "hotspots": m.hotspots,
-               "closesAt": m.closes_at, "settlesAt": m.settles_at, "futures": pricing.N_FUTURES,
+               "closesAt": m.closes_at, "settlesAt": m.settles_at, "futures": fan.futures_json(m, self.store, now),
                "options": self.options_json(m),
                "aiBets": [{k: b[k] for k in ("trader", "option", "why", "stake", "odds")} for b in m.ai_bets],
                "source": m.source, "rule": m.rule, "status": self.status(m, now),

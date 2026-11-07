@@ -5,6 +5,7 @@ import { useState, type MouseEvent } from "react";
 import { countdown, fmtPts, londonClock, type MyBet, type Settled } from "./city-store";
 import type { Market, Trader } from "./city-types";
 import { MarketClues, usualGhost } from "./Clues";
+import { FuturesFan } from "./FuturesFan";
 
 export type Phase = "open" | "halted" | "locked" | "awaiting" | "settled" | "void";
 
@@ -142,6 +143,8 @@ export function MarketCard({
   const stakeN = stake === "all" ? points : Math.min(stake, points);
   const drafted = m.options.find((o) => o.id === draft);
   const aiResult = new Map(result?.aiResults.map((a) => [a.trader, a.won]));
+  const fut = m.futures?.paths.length ? m.futures : undefined;
+  const countOf = (id: string) => (fut ? `${fut.byOption[id] ?? 0} of ${fut.alive} futures` : null);
 
   const tip = (e: MouseEvent<HTMLElement>, trader: string, why: string) => {
     e.stopPropagation();
@@ -182,11 +185,11 @@ export function MarketCard({
         <div className="tl-m-lead">
           <span className="tl-big tl-num">{Math.round(leader.prob * 100)}%</span>
           <span className="tl-lead-label">{leader.label}</span>
-          <Spark lines={m.options.map((o) => history[o.id] ?? [o.prob])} lead={lead} ghost={usualGhost(m.signals)} />
         </div>
       )}
 
       {phase === "settled" && result && <p className="tl-reading">{result.reading}</p>}
+      {fut && phase !== "void" && <FuturesFan f={fut} settled={phase === "settled"} overUnder={m.kind === "overunder"} />}
       {phase === "void" && (
         <p className="tl-reading" data-void>
           No data, every stake refunded. {result?.localVoid ? "The feed never reported." : result?.reading}
@@ -212,6 +215,7 @@ export function MarketCard({
                   <span className="tl-opt-name">
                     {state === "won" && <Check size={14} strokeWidth={3} />}
                     {o.label}
+                    {fut && <span className="tl-opt-count">{countOf(o.id)}</span>}
                   </span>
                   <span className="tl-opt-pct tl-data">{Math.round(o.prob * 100)}%</span>
                 </>
@@ -233,6 +237,11 @@ export function MarketCard({
                 </span>
                 <span className="tl-opt-odds tl-data">×{o.odds.toFixed(1)}</span>
               </button>
+              {fut && n === 2 && (
+                <span className="tl-opt-count">
+                  <span className="tl-data">{Math.round(o.prob * 100)}%</span> · {countOf(o.id)}
+                </span>
+              )}
               {(backers.length > 0 || mine) && (
                 <span className="tl-backers">
                   {mine && bet && (
@@ -324,10 +333,18 @@ export function MarketCard({
         </button>
       </footer>
       {rules && (
-        <p className="tl-rule">
-          {m.rule ?? "Settles on the first official reading at the settle time. No reading means void and every stake is refunded."}{" "}
-          Prices come from {m.futures} simulated futures and move with every bet.
-        </p>
+        <div className="tl-rule">
+          <p>
+            {m.rule ?? "Settles on the first official reading at the settle time. No reading means void and every stake is refunded."}{" "}
+            Prices come from {m.futures?.n ?? 50} simulated futures and move with every bet.
+          </p>
+          <div className="tl-rule-price">
+            <span>
+              {leader.label}, price since open <span className="tl-data">{Math.round(leader.prob * 100)}%</span>
+            </span>
+            <Spark lines={m.options.map((o) => history[o.id] ?? [o.prob])} lead={lead} ghost={usualGhost(m.signals)} />
+          </div>
+        </div>
       )}
     </article>
   );
