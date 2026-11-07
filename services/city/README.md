@@ -15,35 +15,37 @@ CORS allows localhost:3047, :3349 and :3849.
 
 ## Endpoints
 
-`GET /hotspots /traders /markets /leaderboard /stats`, `POST /settle {id}`, `POST /bet {player, market, option, stake}`,
+`GET /hotspots /traders /markets /round /leaderboard /stats`, `POST /settle {id}`, `POST /bet {player, market, option, stake}`,
 `POST /score {player, name, points}`. The response shapes are in the city contract (shared with the UI); `/stats` is
-the settled count per market kind (real reading vs void) plus a calibration table.
+the settled count per series (real reading vs void), calibration tables and the favourite's price at open.
+`/round` lists the current round's markets and the previous round's results.
 
-## Markets
+## Rounds and series
 
-| kind | question | feed | settles on |
+Markets come in rounds on a fixed 5-minute wall clock (:00, :05 … Europe/London), Kalshi-style. Every market in round
+R opens when round R−5 closes, closes at R−60 s (a series may close earlier) and settles at R, so there is always one
+round to bet on. Each round lists every registered series, so a player can learn them.
+
+The series registry is in `markets.py`. Adding one is self-contained: a `build` and a `settle` function, one
+`register(Series(id, feed, build, settle, close_before_ms=60_000, skip=None))`, and a `PLAYS` entry in `traders.py`
+for each trader whose feed informs it. Today's book:
+
+| series | kind | question | settles on |
 |---|---|---|---|
-| versus | Which station is busiest at 17:50? | TfL Crowding (% of usual) | each station's last reading at or before T (≤2 min old) |
-| overunder | Over/under 12 people on the Oxford Circus camera at 17:52? | JamCam + YOLO | median count in [T−60 s, T]; the neighbouring cam is the fallback |
-| yesno | Will any Tube line get worse by 17:22? | TfL line status | the last reading at or before T compared with the snapshot at open |
-| yesno | Will the Central line be back to Good Service by 17:22? | TfL line status | the last reading at or before T |
-| yesno | Rain in central London before 17:25? | Open-Meteo | any reading > 0.1 mm in [open, T] |
+| oxford-busy | bracket | Oxford Circus busyness at 17:50 (4 brackets of % of usual) | first TfL Crowding reading after bets close |
 
-The exchange keeps 3–5 markets open at all times. At least one closes within 2 min, and a new market opens as an old one
-closes. Horizons are 2–10 min. Crowding and rain markets settle just after TfL's or Open-Meteo's 5-min publish, so the
-settling reading is fresh. Trading closes 60 s before T (90 s for cameras). A market halts on a stale feed (3 min; 6 min
-for the 5-minutely crowding and rain) or on a 3σ jump in its own series, and resumes after 2 clean ticks. With no
-reading by T+3 min, "by T" yes/no markets resolve No and the others void with a refund.
+Bracket ladders: three equal-width edges on whole numbers, placed on the futures so the favourite is a middle bracket
+near 40% and no bracket is under 5%; lower edges are inclusive and `rule` says so. A bracket series whose favourite
+would still exceed 85% is skipped for the round. Crowding settles on the first reading published after bets close,
+so nobody bets on a reading that is already out. A market halts on a stale feed (3 min; 6 min for the 5-minutely
+crowding) or on a 3σ jump in a crowding series, and resumes after 2 clean ticks. With no reading in time it voids
+with a refund.
 
 ## Pricing
 
 Each market runs 50 futures. Every future starts from the last real reading:
 - crowding: a log random walk per station. Per-minute sigma comes from today's real changes, drift is half the last
-  hour's trend (capped), and every step is capped at 2.5σ;
-- cameras: sticky counts. The per-minute chance of a change and the size of a change are fitted from today's counts
-  for that camera;
-- lines: worsening and recovery hazards per line-minute, fitted from today's status changes;
-- rain: one wet/dry draw per 15-min slot, using the odds of that slot's nowcast.
+  hour's trend (capped), and every step is capped at 2.5σ.
 
 Each new observation rules out the futures that disagree with it, never more than 60% of them in total.
 prob = share of surviving futures, clamped to [3%, 97%]. Bets move prices through LMSR with b = 1200, with the futures'
@@ -53,7 +55,7 @@ A 5% fee keeps the locked payout near the displayed `odds = 0.95/prob`.
 ## Files
 
 `data.py` reads the recorder files into compact snapshots and never returns data after `now`. `pricing.py` holds the
-fits, simulators, particle filter and LMSR. `markets.py` builds and settles each market kind. `traders.py` holds the
-six traders. `exchange.py` runs the rolling book, betting, settlement and scores. `server.py` is the HTTP layer.
+fits, simulators, particle filter and LMSR. `markets.py` holds the series registry and builds and settles each series. `traders.py` holds the
+six traders. `exchange.py` runs the rounds, betting, settlement and scores. `server.py` is the HTTP layer.
 `hotspots.json` lists the hotspots with their JamCams, bus stops and lines; the recorder adds these cams to its
 YOLO list.
