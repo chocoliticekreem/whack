@@ -1,0 +1,14 @@
+:ok
+
+event: message
+id: [0]
+data: {"$schema": "/mediawiki/recentchange/1.0.0", "meta": {"dt": "2026-11-07T13:20:00Z", "domain": "en.wikipedia.org"}, "type": "edit", "title": "Q1", "wiki": "wikidatawiki", "user": "Example", "bot": false, "minor": false, "comment": "crowd crush closure", "timestamp": 1794057600, "length": {"old": 100, "new": 120}, "revision": {"old": 1, "new": 2}}
+
+event: message
+id: [1]
+data: {"$schema": "/mediawiki/recentchange/1.0.0", "meta": {"dt": "2026-11-07T13:20:00Z", "domain": "en.wikipedia.org"}, "type": "edit", "title": "Oxford Street", "wiki": "enwiki", "user": "Example", "bot": false, "minor": false, "comment": "crowd crush closure", "timestamp": 1794057600, "length": {"old": 100, "new": 120}, "revision": {"old": 1, "new": 2}}
+
+event: message
+id: [2]
+data: {"$schema": "/mediawiki/recentchange/1.0.0", "meta": {"dt": "2026-11-07T13:20:00Z", "domain": "en.wikipedia.org"}, "type": "edit", "title": "Paris", "wiki": "enwiki", "user": "Example", "bot": false, "minor": false, "comment": "crowd crush closure", "timestamp": 1794057600, "length": {"old": 100, "new": 120}, "revision": {"old": 1, "new": 2}}
+
