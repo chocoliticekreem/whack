@@ -65,7 +65,7 @@ close.
 | Responsible play: loss limits, reality checks, self-exclusion | Partly done (#45): daily loss limit, large-stake confirmation, 1 h / 24 h breaks. Reality checks and self-exclusion later |
 | Published settlement source and rule, with the settled reading frozen | Done |
 | Market integrity: position cap, settling on a window, halts on stale data and sudden jumps | Done |
-| Peer-to-peer order book with market makers (no house risk) | Later: today's automatic market maker is the stepping stone. Roles and design in [market.md](market.md) |
+| Peer-to-peer order book with market makers (no house risk) | Later: today's automatic market maker is the stepping stone. Design in [exchange-design.md](exchange-design.md) |
 | ID verification and anti-money-laundering checks | Later: the player record is designed for it |
 
 ## Open questions (need legal advice, not verified)
