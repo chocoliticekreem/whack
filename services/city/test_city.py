@@ -849,5 +849,177 @@ class TraderTest(CityCase):
         self.assertEqual(names["bus"], "Plane Spotter")
 
 
+# ---------------------------------------------------------------- the central-London simulation
+
+
+def sim_state(base: int, pct: dict[str, float], width: float = 10.0) -> dict:
+    """A central sim GET /state: every station at pct[naptan] % of usual at +5/+15/+60, p10/p90 at ±width."""
+    rows = [{"naptan": nap, "name": nap, "hub": None,
+             **{f"+{h}": {"mean": v, "p10": v - width, "p90": v + width} for h in (5, 15, 60)}}
+            for nap, v in pct.items()]
+    return {"seedAt": base - 2 * MIN, "minute": 2, "liveTs": base, "area": "Central London", "vix": 20.0,
+            "forecast": {"unit": "% of usual", "stations": rows, "hubs": []}}
+
+
+def hub_pct(**over) -> dict[str, float]:
+    return {NAPTANS[h]: over.get(h.replace("-", "_"), 100.0) for h in HUBS}
+
+
+class SimTest(CityCase):
+    def setUp(self):
+        super().setUp()
+        city(self.raw, T0 + 10 * MIN)
+        self.now = T0 + 10 * MIN
+        self.at = T0 + 15 * MIN
+
+    def store(self, state: dict | None, now: int | None = None) -> Store:
+        store = self.raw.store(self.now)
+        if state is not None:
+            store.sim_feed = data.SimFeed(lambda: data.reduce_sim(state))
+            store.sim_feed.poll()
+        return store
+
+    def builds(self, store: Store) -> list[mk.Market]:
+        return [mk.build_hub_surge("hub_surge-1515", store, SPOTS, self.now, self.at),
+                mk.build_city_pulse("city_pulse-1515", store, SPOTS, self.now, self.at),
+                mk.build_hub_hour("hub_hour-1605", store, SPOTS, self.now, T0 + 65 * MIN)]
+
+    def test_reduce_sim_reads_the_state_forecast_and_rejects_junk(self):
+        fc = data.reduce_sim(sim_state(self.now, hub_pct(bank=103)))
+        self.assertEqual((fc["ts"], fc["base"], fc["area"]), (self.now, self.now, "Central London"))
+        self.assertEqual(fc["stations"][NAPTANS["bank"]]["h"]["5"], {"mean": 103, "p10": 93, "p90": 113})
+        for junk in (None, [], {"forecast": None}, {"seedAt": 1, "minute": 0, "forecast": {"stations": []}}):
+            self.assertIsNone(data.reduce_sim(junk))
+
+    def test_sim_none_or_stale_leaves_pricing_exactly_as_before(self):
+        plain = self.builds(self.store(None))
+        stale = self.builds(self.store(sim_state(self.now - 4 * MIN, hub_pct(bank=180))))
+        for a, b in zip(plain, stale):
+            self.assertEqual(a.futures.sim.paths, b.futures.sim.paths, a.sub)
+            self.assertEqual(a.open_model, b.open_model, a.sub)
+            self.assertEqual(b.futures.from_sim, 0)
+
+    def test_a_fresh_sim_samples_half_the_futures_and_keeps_the_statistical_half(self):
+        plain = self.builds(self.store(None))
+        blended = self.builds(self.store(sim_state(self.now, hub_pct(bank=180))))
+        n = pricing.sim_count()
+        self.assertEqual(n, 25)
+        for a, b in zip(plain, blended):
+            self.assertEqual(b.futures.from_sim, n, b.sub)
+            self.assertEqual(b.futures.origins, ["stat"] * 25 + ["sim"] * 25)
+            self.assertEqual(a.futures.sim.paths[:25], b.futures.sim.paths[:25], b.sub)
+        hour_plain, hour_sim = plain[2], blended[2]
+        self.assertGreater(hour_sim.open_model["bank"], hour_plain.open_model["bank"] + 0.2)
+
+    def test_markets_json_says_how_many_futures_came_from_the_sim(self):
+        ex = Exchange(self.store(sim_state(self.now, hub_pct())), Clock(self.now), SPOTS)
+        ex.tick(self.now)
+        got = {m["series"]: m["futures"]["fromSim"] for m in ex.markets_json(self.now)["markets"]}
+        self.assertEqual(got["hub_surge"], 25)
+        self.assertEqual(got["city_pulse"], 25)
+        self.assertEqual(got["heathrow_stack"], 0)
+
+    def test_sim_view_maps_station_forecasts_onto_the_settle_rules(self):
+        store = self.store(sim_state(self.now, hub_pct(waterloo=200)))
+        hour = mk.build_hub_hour("hub_hour-1605", store, SPOTS, self.now, T0 + 65 * MIN)
+        view = mk.sim_view(hour, store, self.now)
+        self.assertGreater(view["probs"]["waterloo"], 0.99)
+        self.assertAlmostEqual(sum(view["probs"].values()), 1.0)
+        self.assertRegex(view["detail"]["waterloo"], r"200% of usual at \d\d:\d\d \(p10 190, p90 210\)")
+        surge = mk.build_hub_surge("hub_surge-1515", store, SPOTS, self.now, self.at)
+        self.assertGreater(mk.sim_view(surge, store, self.now)["probs"]["waterloo"], 0.99)
+        self.assertIsNone(mk.sim_view(hour, self.store(None), self.now))
+
+    def decide_with(self, probs: dict[str, float], m: mk.Market):
+        orig = traders.sim_view
+        traders.sim_view = lambda *_: {"probs": probs, "detail": {o: "Bank 103% of usual" for o in probs}}
+        self.addCleanup(setattr, traders, "sim_view", orig)
+        return traders.decide("sim", m, self.raw.store(self.now), self.now, {})
+
+    def test_the_sim_trader_bets_only_on_an_edge_of_five_points(self):
+        m = mk.build_city_pulse("p", self.store(None), SPOTS, self.now, self.at)
+        p = m.prices()["over"]
+        self.assertIsNone(self.decide_with({"over": p + 0.049, "under": 1 - p - 0.049}, m))
+        side, why = self.decide_with({"over": p + 0.051, "under": 1 - p - 0.051}, m)
+        self.assertEqual(side, "over")
+        self.assertRegex(why, rf"^Simulation: Bank 103% of usual; Over .* in \d+% of its draws vs the market's "
+                              rf"{p * 100:.0f}%$")
+
+    def test_the_sim_trader_respects_the_position_cap_and_the_odds_floor(self):
+        store = self.store(sim_state(self.now, hub_pct()))
+        ex = Exchange(store, Clock(self.now), SPOTS)
+        ex.tick(self.now)
+        pulse = next(m for m in ex.biddable(self.now) if m.sub == "city_pulse")
+        orig = traders.sim_view
+        self.addCleanup(setattr, traders, "sim_view", orig)
+        fresh = mk.build_city_pulse("city_pulse-1520", store, SPOTS, self.now, self.at + 5 * MIN)
+        ex.markets[fresh.id] = fresh
+        traders.sim_view = lambda *_: {"probs": {"over": 1.0, "under": 0.0}, "detail": {"over": "x", "under": "x"}}
+        model = fresh.futures.probs()
+        target = 0.93
+        fresh.book.q["over"] = pricing.LMSR_B * math.log(target / (1 - target) * model["under"] / model["over"])
+        self.assertAlmostEqual(fresh.prices()["over"], target, places=3)
+        others = {t["id"] for t in traders.TRADERS} - {"sim"}
+        fresh.decided |= others
+        ex.ai_bets(fresh, self.now)
+        self.assertFalse([b for b in fresh.ai_bets if b["trader"] == "sim"], "odds under 1.05 must not book")
+        self.assertIsNone(pricing.locked_odds(fresh.book.quote(model, "over", traders.STAKE), traders.STAKE))
+        capped = mk.build_city_pulse("city_pulse-1525", store, SPOTS, self.now, self.at + 10 * MIN)
+        ex.record["sim"]["points"] = 300
+        ex.rounds[capped.settles_at] = {"markets": [capped.id], "skipped": {}}
+        ex.markets[capped.id] = capped
+        capped.decided |= others
+        ex.ai_bets(capped, self.now)
+        self.assertFalse([b for b in capped.ai_bets if b["trader"] == "sim"])
+        self.assertIn("position cap 75 points", ex.sat_out["sim"][1])
+        ex.record["sim"]["points"] = 1000
+        again = mk.build_city_pulse("city_pulse-1530", store, SPOTS, self.now, self.at + 15 * MIN)
+        again.decided |= others
+        ex.ai_bets(again, self.now)
+        self.assertEqual([b["stake"] for b in again.ai_bets if b["trader"] == "sim"], [traders.STAKE])
+        self.assertIn("sim", pulse.decided)
+
+    def test_the_sim_trader_sits_out_when_the_sim_is_down_and_traders_says_why(self):
+        ex = Exchange(self.raw.store(self.now), Clock(self.now), SPOTS)
+        ex.tick(self.now)
+        rows = {t["id"]: t for t in ex.traders_json(self.now)["traders"]}
+        self.assertEqual(rows["sim"]["name"], "Simulation")
+        self.assertEqual(rows["sim"]["watches"], "Agent simulation of central London (50 worlds on the street graph)")
+        self.assertIn("Sitting out: the city simulation", rows["sim"]["why"])
+        self.assertFalse([b for m in ex.active() for b in m.ai_bets if b["trader"] == "sim"])
+        self.assertIn("Simulation", [r["name"] for r in ex.leaderboard()["rows"]])
+
+    def test_fetch_sim_times_out_and_the_feed_keeps_the_last_good_forecast_for_three_minutes(self):
+        import threading
+        import time
+        from http.server import BaseHTTPRequestHandler, HTTPServer
+
+        class Slow(BaseHTTPRequestHandler):
+            def do_GET(self):
+                time.sleep(1.5)
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"{}")
+
+            def log_message(self, *a):
+                pass
+
+        srv = HTTPServer(("127.0.0.1", 0), Slow)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        self.addCleanup(srv.server_close)
+        self.addCleanup(srv.shutdown)
+        t = time.monotonic()
+        self.assertIsNone(data.fetch_sim(f"http://127.0.0.1:{srv.server_port}", timeout=0.3))
+        self.assertLess(time.monotonic() - t, 1.2)
+        self.assertIsNone(data.fetch_sim("http://127.0.0.1:1", timeout=0.3))
+        answers = [data.reduce_sim(sim_state(self.now, hub_pct())), None]
+        feed = data.SimFeed(lambda: answers.pop(0))
+        self.assertTrue(feed.poll())
+        self.assertFalse(feed.poll())
+        self.assertIsNotNone(feed.now(self.now + 3 * MIN))
+        self.assertIsNone(feed.now(self.now + 3 * MIN + 1))
+        self.assertIn("min old", feed.why_none(self.now + 4 * MIN))
+
+
 if __name__ == "__main__":
     unittest.main()
