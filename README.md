@@ -30,6 +30,7 @@ Vercel's `CITY_URL` to the tunnel URL.
 | [docs/build.md](docs/build.md) | What's shipped (by PR), what's in progress, ranked gaps, how to run it |
 | [services/city/README.md](services/city/README.md) | The markets backend: series, pricing, integrity rules, wallet, endpoints |
 | [docs/questions.md](docs/questions.md) | Why each market question was chosen, measured on Saturday's data |
+| [docs/market.md](docs/market.md) | Who makes and trades the market today (the house, six AI traders), how efficient it is, and the proposed market makers and funds |
 | [docs/business.md](docs/business.md) | Fairness principle, market integrity, the path from game to exchange |
 | [docs/marshall-wace.md](docs/marshall-wace.md) | The sponsor: brief, judging, who MW are, past winners |
 | [docs/event.md](docs/event.md) | Logistics: rules, timetable, tracks and prizes, submission |
