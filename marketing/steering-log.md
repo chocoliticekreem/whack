@@ -42,6 +42,9 @@ What we learned, What's next for OverWatch.
 | 22 | ~20:40 | — | "The judges are Marshall Wace quants; they'll ask these." | Judge-prep pressure test: the hardest questions, honest answers, a fix list |
 | 23 | ~20:40 | A what-if settings form | "This makes no sense." | Redesigned as direct manipulation: click a street, pick an action, see the odds move |
 | 24 | ~20:55 | Market cards stacked with clue lines, a futures fan, counts, source and rules | "I don't understand even a bit of it. Any person should be able to understand how to trade." | Plain-language cards: a question, big answer buttons with chance and payout, details behind a tap, 3-step onboarding |
+| 25 | ~21:40 | Settlement either fast (cheatable) or fair (about 14 min, because TfL publishes late) | "Fair, and yes" to showing the wait | Station markets settle only on readings TfL stamped after betting closed; cards say "result about HH:MM, when TfL publishes" |
+| 26 | ~21:45 | Hint lines under every card, a static clue strip | "Remove these useless literal subwordings, they bloat the screen"; "make this rotate like a stock exchange" | Hints cut; the strip became a scrolling exchange ticker |
+| 27 | ~21:50 | Light editorial chrome around a colourful dusk map | "Make the UI nicer, it's pretty bland" | Dark glass theme matching the map, series colours, tactile buttons, motion that signals live prices |
 
 ## Challenges (for Devpost)
 - **Markets that were obvious.** At first 286 of 309 markets opened with a favourite above 90%.
