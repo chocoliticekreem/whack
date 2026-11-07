@@ -2,7 +2,7 @@
 
 import { Fragment } from "react";
 import type { CitySignals, HubsVsUsual, LineBoard, Signal, UsualTrend } from "./city-types";
-import { busyText } from "./plain";
+import { busyText, vsNormal } from "./plain";
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const signed = (v: number, dp = 1) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(dp)}`;
@@ -58,15 +58,11 @@ export function CityStrip({ signals }: { signals: CitySignals | null }) {
   const items = (
     <>
       {hubs?.hubs.map((h) => {
-        const delta = Math.round((h.vsUsual - 1) * 100);
+        const move = vsNormal(h.vsUsual);
         return (
-          <span key={h.id} className="tl-tick" data-dir={delta > 0 ? "up" : delta < 0 ? "down" : undefined}>
+          <span key={h.id} className="tl-tick" data-dir={move.tone} title={busyText(h.vsUsual, hubs.day)}>
             <span className="tl-tick-name">{h.name}</span>
-            <span className="tl-data">{Math.round(h.vsUsual * 100)}%</span>
-            <span className="tl-tick-chg tl-data">
-              {delta > 0 ? "▲" : delta < 0 ? "▼" : "•"}
-              {Math.abs(delta)}
-            </span>
+            <span className="tl-tick-chg tl-data">{move.text}</span>
           </span>
         );
       })}
@@ -121,8 +117,8 @@ function HubBars({ data }: { data: HubsVsUsual }) {
 function vsUsualText(d: HubsVsUsual): string {
   const low = d.hubs.find((h) => h.id === d.laggard);
   const top = d.hubs.find((h) => h.id === d.leader);
-  const parts = [top && `${shortHub(top.name)} ${pct(top.vsUsual)} highest`, low && `${shortHub(low.name)} ${pct(low.vsUsual)} furthest below`];
-  return `Vs a usual ${d.day}: ${parts.filter(Boolean).join(", ")}`;
+  const parts = [top && `${shortHub(top.name)} ${vsNormal(top.vsUsual).text} busiest`, low && `${shortHub(low.name)} ${vsNormal(low.vsUsual).text} quietest`];
+  return `Vs a normal ${d.day}: ${parts.filter(Boolean).join(", ")}`;
 }
 
 function clueText(s: Signal, day: string): string {
@@ -130,7 +126,7 @@ function clueText(s: Signal, day: string): string {
     case "vs_usual":
       return vsUsualText(s.data);
     case "usual_curve":
-      return `${shortHub(s.data.name)} ${pct(s.data.vsUsual)} of a usual ${day} · usual curve ${TREND[s.data.usualTrend]} next 15 min`;
+      return `${shortHub(s.data.name)} ${vsNormal(s.data.vsUsual).text} vs a normal ${day} · usual curve ${TREND[s.data.usualTrend]} next 15 min`;
     case "pulse": {
       const d = s.data;
       const usual = d.usual == null ? "" : ` · usual ${d.usual.toFixed(1)}, ${TREND[d.usualTrend].replace("is ", "")} next 15 min`;

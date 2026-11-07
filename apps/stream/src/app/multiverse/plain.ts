@@ -122,6 +122,12 @@ export function plainSettle(m: Market, r: Settled, outcome: "won" | "lost" | "vo
   return `${plainResult(m, r)}. You ${outcome} ${pts} points.`;
 }
 
+/** Busyness as a move against a normal day, like a stock's daily change: "−19%", "+12%", "±0". */
+export function vsNormal(vsUsual: number): { text: string; tone: "up" | "down" | undefined } {
+  const d = Math.round((vsUsual - 1) * 100);
+  return { text: d > 0 ? `+${d}%` : d < 0 ? `−${-d}%` : "±0", tone: d > 0 ? "up" : d < 0 ? "down" : undefined };
+}
+
 /** "95% as busy as a usual Saturday" with a day, "95% of usual" without. */
 export function busyText(vsUsual: number, day?: string): string {
   const p = `${Math.round(vsUsual * 100)}%`;

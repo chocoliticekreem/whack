@@ -93,6 +93,14 @@
   display: none;
 }
 
+.cm-hub-vs[data-tone="up"] {
+  color: var(--yes-ink);
+}
+
+.cm-hub-vs[data-tone="down"] {
+  color: var(--no-ink);
+}
+
 .cm-hub[data-active] .cm-hub-vs,
 .cm-hub[data-win] .cm-hub-vs {
   color: inherit;
