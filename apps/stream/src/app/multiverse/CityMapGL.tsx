@@ -5,6 +5,8 @@ import "./city-map.css";
 import type { Map as MapLibreMap, Marker } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 import { buildCityStyle, LOOK } from "./city-map-style";
+// map-3d: deck.gl overlay mount (see CityLayers.tsx)
+import { CityLayers } from "./CityLayers";
 import type { Hotspot, HubsVsUsual } from "./city-types";
 
 export interface Pop {
@@ -14,15 +16,19 @@ export interface Pop {
   good: boolean;
 }
 
-const PITCH = 55;
-const BEARING = -30;
-const START = { center: [-0.122, 51.516] as [number, number], zoom: 13.4 };
+// map-3d camera: steep pitch and an angled bearing so the extruded city reads as 3D at the overview zoom.
+const PITCH = 70;
+const BEARING = -50;
+// A wider lens than MapLibre's 37° default: stronger perspective, and the dusk horizon shows at this pitch.
+const FOV = 48;
+const FIT_LIFT = 0.18;
+const START = { center: [-0.122, 51.516] as [number, number], zoom: 13.7 };
 const MAX_BOUNDS: [[number, number], [number, number]] = [
   [-0.32, 51.42],
   [0.08, 51.61],
 ];
 const FIT_MAX_ZOOM = 15.2;
-const FIT_MIN_ZOOM = 13.1;
+const FIT_MIN_ZOOM = 13.6;
 
 // Why: City.tsx frames hubs through a plain function (the old twin contract), so the live map is held here.
 let liveMap: MapLibreMap | null = null;
@@ -61,7 +67,8 @@ function fit(map: MapLibreMap, hubs: Hotspot[], duration: number) {
   // OpenMapTiles ships buildings from z13 only, so the overview never zooms out past where the city turns flat.
   const zoom = Math.max(cam?.zoom ?? FIT_MIN_ZOOM, FIT_MIN_ZOOM);
   // An offset, not padding: easeTo keeps padding on the map, and cameraForBounds would then count it twice.
-  const offset: [number, number] = [(pad.left - pad.right) / 2, (pad.top - pad.bottom) / 2];
+  // map-3d: lift the hubs into the far half of the steep view, where perspective shrinks them enough to fit.
+  const offset: [number, number] = [(pad.left - pad.right) / 2, (pad.top - pad.bottom) / 2 - (isPhone() ? 0 : window.innerHeight * FIT_LIFT)];
   const center: [number, number] = [(bounds[0][0] + bounds[1][0]) / 2, (bounds[0][1] + bounds[1][1]) / 2];
   map.easeTo({ center, zoom, offset, pitch: PITCH, bearing: BEARING, duration, essential: true });
 }
@@ -125,6 +132,8 @@ export function CityMapGL({
   const lib = useRef<typeof import("maplibre-gl") | null>(null);
   const pins = useRef(new Map<string, Pin>());
   const [ready, setReady] = useState(false);
+  // map-3d: the map instance for CityLayers.
+  const [glMap, setGlMap] = useState<MapLibreMap | null>(null);
 
   useEffect(() => {
     const el = container.current;
@@ -147,12 +156,13 @@ export function CityMapGL({
         ...START,
         pitch: PITCH,
         bearing: BEARING,
-        maxPitch: 65,
+        maxPitch: 75,
         minZoom: 11.5,
         maxBounds: MAX_BOUNDS,
         canvasContextAttributes: { antialias: true },
         attributionControl: { compact: true },
       });
+      map.setVerticalFieldOfView(FOV); // map-3d
       liveMap = map;
       if (process.env.NODE_ENV !== "production") Object.assign(window, { __cityMap: map });
       map.once("load", () => {
@@ -164,6 +174,7 @@ export function CityMapGL({
         pending = null;
       });
       setReady(true);
+      setGlMap(map); // map-3d
     });
 
     return () => {
@@ -177,6 +188,7 @@ export function CityMapGL({
         liveLoaded = false;
       }
       setReady(false);
+      setGlMap(null); // map-3d
     };
   }, []);
 
@@ -234,5 +246,11 @@ export function CityMapGL({
     p.pop = fresh;
   }, [pop]);
 
-  return <div ref={container} className="cm-map" style={{ background: LOOK.land }} />;
+  return (
+    <>
+      <div ref={container} className="cm-map" style={{ background: LOOK.land }} />
+      {/* map-3d: deck.gl columns, surge arcs and settle pulse */}
+      <CityLayers map={glMap} hotspots={hotspots} vsUsual={vsUsual} winner={winner} />
+    </>
+  );
 }
