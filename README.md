@@ -2,8 +2,8 @@
 
 Our build for **WHACK 26** (Warwick, 7–8 Nov 2026) on the **Marshall Wace "New Worlds"** track.
 
-**Status:** ideating. Leading idea: *Reality Prunes the Multiverse*, presented as an *Exchange of
-Worlds* built on our Mirrorverse London twin.
+**Status:** ideating. Leading idea: **The Exchange of Worlds**, *a stock exchange where every
+stock is a possible future of London, and reality is the market.* Pitch in docs/idea.md ★.
 
 ## Docs, in reading order
 | Doc | Read it for |

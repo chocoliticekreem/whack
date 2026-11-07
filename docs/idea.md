@@ -9,6 +9,43 @@ status: ideating · track chosen (Marshall Wace) · code reuse approved, not pul
 Built on **Mirrorverse**, our October build: a live mirror of real London fed by TfL cameras,
 buses and disruptions (see [build.md](build.md)). This doc covers *what we make with it*.
 
+## ★ The pitch (consolidated)
+**The Exchange of Worlds**, built on Mirrorverse. One product in three layers. The image leads
+and the mechanism comes after.
+
+| Layer | What it is | Role in the pitch |
+|---|---|---|
+| **1. The worlds** (engine) | 50 parallel versions of Oxford Circus, 30 min ahead, forked from live TfL data | *The new world*: futures that don't exist yet |
+| **2. The market** (betting) | Every world is a stock; price = probability it happens. Each real camera frame reprices it, and wrong worlds are **delisted** | *The interaction*: judges bet, reality settles it |
+| **3. The brokers** (TOPS) | AI personas (commuter, tourist, bus driver, contrarian) bet on the futures they believe in. Reality scores their track record, and the right ones get more say | *The MW hook*: their founding idea, pointed at a city |
+
+**Rule:** lead with the stock-market image. Say TOPS once, after it lands. Betting is how
+judges touch it, not the point. Points only, never real money.
+
+**10 s:** "We built a stock exchange where every stock is a possible future of London, and
+reality is the market."
+
+**30 s:** "Right now there are 50 versions of Oxford Circus, 30 minutes from now. Each one is a
+stock, priced by how likely it is to happen. AI brokers (a commuter, a tourist, a bus driver)
+bet on the future they believe in. Every time a real TfL camera frame arrives, the market
+reprices: wrong worlds are delisted, and brokers who called it gain track record. It's Marshall
+Wace's TOPS idea, trust whoever has been right, pointed at a city. And you can bet too."
+
+**Close:** "Marshall Wace built TOPS to find out which brokers to trust. We built it to find out
+which London is real."
+
+**3-minute demo:**
+1. **0:00 hook:** the 10-second line, board on screen.
+2. **0:15 bet:** a judge buys a world ("W-117: rain at 15:40, buses 4 min late").
+3. **0:45 reality speaks:** the next frame lands, worlds are delisted with reasons ("predicted
+   23 people, cameras saw 86"), prices jump.
+4. **1:30 brokers:** the leaderboard. "The bus driver has called it three frames running. The
+   tourist hasn't."
+5. **2:00 how:** live TfL feeds → 50 simulated worlds with shared randomness → likelihood
+   repricing → broker scoring. One line each.
+6. **2:30 why new:** "Every piece exists already. Nobody has pointed them at a city's futures."
+   Then the TOPS close.
+
 ## 1. Where we are
 - **Track: Marshall Wace.** We chose it on purpose over incident.io, which fits the old code more
   literally.
