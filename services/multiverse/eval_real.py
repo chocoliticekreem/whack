@@ -21,6 +21,13 @@ before the window).
 sd sqrt(POISSON_SD^2 + MODEL_SD^2); bus Gaussian, sd BUS_SD_MIN; both floored at 0), so a market's interval is
 the 10th-90th percentile of the price-weighted mixture of its worlds and a baseline's is that of one centre.
 
+Central London (`--central [--windows 3 --minutes 60 --events-ab]`): the central model over seeds/central-london.json.
+After each recorded minute every method forecasts each station's busyness as % of its typical day and each camera's
+count 5 min ahead; the new reading 5 min later scores it. Methods: the market (events from events.py applied to every
+world), persistence (the last reading the recorder had), the typical day (100 % of usual for stations; for cameras the
+camera's mean count so far today, the recorder holding no earlier days). --events-ab reruns with the event layer off
+and compares the market on the same readings.
+
 No lookahead: windows start at or after the seed's own timestamp, because the seed pins its streets to camera
 counts recorded before it was built and an earlier window would be scored on those very counts.
 """
@@ -310,12 +317,168 @@ def report(results: list[dict], day: str, rng_seed: int, elapsed: float, cam_nam
     print(f"({elapsed:.1f} s)")
 
 
+# ---------------------------------------------------------------- central London (--central)
+
+CENTRAL_SEED = HERE / "seeds" / "central-london.json"
+LEAD_MIN = 5
+CENTRAL_METHODS = ("market", "persist", "typical")
+CENTRAL_LABELS = {"market": "market (priced, pruned)", "persist": "persistence (last value)",
+                  "typical": "typical day (stations) / day-so-far mean (cams)"}
+
+
+def station_history(raw: Path, start: int, end: int, naptans: set[str]) -> dict[str, list[tuple[int, float]]]:
+    """Every new TfL busyness reading per station, keyed by when the recorder had it (no lookahead)."""
+    import central
+    seen: dict[str, str] = {}
+    out: dict[str, list[tuple[int, float]]] = {}
+    for ts, payload in sorted(feeds.records_between(raw, "crowding", start, end), key=lambda r: r[0]):
+        for nap, v in central.station_readings(payload, naptans, seen).items():
+            out.setdefault(nap, []).append((ts, v))
+    return out
+
+
+def last_before(series: list[tuple[int, float]], t: int) -> float | None:
+    vals = [v for ts, v in series if ts <= t]
+    return vals[-1] if vals else None
+
+
+def log_interval(centre: float, sd: float) -> tuple[float, float]:
+    z = 1.2815515655446004
+    return centre * math.exp(-z * sd), centre * math.exp(z * sd)
+
+
+def central_window(base: dict, raw: Path, start: int, minutes: int, rng_seed: int, events_on: bool,
+                   st_hist: dict, cam_hist: dict, new_by_min: dict) -> list[dict]:
+    """One market over [start, start + minutes]: after each recorded minute, every method forecasts each station's
+    busyness (% of usual) and each camera's count LEAD_MIN ahead; a new reading LEAD_MIN later scores them."""
+    import central
+    seed, _ = central.seed_at(base, raw, start)
+    end = start + minutes * 60_000
+    frames = central.load_frames(raw, seed, start + 1, end)
+    feed = central.EventFeed(raw, start, end) if events_on else None
+    mv = engine.Multiverse(seed, n=N, horizon=HORIZON, crn_seed=CRN_SEED, rng_seed=rng_seed, model=central)
+    mv.spawn()
+    profiles = {s["naptan"]: s.get("profile") for s in seed["stations"]}
+    count_sd = COUNT_SD
+    preds: dict[int, dict] = {}
+    rows = []
+    for f in frames:
+        key = f["ts"] // 60_000
+        if feed is not None:
+            ivs, _ = central.resolve_events(feed.at(f["ts"]), mv.seed, f["ts"])
+            mv.set_applied(ivs)
+        mv.advance(f)
+        made = preds.get(key - LEAD_MIN)
+        if made:
+            for nap, obs in f.get("stations", {}).items():
+                typ = central.typical_at(profiles[nap], f["ts"])
+                if nap not in made["st"] or not typ:
+                    continue
+                last = last_before(st_hist.get(nap, []), made["ts"])
+                if last is None:
+                    continue
+                o = 100 * obs / typ
+                p_c = 100 * last / typ
+                rows.append({"kind": "station", "id": nap, "ts": f["ts"], "obs": o, "event": made["ev"].get(nap, False),
+                             "market": made["st"][nap], "persist": (p_c, log_interval(p_c, engine.STATION_SD)),
+                             "typical": (100.0, log_interval(100.0, engine.STATION_SD))})
+            for cid, obs in new_by_min.get(key, {}).items():
+                if cid not in made["cam"]:
+                    continue
+                past = [v for ts, v in cam_hist.get(cid, []) if ts <= made["ts"]]
+                if not past:
+                    continue
+                typ = sum(past) / len(past)
+                rows.append({"kind": "cam", "id": cid, "ts": f["ts"], "obs": obs, "event": False,
+                             "market": made["cam"][cid],
+                             "persist": (past[-1], interval80([past[-1]], [1.0], "count")),
+                             "typical": (typ, interval80([typ], [1.0], "count"))})
+        st = {}
+        for s in mv.seed["stations"]:
+            fc = central.station_forecast(mv, s["naptan"], LEAD_MIN)
+            if fc["mean"] is not None:
+                st[s["naptan"]] = (fc["mean"], (fc["p10"], fc["p90"]))
+        cams = {c["camId"]: (c["mean"], (c["p10"], c["p90"])) for c in central.cam_forecast(mv, LEAD_MIN)}
+        ev = {n: True for iv in mv.applied for n in iv.get("stations", {})}
+        preds[key] = {"ts": f["ts"], "st": st, "cam": cams, "ev": ev}
+    return rows
+
+
+def central_score(rows: list[dict], method: str) -> tuple[float | None, float | None]:
+    obs = [r["obs"] for r in rows]
+    return mae([r[method][0] for r in rows], obs), coverage([r[method][1] for r in rows], obs)
+
+
+def central_table(title: str, rows: list[dict], unit: str) -> None:
+    print(f"\n{title} ({len(rows)} readings, {unit})")
+    print(f"{'method':50}{'MAE':>8} {'in 80%':>8} {'vs mkt':>8}")
+    cm = central_score(rows, "market")[0]
+    for m in CENTRAL_METHODS:
+        a, c = central_score(rows, m)
+        g = "" if m == "market" else fmt(gain(cm, a), True)
+        print(f"{CENTRAL_LABELS[m]:50}{fmt(a):>8} {fmt(c, True):>8} {g:>8}")
+
+
+def central_main(args: argparse.Namespace) -> None:
+    """Station busyness and camera counts LEAD_MIN ahead over central London, the market against persistence and
+    the typical day, with the event layer's interventions applied to the worlds (and, with --events-ab, without)."""
+    import central
+    t0 = time.perf_counter()
+    base = json.loads(CENTRAL_SEED.read_text())
+    day_start, day_end, day = newest_day(args.raw)
+    naptans = {s["naptan"] for s in base["stations"]}
+    st_hist = station_history(args.raw, day_start, day_end, naptans)
+    day_frames = load_day(args.raw, base, day_start, day_end)
+    cam_hist: dict[str, list[tuple[int, float]]] = {}
+    new_by_min: dict[int, dict[str, float]] = {}
+    for f in day_frames:
+        new_by_min[f["ts"] // 60_000] = f["new"]
+        for cid, v in f["new"].items():
+            cam_hist.setdefault(cid, []).append((f["ts"], v))
+    first = min(f["ts"] for f in day_frames)
+    last = max(f["ts"] for f in day_frames)
+    span = args.minutes * 60_000
+    usable = max(1, (last - first - 30 * 60_000) // span)
+    starts = [first + 30 * 60_000 + k * span for k in range(min(args.windows, usable))]
+    variants = (True, False) if args.events_ab else (True,)
+    results: dict[bool, list[dict]] = {}
+    for on in variants:
+        results[on] = []
+        for k, s in enumerate(starts):
+            results[on] += central_window(base, args.raw, s, args.minutes, args.seed + k, on, st_hist, cam_hist, new_by_min)
+    central.shutdown()
+    rows = results[True]
+    print(f"Central London, recorder data {day} (UTC): {len(starts)} windows of {args.minutes} min "
+          f"({', '.join(hhmm(s) for s in starts)}), n={N} worlds, +{LEAD_MIN} min ahead, events on, "
+          f"{len(base['stations'])} stations, {len(base['cams'])} cameras.")
+    central_table("station busyness, % of usual", [r for r in rows if r["kind"] == "station"], "percentage points")
+    central_table("camera counts", [r for r in rows if r["kind"] == "cam"], "people per frame")
+    if args.events_ab:
+        off_by = {(r["id"], r["ts"]): r for r in results[False] if r["kind"] == "station"}
+        on = [r for r in results[True] if r["kind"] == "station" and (r["id"], r["ts"]) in off_by]
+        off = [off_by[(r["id"], r["ts"])] for r in on]
+        print("\nevents in the simulation, on vs off (station busyness, % of usual; same readings)")
+        for label, a, b in (("all stations", on, off),
+                            ("stations with an active event", [r for r in on if r["event"]],
+                             [o for o, r in zip(off, on) if r["event"]])):
+            (ma, ca), (mb, cb) = central_score(a, "market"), central_score(b, "market")
+            print(f"   {label:32} n={len(a):4d}  on: MAE {fmt(ma)} in80 {fmt(ca, True)} | "
+                  f"off: MAE {fmt(mb)} in80 {fmt(cb, True)}")
+    print(f"({time.perf_counter() - t0:.1f} s)")
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--raw", type=Path, default=feeds.alt_root())
     ap.add_argument("--windows", type=int, default=6)
     ap.add_argument("--seed", type=int, default=7)
+    ap.add_argument("--central", action="store_true", help="central London: stations + cameras, +5 min")
+    ap.add_argument("--minutes", type=int, default=60, help="--central: minutes per window")
+    ap.add_argument("--events-ab", action="store_true", help="--central: also run with the event layer off")
     args = ap.parse_args()
+    if args.central:
+        central_main(args)
+        return
     t0 = time.perf_counter()
     base = json.loads(SEED_PATH.read_text())
     start, end, day = newest_day(args.raw)
