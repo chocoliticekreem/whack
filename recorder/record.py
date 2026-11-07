@@ -127,14 +127,22 @@ def props(place: dict) -> dict:
 
 
 SEED = ROOT / "services" / "multiverse" / "seeds" / "oxford-circus.json"
+HOTSPOTS = ROOT / "services" / "city" / "hotspots.json"
 
 
-def seed_cam_ids(path: Path = SEED) -> set[str]:
-    """The 2-worker YOLO server can't keep 83 cameras fresh, so only count the cameras the market reads."""
+def seed_cam_ids(path: Path = SEED, hotspots: Path = HOTSPOTS) -> set[str]:
+    """The 2-worker YOLO server can't keep 83 cameras fresh, so only count the cameras the markets read:
+    the Oxford Circus multiverse seed plus the city hotspots."""
+    ids: set[str] = set()
     try:
-        return {c["id"] for c in json.loads(path.read_text())["cams"]}
+        ids |= {c["id"] for c in json.loads(path.read_text())["cams"]}
     except (OSError, KeyError, ValueError):
-        return set()
+        pass
+    try:
+        ids |= {c for h in json.loads(hotspots.read_text())["hotspots"] for c in h["cams"]}
+    except (OSError, KeyError, ValueError):
+        pass
+    return ids
 
 
 class Recorder:

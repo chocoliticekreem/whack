@@ -1,0 +1,39 @@
+{
+  "hotspots": [
+    {
+      "id": "oxford-circus", "name": "Oxford Circus", "short": "Oxford Circus",
+      "lat": 51.5152, "lon": -0.1418, "naptan": "940GZZLUOXC",
+      "cams": ["JamCams_00001.07451", "JamCams_00001.07400", "JamCams_00001.08860"],
+      "busStops": ["490000173RC", "490000173RG", "490000173JC", "490000173JA", "490000173RF", "490000173N"],
+      "lines": ["bakerloo", "central", "victoria"]
+    },
+    {
+      "id": "kings-cross", "name": "King's Cross St Pancras", "short": "King's Cross",
+      "lat": 51.5308, "lon": -0.1238, "naptan": "940GZZLUKSX",
+      "cams": ["JamCams_00001.09640"],
+      "busStops": ["490000129D", "490000129E", "490012553B", "490001171G", "490004722M", "490000129R"],
+      "lines": ["circle", "hammersmith-city", "metropolitan", "northern", "piccadilly", "victoria"]
+    },
+    {
+      "id": "piccadilly", "name": "Piccadilly Circus", "short": "Piccadilly Circus",
+      "lat": 51.5098, "lon": -0.1342, "naptan": "940GZZLUPCC",
+      "cams": ["JamCams_00001.07450", "JamCams_00001.07458"],
+      "busStops": ["490015185H", "490011516Y", "490007960R", "490011515Z", "490000179B", "490000179S"],
+      "lines": ["bakerloo", "piccadilly"]
+    },
+    {
+      "id": "waterloo", "name": "Waterloo", "short": "Waterloo",
+      "lat": 51.5036, "lon": -0.1143, "naptan": "940GZZLUWLO",
+      "cams": ["JamCams_00001.04225", "JamCams_00001.04223", "JamCams_00001.04226"],
+      "busStops": ["490000254A", "490000254W", "490000254Z", "490000254B", "490000254K", "490000254J"],
+      "lines": ["bakerloo", "jubilee", "northern", "waterloo-city"]
+    },
+    {
+      "id": "bank", "name": "Bank", "short": "Bank",
+      "lat": 51.5133, "lon": -0.0886, "naptan": "940GZZLUBNK",
+      "cams": [],
+      "busStops": ["490000013E", "490000013D", "490000013C", "490011218B", "490000013F", "490011218A"],
+      "lines": ["central", "northern", "waterloo-city"]
+    }
+  ]
+}

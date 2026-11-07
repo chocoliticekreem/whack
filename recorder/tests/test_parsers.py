@@ -90,9 +90,21 @@ if __name__ == "__main__":
 
 class SeedCamsTest(unittest.TestCase):
     def test_reads_the_market_seed_cameras(self):
-        ids = record.seed_cam_ids()
+        ids = record.seed_cam_ids(hotspots=Path("/nonexistent/hotspots.json"))
         self.assertEqual(len(ids), 8)
         self.assertTrue(all(i.startswith("JamCams_") for i in ids))
 
+    def test_adds_the_city_hotspot_cameras(self):
+        seed = record.seed_cam_ids(hotspots=Path("/nonexistent/hotspots.json"))
+        city = {c for h in json.loads(record.HOTSPOTS.read_text())["hotspots"] for c in h["cams"]}
+        ids = record.seed_cam_ids()
+        self.assertEqual(ids, seed | city)
+        self.assertIn("JamCams_00001.04225", ids)  # Waterloo, not in the Oxford Circus seed
+        self.assertLessEqual(len(ids), 20)  # the YOLO server has 2 workers
+
+    def test_hotspots_alone_still_count(self):
+        ids = record.seed_cam_ids(Path("/nonexistent/seed.json"))
+        self.assertIn("JamCams_00001.09640", ids)
+
     def test_missing_seed_means_count_every_camera(self):
-        self.assertEqual(record.seed_cam_ids(Path("/nonexistent/seed.json")), set())
+        self.assertEqual(record.seed_cam_ids(Path("/nonexistent/seed.json"), Path("/nonexistent/h.json")), set())
