@@ -50,8 +50,7 @@ The "new world" in the brief is the one nobody can see: the London that hasn't h
   Contradicted worlds are delisted with a plain reason ("predicted 23 people, cameras saw 86"),
   and survivors spawn new worlds.
 - **AI brokers bet too, and each reads a different stream of alternative data:** Heathrow
-  holding stacks, rain, the power grid, geocoded news, bike docks, theatre show-out times,
-  Wikipedia attention. They submit ideas about the future with a conviction level. Each idea spawns worlds, and reality
+  holding stacks, rain, the power grid, geocoded news, bike docks, Wikipedia attention. They submit ideas about the future with a conviction level. Each idea spawns worlds, and reality
   scores every broker's track record, TOPS-style: brokers who keep calling it right get more say.
 - [VERIFY: judge betting UI not built yet] **You can bet**, on points only: buy a world and watch the next frame settle it.
 - **Place an event:** drop a closure or crowd surge on a street and watch the multiverse fork.

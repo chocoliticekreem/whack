@@ -87,8 +87,7 @@ yet (R).
 For signals with no API, polite scrapers (plain HTTP, or Playwright where JS is needed). They
 check robots.txt and terms first, use a descriptive User-Agent, and make at most 1 request per
 page per 10 min:
-- **West End theatre show times** (show-out surges near Oxford Circus).
-- **What's-on and major events** near the West End.
+- **Today's major events and fixtures** in London (only if it gives a live daytime signal). Optional.
 - **Football and big-event fixtures** in London (stations that will surge).
 - **Not scraped:** Google Maps / Popular Times, or anything behind a login (terms).
 
