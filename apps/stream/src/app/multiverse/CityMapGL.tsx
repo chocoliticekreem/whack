@@ -5,7 +5,7 @@ import "./city-map.css";
 import type { Map as MapLibreMap, Marker } from "maplibre-gl";
 import { useEffect, useRef, useState } from "react";
 import { buildCityStyle, LOOK } from "./city-map-style";
-import type { Hotspot } from "./city-types";
+import type { Hotspot, HubsVsUsual } from "./city-types";
 
 export interface Pop {
   key: number;
@@ -38,7 +38,7 @@ function padding() {
   const rect = (sel: string) => document.querySelector(sel)?.getBoundingClientRect() ?? null;
   const side = rect(".tl-markets");
   const ai = rect(".tl-ai");
-  const bar = rect(".tl-bar");
+  const bar = rect(".tl-strip") ?? rect(".tl-bar");
   // Tags sit ~40 px above their spot, so the top needs more room than the sides.
   const p = isPhone()
     ? { top: (ai?.bottom ?? bar?.bottom ?? 60) + 56, bottom: h - (side?.top ?? h * 0.5) + 24, left: 36, right: 36 }
@@ -80,6 +80,7 @@ interface Pin {
   marker: Marker;
   el: HTMLDivElement;
   pop: HTMLSpanElement;
+  vs: HTMLSpanElement;
 }
 
 function makePin(lib: typeof import("maplibre-gl"), map: MapLibreMap, hub: Hotspot): Pin {
@@ -87,7 +88,7 @@ function makePin(lib: typeof import("maplibre-gl"), map: MapLibreMap, hub: Hotsp
   el.className = "cm-hub";
   el.setAttribute("role", "button");
   el.setAttribute("aria-label", hub.name);
-  el.innerHTML = '<span class="cm-hub-ring"></span><span class="cm-hub-dot"></span><span class="cm-hub-tag"><span class="cm-hub-tag-dot"></span><span class="cm-hub-name"></span></span>';
+  el.innerHTML = '<span class="cm-hub-halo"></span><span class="cm-hub-ring"></span><span class="cm-hub-dot"></span><span class="cm-hub-tag"><span class="cm-hub-tag-dot"></span><span class="cm-hub-name"></span><span class="cm-hub-vs"></span></span>';
   (el.querySelector(".cm-hub-name") as HTMLSpanElement).textContent = hub.name;
   const pop = document.createElement("span");
   pop.className = "cm-hub-pop";
@@ -97,7 +98,7 @@ function makePin(lib: typeof import("maplibre-gl"), map: MapLibreMap, hub: Hotsp
     map.easeTo({ center: [hub.lon, hub.lat], zoom: Math.max(map.getZoom(), 15.4), duration: 900 });
   });
   const marker = new lib.Marker({ element: el, anchor: "center" }).setLngLat([hub.lon, hub.lat]).addTo(map);
-  return { marker, el, pop };
+  return { marker, el, pop, vs: el.querySelector(".cm-hub-vs") as HTMLSpanElement };
 }
 
 /** MapLibre city view: OpenFreeMap vector tiles, pale extruded buildings, hotspots as DOM markers. */
@@ -106,11 +107,14 @@ export function CityMapGL({
   active,
   winner,
   pop,
+  vsUsual,
 }: {
   hotspots: Hotspot[];
   active: string[];
   winner: string | null;
   pop: Pop | null;
+  /** From GET /signals; null hides the % and the laggard ring. */
+  vsUsual: HubsVsUsual | null;
 }) {
   const container = useRef<HTMLDivElement>(null);
   const lib = useRef<typeof import("maplibre-gl") | null>(null);
@@ -199,6 +203,18 @@ export function CityMapGL({
       p.el.toggleAttribute("data-dim", on.size > 0 && !isActive && !isWin);
     }
   }, [ready, hotspots, activeKey, winner]);
+
+  useEffect(() => {
+    const rows = new Map((vsUsual?.hubs ?? []).map((h) => [h.id, h]));
+    for (const [id, p] of pins.current) {
+      const row = rows.get(id);
+      const vs = row ? `${Math.round(row.vsUsual * 100)}%` : "";
+      const name = p.el.querySelector(".cm-hub-name")?.textContent ?? "";
+      p.vs.replaceChildren(vs);
+      p.el.toggleAttribute("data-laggard", !!row && vsUsual?.laggard === id);
+      p.el.setAttribute("aria-label", row ? `${name}, ${vs} of a usual ${vsUsual?.day}` : name);
+    }
+  }, [ready, hotspots, vsUsual]);
 
   useEffect(() => {
     if (!pop) return;

@@ -4,6 +4,7 @@ import { Bus, Camera, Check, CloudRain, Shuffle, TrafficCone, TrainFront, X, typ
 import { useState, type MouseEvent } from "react";
 import { countdown, fmtPts, londonClock, type MyBet, type Settled } from "./city-store";
 import type { Market, Trader } from "./city-types";
+import { MarketClues, usualGhost } from "./Clues";
 
 export type Phase = "open" | "halted" | "locked" | "awaiting" | "settled" | "void";
 
@@ -61,22 +62,34 @@ export function Badge({ id, name, kind = "ai", small }: { id: string; name: stri
   );
 }
 
-function Spark({ lines, lead }: { lines: number[][]; lead: number }) {
+function Spark({ lines, lead, ghost }: { lines: number[][]; lead: number; ghost: number[] | null }) {
   const W = 140;
   const H = 40;
+  // Why: the usual curve looks 15 min ahead, so it continues past the price line instead of sharing its time axis.
+  const PW = ghost ? W * 0.72 : W;
+  const yOf = (p: number) => H - 2 - p * (H - 4);
   const path = (pts: number[]) => {
     if (pts.length < 2) return "";
-    const lo = 0;
-    const hi = 1;
-    return pts
-      .map((p, i) => `${i ? "L" : "M"}${((i / (pts.length - 1)) * W).toFixed(1)},${(H - 2 - ((p - lo) / (hi - lo)) * (H - 4)).toFixed(1)}`)
-      .join(" ");
+    return pts.map((p, i) => `${i ? "L" : "M"}${((i / (pts.length - 1)) * PW).toFixed(1)},${yOf(p).toFixed(1)}`).join(" ");
   };
+  const leadPts = lines[lead] ?? [];
+  const y0 = yOf(leadPts[leadPts.length - 1] ?? 0.5);
+  const ghostPath =
+    ghost && ghost.length > 1
+      ? ghost
+          .map((r, i) => {
+            const x = PW + (i / (ghost.length - 1)) * (W - PW);
+            const y = Math.max(2, Math.min(H - 2, y0 - (r - 1) * H * 2));
+            return `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`;
+          })
+          .join(" ")
+      : "";
   return (
     <svg className="tl-spark" viewBox={`0 0 ${W} ${H}`} width={W} height={H} aria-hidden>
       {lines.map((pts, i) => (
         <path key={i} d={path(pts)} data-lead={i === lead || undefined} />
       ))}
+      {ghostPath && <path className="tl-spark-ghost" d={ghostPath} />}
     </svg>
   );
 }
@@ -163,11 +176,13 @@ export function MarketCard({
 
       <h3 className="tl-q">{m.question}</h3>
 
+      <MarketClues signals={m.signals} />
+
       {phase !== "settled" && phase !== "void" && (
         <div className="tl-m-lead">
           <span className="tl-big tl-num">{Math.round(leader.prob * 100)}%</span>
           <span className="tl-lead-label">{leader.label}</span>
-          <Spark lines={m.options.map((o) => history[o.id] ?? [o.prob])} lead={lead} />
+          <Spark lines={m.options.map((o) => history[o.id] ?? [o.prob])} lead={lead} ghost={usualGhost(m.signals)} />
         </div>
       )}
 

@@ -43,6 +43,7 @@
   --s5: 24px;
 
   --bar-h: 48px;
+  --strip-h: 0px;
   --side-w: 420px;
   --ai-w: 288px;
 
@@ -339,7 +340,7 @@
 .tl-markets {
   position: absolute;
   z-index: 20;
-  top: calc(var(--bar-h) + env(safe-area-inset-top));
+  top: calc(var(--bar-h) + var(--strip-h) + env(safe-area-inset-top));
   left: 0;
   bottom: 0;
   width: var(--side-w);
@@ -866,11 +867,120 @@
   color: var(--muted);
 }
 
+/* City strip: one calm line under the header, from GET /signals. */
+.tl[data-strip] {
+  --strip-h: 32px;
+}
+
+.tl-strip {
+  position: absolute;
+  z-index: 25;
+  top: calc(var(--bar-h) + env(safe-area-inset-top));
+  left: 0;
+  right: 0;
+  height: var(--strip-h);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+}
+
+.tl-strip::-webkit-scrollbar {
+  display: none;
+}
+
+.tl-strip-row {
+  display: flex;
+  align-items: center;
+  width: max-content;
+  height: 100%;
+  padding: 0 var(--s4);
+  white-space: nowrap;
+}
+
+.tl-strip-item {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.tl-strip-item + .tl-strip-item {
+  margin-left: var(--s4);
+  padding-left: var(--s4);
+  border-left: 1px solid var(--line-strong);
+}
+
+.tl-strip-hub {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+}
+
+.tl-strip-dot {
+  margin-right: 2px;
+  color: var(--line-strong);
+}
+
+.tl-strip-hub[data-low] {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.tl-strip-note {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+/* Clues under a market's question: quiet, one or two lines. */
+.tl-clues {
+  display: grid;
+  gap: 2px;
+  margin-top: calc(-1 * var(--s1));
+}
+
+.tl-clue {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s2);
+  margin: 0;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.tl-bars {
+  flex: none;
+  margin-top: 0.5px;
+}
+
+.tl-bars rect {
+  fill: var(--line-strong);
+}
+
+.tl-bars rect[data-low] {
+  fill: var(--ink-2);
+}
+
+.tl-bars line {
+  stroke: var(--muted);
+  stroke-width: 1;
+  stroke-dasharray: 2 2;
+}
+
+.tl-spark path.tl-spark-ghost {
+  stroke: var(--muted);
+  stroke-width: 1.25;
+  stroke-dasharray: 3 3;
+}
+
 /* AI traders: flush right, attached to the header. */
 .tl-ai {
   position: absolute;
   z-index: 20;
-  top: calc(var(--bar-h) + env(safe-area-inset-top));
+  top: calc(var(--bar-h) + var(--strip-h) + env(safe-area-inset-top));
   right: 0;
   width: var(--ai-w);
   background: var(--surface);
@@ -972,7 +1082,7 @@
 .tl-toast {
   position: absolute;
   z-index: 50;
-  top: calc(var(--bar-h) + var(--s4) + env(safe-area-inset-top));
+  top: calc(var(--bar-h) + var(--strip-h) + var(--s4) + env(safe-area-inset-top));
   left: calc(var(--side-w) + (100% - var(--side-w) - var(--ai-w)) / 2);
   display: grid;
   justify-items: center;
@@ -1334,6 +1444,27 @@
     border-radius: var(--r-l) var(--r-l) 0 0;
   }
 
+  .tl[data-strip] {
+    --strip-h: 30px;
+  }
+
+  .tl-strip {
+    font-size: 12px;
+  }
+
+  .tl-strip-row {
+    padding: 0 var(--s3);
+  }
+
+  .tl-strip-item + .tl-strip-item {
+    margin-left: var(--s3);
+    padding-left: var(--s3);
+  }
+
+  .tl-clue {
+    font-size: 12px;
+  }
+
   .tl-intro {
     padding: var(--s3) var(--s4) var(--s2);
   }
@@ -1360,7 +1491,7 @@
   }
 
   .tl-toast {
-    top: calc(var(--bar-h) + 72px + env(safe-area-inset-top));
+    top: calc(var(--bar-h) + var(--strip-h) + 72px + env(safe-area-inset-top));
     left: 50%;
     max-width: calc(100% - 2 * var(--s4));
   }

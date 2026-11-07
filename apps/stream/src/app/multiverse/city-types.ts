@@ -52,6 +52,76 @@ export interface Market {
   /** Full one-line settlement rule. */
   rule?: string;
   status?: MarketStatus;
+  /** 1–2 clues from services/city/signals.py; null or missing renders nothing. */
+  signals?: Signal[] | null;
+}
+
+export type UsualTrend = "up" | "down" | "flat";
+
+/** Live busyness ÷ the typical value for this weekday and 15-min band; raw fractions (1 = usual). */
+export interface HubVsUsual {
+  id: string;
+  name: string;
+  live: number;
+  typical: number;
+  vsUsual: number;
+  typicalNext15: { at: number; typical: number }[];
+  usualTrend: UsualTrend;
+  furthestBelow: boolean;
+  leader: boolean;
+}
+
+export interface HubsVsUsual {
+  day: string;
+  asOf: number;
+  laggard: string;
+  leader: string;
+  hubs: HubVsUsual[];
+}
+
+export interface LineDisruption {
+  id: string;
+  name: string;
+  sev: number;
+  desc: string;
+  reason: string;
+  sinceMin: number | null;
+}
+
+export interface LineBoard {
+  good: number;
+  of: number;
+  sinceLastChangeMin: number | null;
+  disrupted: LineDisruption[];
+}
+
+export type Signal =
+  | { id: "vs_usual"; text: string; data: HubsVsUsual }
+  | {
+      id: "usual_curve";
+      text: string;
+      data: { hub: string; name: string; vsUsual: number; typicalNow: number; typicalIn15: number; usualTrend: UsualTrend };
+    }
+  | {
+      id: "fixture";
+      text: string;
+      data: { home: string; away: string; score: string; status: string; hub: string; minutesSinceEgress: number };
+    }
+  | {
+      id: "pulse";
+      text: string;
+      data: { pulse: number; usual: number | null; typicalIn15: number | null; usualTrend: UsualTrend; change5: number | null };
+    }
+  | { id: "vix_driver"; text: string; data: { vix: number; driver: string; driverDelta: number; change5: number | null } }
+  | { id: "stacks"; text: string; data: { total: number; stacks: Record<string, number>; avg30: number; change10: number | null } }
+  | { id: "lines"; text: string; data: LineBoard };
+
+/** GET /signals: the top strip. */
+export interface CitySignals {
+  now: number;
+  hubs: (HubsVsUsual & { text: string }) | null;
+  lines: (LineBoard & { text: string }) | null;
+  football: { home: string; away: string; score: string; status: string; hub: string | null; text: string } | null;
 }
 
 export interface Feed {

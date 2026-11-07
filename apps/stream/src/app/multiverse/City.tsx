@@ -14,7 +14,8 @@ import {
   type Settled,
   type Wallet,
 } from "./city-store";
-import type { BetResponse, Hotspot, LeaderRow, Market, MarketsResponse, SettleResponse, Trader } from "./city-types";
+import type { BetResponse, CitySignals, Hotspot, LeaderRow, Market, MarketsResponse, SettleResponse, Trader } from "./city-types";
+import { CityStrip } from "./Clues";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
 import { WalletPanel, createPlayer, setNickname, useServerWallet, useStakeConfirm } from "./Wallet";
 
@@ -108,6 +109,7 @@ export function City() {
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [traders, setTraders] = useState<Trader[]>([]);
   const [feed, setFeed] = useState<MarketsResponse | null>(null);
+  const [signals, setSignals] = useState<CitySignals | null>(null);
   const [results, setResults] = useState<Record<string, Settled & { at: number }>>({});
   const [wallet, setWallet] = useState<Wallet>(loadWallet);
   const [selected, setSelected] = useState<string | null>(null);
@@ -162,6 +164,12 @@ export function City() {
   const hubMap = useMemo(() => new Map(hotspots.map((h) => [h.id, h])), [hotspots]);
 
   const pollMarkets = useCallback(async () => {
+    // Why: the strip is optional context, so a failed /signals clears it without touching the markets.
+    if (mock) setSignals(null);
+    else
+      void call<CitySignals>(false, "signals")
+        .then((r) => setSignals(r.ok ? r.data : null))
+        .catch(() => setSignals(null));
     try {
       const r = await call<MarketsResponse & { error?: string }>(mock, "markets");
       if (!r.ok) throw new Error(r.data.error ?? `HTTP ${r.status}`);
@@ -404,6 +412,8 @@ export function City() {
     return out;
   }, [feed]);
 
+  const hasStrip = !!(signals?.hubs?.hubs.length || signals?.lines || signals?.football);
+
   const tipTrader = tip ? traderMap.get(tip.trader) : null;
   const tipRect = tip?.el.getBoundingClientRect();
 
@@ -415,9 +425,9 @@ export function City() {
   }, [board, wallet, server]);
 
   return (
-    <div className="tl" onClick={() => setTip(null)}>
+    <div className="tl" data-strip={hasStrip || undefined} onClick={() => setTip(null)}>
       <div className="tl-world">
-        <CityMapGL hotspots={hotspots} active={active} winner={glow} pop={pop} />
+        <CityMapGL hotspots={hotspots} active={active} winner={glow} pop={pop} vsUsual={signals?.hubs ?? null} />
       </div>
 
       <header className="tl-bar">
@@ -487,6 +497,8 @@ export function City() {
           </div>
         )}
       </header>
+
+      <CityStrip signals={signals} />
 
       <aside className="tl-ai">
         <div className="tl-ai-head">
