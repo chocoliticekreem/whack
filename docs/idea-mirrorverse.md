@@ -27,6 +27,35 @@ prior_art: https://github.com/chocoliticekreem/mirrorverse (built 2026-10-17, VA
 crowd. That validates the direction, so we must clearly go further: a real city, live data,
 several systems, a visible cascade. See [past-winners.md](past-winners.md).
 
+## ⚠ Steering check: is it *novel*, or just on theme?
+This year's brief asks for "something novel no one has seen before" (see the brief comparison
+in marshall-wace-track.md). An honest read:
+- **The risk:** a literal "crash → traffic cascade" sim is almost exactly MW's **2024** brief
+  ("a game where your actions have consequences"). It's also a known category: digital twins,
+  SimCity, and IC Hack 26's winning Digital Twin. Pitched as "a city traffic simulator", it
+  reads as *last year's theme* and *seen before*.
+- **What's actually new:** the **counterfactual present**. This is not a model of a city, it's
+  *a parallel version of today's real London*, forked from live data at this minute. A world
+  that exists only because you changed one thing. Nobody has walked through the present that
+  didn't happen.
+
+**Sharpen toward "New Worlds" (pick one or two, don't do all):**
+1. **Branching multiverse:** every intervention forks a new world, and the worlds form a tree.
+   Users explore *a map of possible Londons*, compare branches, and see where they diverge
+   most. The "world" is the product.
+2. **New data:** each fork produces a dataset that has never existed, such as "what Oxford
+   Street's traffic would look like right now if…". Show it next to the real feed, as a new
+   data source.
+3. **Explore, don't just watch:** drop into the counterfactual world in first person and walk
+   the street that only exists in this branch.
+
+**Pitch words:** "parallel present", "the London that didn't happen", "fork reality".
+**Avoid:** "digital twin", "traffic simulator", "chain of events".
+
+**Ask MW at the stand:** "Is a counterfactual fork of the real city, live, novel enough for
+New Worlds, or does it feel like a sim?" Their answer decides how hard we push the multiverse
+angle.
+
 ## How it scores on MW's 3 criteria
 | Criterion | What makes it land |
 |---|---|

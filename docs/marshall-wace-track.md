@@ -69,6 +69,26 @@ Takeaways:
 - A finance tool is not required.
 - The literal reading of the theme gets crowded fast.
 
+## How their briefs have changed (full text where published)
+| Event | Theme | Their example directions | Judging criteria |
+|---|---|---|---|
+| DurHack 2024 | Chain of events | "Make a game where your actions have consequences · Visualise global supply chains · Create a high-throughput data processing pipeline" | Innovation/Idea, Creativity, Learning |
+| DurHack 2025 | Bridging Worlds | "Map data between domains to uncover new insights · Interface between systems that operate independently · Design a system for human-AI collaboration" | Creativity/Innovation, Technical Competence/Execution, Research/Learning, Polish/Completion |
+| IC Hack 26 | Emergent Behaviour | Not published (Devpost lists only the prize name) | Not published |
+| **WHACK 26** | **New Worlds** | **None.** "Opens a door to the unexplored, whether that's new data, ideas or **something novel no one has seen before**" | **Creativity, Technical complexity, Good presentation** · "Do what you're interested in!" |
+
+**What changed this time:**
+1. **Novelty is now in the brief itself.** Earlier briefs asked you to *explore an idea*. This one
+   asks for something *no one has seen before*. It's a higher bar.
+2. **No example directions.** In earlier years the examples steered entries into the same few
+   answers. Leaving them out reads as "don't hand us a template".
+3. **Creativity comes first, and "Learning" is gone.** Earlier criteria rewarded learning
+   effort. Now it's creativity + technical complexity + presentation: be original, be hard, sell it.
+
+**Steering test for any idea:** if a judge could say "I've seen that before" (a digital twin, a
+traffic sim, a chatbot over X, a dashboard of Y), the novelty has to come from something else.
+That might be a new framing, a new dataset, or something new you can do in it.
+
 ## What a winning entry looks like (mapped to their 3 criteria)
 1. **Creativity.** "Interpret however you think best" invites a clever reading. The literal
    reading (a space game, a planet generator) will be crowded. Aim for a "door" moment: in about
