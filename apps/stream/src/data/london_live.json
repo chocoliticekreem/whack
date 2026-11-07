@@ -1,0 +1,117 @@
+{
+  "updated": "2026-10-17",
+  "notes": [
+    "Continuous live video streams of London found on public sites. YouTube live IDs change when a stream restarts, so each entry keeps a 'resolve' rule: try video_id, else find the live stream on the channel whose title contains 'match'.",
+    "Never store the resolved .m3u8 URL: it expires after a few hours. Call streams.py resolve <id> when the stream is needed.",
+    "location_precision: 'exact' = known fixed spot; 'approx' = area only (camera position not published)."
+  ],
+  "cameras": [
+    {
+      "id": "abbey-road-crossing",
+      "name": "Abbey Road Crossing",
+      "area": "St John's Wood",
+      "lat": 51.53204,
+      "lon": -0.17752,
+      "location_precision": "exact",
+      "kind": "fixed_street",
+      "subjects": ["pedestrians", "cars", "buses"],
+      "source": "EarthCam on YouTube (also embedded by SkylineWebcams and Webcamtaxi)",
+      "page": "https://www.youtube.com/watch?v=zMCea32gpmg",
+      "resolve": { "video_id": "zMCea32gpmg", "channel": "@earthcam", "match": "Abbey Road" },
+      "verified": { "at": "2026-10-17T10:02Z", "live": true, "resolution": "1920x1080", "fps": 30 }
+    },
+    {
+      "id": "london-bridge-golden-hinde",
+      "name": "London Bridge & River Thames (Golden Hinde)",
+      "area": "Bankside / London Bridge",
+      "lat": 51.50735,
+      "lon": -0.09045,
+      "location_precision": "approx",
+      "kind": "fixed_landmark",
+      "subjects": ["pedestrians", "river traffic", "bridge traffic"],
+      "source": "Beach Life Cams on YouTube",
+      "page": "https://www.youtube.com/watch?v=znmUEZUM9Zc",
+      "resolve": { "video_id": "znmUEZUM9Zc", "channel": "@BeachLifeCams", "match": "London Bridge" },
+      "verified": { "at": "2026-10-17T10:00Z", "live": true, "resolution": "1920x1080", "fps": 30 },
+      "view": "From the Golden Hinde (Bankside) north-east across the Thames to London Bridge and the City towers. Wide shot: people and vehicles on the bridge are small, use 1080p for detection.",
+      "demo_note": "Closest live camera to the Tower Hill -> Tower Bridge demo route (~1.3 km west of Tower Bridge)."
+    },
+    {
+      "id": "notting-hill-gate",
+      "name": "Notting Hill Gate Station",
+      "area": "Notting Hill",
+      "lat": 51.50906,
+      "lon": -0.19617,
+      "location_precision": "approx",
+      "kind": "fixed_street",
+      "subjects": ["pedestrians", "cars", "buses"],
+      "source": "Notting Hill Gate Cam on YouTube",
+      "page": "https://www.youtube.com/@NottingHillGateCam/live",
+      "resolve": { "video_id": "aVdCJd_Zw78", "channel": "@NottingHillGateCam", "match": "Notting Hill" },
+      "verified": { "at": "2026-10-17T10:00Z", "live": true, "resolution": "1920x1080", "fps": 30 }
+    },
+    {
+      "id": "heathrow-flightfocus365",
+      "name": "Heathrow Airport (Flight Focus 365)",
+      "area": "Heathrow",
+      "lat": 51.4700,
+      "lon": -0.4543,
+      "location_precision": "approx",
+      "kind": "airport",
+      "subjects": ["aircraft"],
+      "source": "Flight Focus 365 on YouTube (daily stream, new ID each day)",
+      "page": "https://www.youtube.com/@FlightFocus365/live",
+      "resolve": { "video_id": "tY-FFLw8tsw", "channel": "@FlightFocus365", "match": "Heathrow" },
+      "verified": { "at": "2026-10-17T10:03Z", "live": true, "resolution": "1920x1080", "fps": 30 }
+    },
+    {
+      "id": "heathrow-flightradar24",
+      "name": "Heathrow Airport 24/7 (Flightradar24)",
+      "area": "Heathrow",
+      "lat": 51.4700,
+      "lon": -0.4543,
+      "location_precision": "approx",
+      "kind": "airport",
+      "subjects": ["aircraft"],
+      "source": "Flightradar24 on YouTube (embedded by Webcamtaxi)",
+      "page": "https://www.youtube.com/watch?v=SgvpyjQX_HM",
+      "resolve": { "video_id": "SgvpyjQX_HM", "channel": "@Flightradar24DotCom", "match": "LHR" },
+      "verified": { "at": "2026-10-17T10:02Z", "live": true, "resolution": "1920x1080", "fps": 30 }
+    },
+    {
+      "id": "heathrow-airplanevideoguy",
+      "name": "Heathrow Airport (Airplane Video Guy)",
+      "area": "Heathrow",
+      "lat": 51.4700,
+      "lon": -0.4543,
+      "location_precision": "approx",
+      "kind": "airport",
+      "subjects": ["aircraft"],
+      "source": "Airplane Video Guy on YouTube (event stream, not 24/7)",
+      "page": "https://www.youtube.com/watch?v=nz6JpX52dFo",
+      "resolve": { "video_id": "nz6JpX52dFo", "channel": "@AirplaneVideoGuy", "match": "HEATHROW" },
+      "verified": { "at": "2026-10-17T10:00Z", "live": true, "resolution": "1920x1080", "fps": 60 }
+    },
+    {
+      "id": "heathrow-littlegreat",
+      "name": "Heathrow Plane Spotting (Little & Great Adventures)",
+      "area": "Heathrow",
+      "lat": 51.4700,
+      "lon": -0.4543,
+      "location_precision": "approx",
+      "kind": "airport",
+      "subjects": ["aircraft"],
+      "source": "Little & Great Adventures on YouTube (event stream, not 24/7)",
+      "page": "https://www.youtube.com/watch?v=7eHESjLMdXA",
+      "resolve": { "video_id": "7eHESjLMdXA", "channel": "@LittleGreatAdventures", "match": "Heathrow" },
+      "verified": { "at": "2026-10-17T10:00Z", "live": true, "resolution": "1920x1080", "fps": 30 }
+    }
+  ],
+  "excluded": [
+    { "what": "London walking tours / bus rides / Underground '24/7 live'", "ids": ["WKGK_hYnlGE", "GMxXkO0ARNE", "Z8OrOHYJciM", "wDaV8EkYHmk", "gzV7uUxwgwI"], "why": "Marked live on YouTube but they are looped recordings or moving cameras, not a real-time view of a fixed place." },
+    { "what": "Thames & Medway shipping cam", "ids": ["pwwYtFDEheE"], "why": "Sheerness, Kent - not London." },
+    { "what": "EveryWebcam / LiveCamsMap / Windy 'London live webcams' (66+)", "why": "All are TfL JamCam snapshots re-hosted through Windy (api.lookr.com), not continuous video." },
+    { "what": "SkylineWebcams Abbey Road", "why": "Embeds the same EarthCam YouTube stream (zMCea32gpmg)." },
+    { "what": "Dead links on directories", "ids": ["1YKf_Za8r4U", "8JCk5M_xrBs", "9zI1gImQXl0", "M3EYAY2MftI"], "why": "Stream ended / video unavailable on 2026-10-17." }
+  ]
+}

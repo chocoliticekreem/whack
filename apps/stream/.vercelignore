@@ -1,0 +1,6 @@
+.env*
+.cache
+.next
+node_modules
+.vercel
+public/footage

@@ -1,0 +1,44 @@
+[
+  {
+    "id": "VCAM_bank",
+    "file": "bank",
+    "name": "Bank Junction / Royal Exchange (4K)",
+    "lat": 51.5134,
+    "lon": -0.0905,
+    "view": "EAST-twds Royal Exchange, from Poultry",
+    "heading": 78,
+    "youtube": "6y3FUksfKps",
+    "section": [
+      300,
+      1200
+    ]
+  },
+  {
+    "id": "VCAM_gracechurch",
+    "file": "citynight",
+    "name": "Gracechurch St, night (4K)",
+    "lat": 51.5117,
+    "lon": -0.0849,
+    "view": "NORTH-twds Bishopsgate",
+    "heading": 10,
+    "youtube": "Xl815cdXHYk",
+    "section": [
+      120,
+      1020
+    ]
+  },
+  {
+    "id": "VCAM_strand",
+    "file": "westend",
+    "name": "Strand / Strand Palace (4K)",
+    "lat": 51.5108,
+    "lon": -0.1198,
+    "view": "WEST-twds Trafalgar Square",
+    "heading": 245,
+    "youtube": "sXJLT3kYdhk",
+    "section": [
+      300,
+      900
+    ]
+  }
+]

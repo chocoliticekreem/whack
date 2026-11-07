@@ -1,0 +1,10 @@
+{"ts": "2026-11-07T15:01:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 3.8, "buses": 12}}
+{"ts": "2026-11-07T15:02:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 4.4, "buses": 12}}
+{"ts": "2026-11-07T15:03:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 3.9, "buses": 12}}
+{"ts": "2026-11-07T15:04:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 4.8, "buses": 12}}
+{"ts": "2026-11-07T15:05:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 4.7, "buses": 12}}
+{"ts": "2026-11-07T15:06:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 4.3, "buses": 12}}
+{"ts": "2026-11-07T15:07:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 5.5, "buses": 12}}
+{"ts": "2026-11-07T15:08:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 4.5, "buses": 12}}
+{"ts": "2026-11-07T15:09:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 4.6, "buses": 12}}
+{"ts": "2026-11-07T15:10:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 4.6, "buses": 12}}
