@@ -17,13 +17,13 @@ from millions of people's choices. Everyone sees the same public data, so the ed
 - **Yes:** crowd flow and footfall, busyness vs a typical day, the London VIX.
 - **No:** planned closures, engineering works, "will TfL close X".
 - **The exception: clean sheet** (does every Tube line on Good Service stay Good for the hour). A line failure is one
-  discrete event, and TfL staff see it before the feed does. What limits it today: the market closes the moment a
-  reading shows a break, each player's stake is capped at 25% of their points per market, and it's points only. A bet
-  delay (or closing betting early in the hour) is next.
+  discrete event, and TfL staff see it before the feed does. What limits it today: bets fill 45 s after they're
+  placed, any line's status change pauses the market and cancels pending bets, stakes are capped at 10% of points,
+  betting closes with the market's first 5-minute round, and it's points only. A head start under 44 s gains nothing.
 
-**Faster feeds.** Betting stops 60 s before settlement, and crowding markets settle on the first reading our recorder
-polls after bets close. TfL stamps that reading with its own time, which can be before the close, so someone polling
-faster than us could see it first. Settling on TfL's own timestamp is next.
+**Faster feeds.** Crowding markets settle on the first reading TfL itself stamped after betting closed, and a value
+measured at or before the close voids. Nobody polling faster than us can see it early. The cost is a wait of about
+14 minutes, because TfL publishes late; the card shows "result about HH:MM, when TfL publishes".
 
 ## Why people would play
 - **Useful:** the market is a live commute forecast ("King's Cross peaks at 18:20, leave at 18:35").
@@ -42,7 +42,7 @@ faster than us could see it first. Settling on TfL's own timestamp is next.
 | "It's gambling" | It launches as a points-only forecasting game. Real money comes only where licensed. A daily loss limit and breaks are built in; reality checks and self-exclusion come next |
 | "Profiting from misery" | No markets on harm: no accidents, crime, injuries, protests or emergencies |
 | "Surveillance" | Counts only, no faces, aggregated across many cameras |
-| "Rigged" | Five busy hubs and a 20-station average, each measured against its own baseline; low-traffic stations are the soft spot we'd exclude. Settled on a published reading inside a fixed window, else void. Positions capped at 25%. Halts on sudden jumps |
+| "Rigged" | Five busy hubs and a 20-station average, each measured against its own baseline; low-traffic stations are the soft spot we'd exclude. Settled on a reading TfL stamped after betting closed, inside a fixed window, else void. Positions capped at 25% (10% on clean sheet and local markets). Bet delays and pauses on feed changes against courtsiding. Halts on sudden jumps |
 | "Is it legit?" | Every market shows its exact source and rule. The settled reading is frozen and shown |
 
 ## Roadmap
@@ -68,7 +68,7 @@ faster than us could see it first. Settling on TfL's own timestamp is next.
 | Client money kept separate (cash, money held in open bets, the house's money) | Done (#45) |
 | Responsible play: loss limits, reality checks, self-exclusion | Partly done (#45): daily loss limit, large-stake confirmation, 1 h / 24 h breaks. Reality checks and self-exclusion later |
 | Published settlement source and rule, with the settled reading frozen | Done |
-| Market integrity: position cap, settling on a window, halts on stale data and sudden jumps | Done |
+| Market integrity: position cap, settling on the source's own timestamp, halts on stale data and sudden jumps, bet delays against courtsiding | Done (#61, #72, #81) |
 | Peer-to-peer order book with market makers (no house risk) | Later. Today the house banks every bet through an LMSR market maker, which is bookmaking, not an exchange. Design in [exchange-design.md](exchange-design.md) |
 | ID verification and anti-money-laundering checks | Later: the player record is designed for it |
 

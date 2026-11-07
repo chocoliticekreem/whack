@@ -11,6 +11,27 @@ Ground truth is the code in `services/city` (cited as `file:line`), the live ser
 [References](#references). Numbers marked *sim* come from `analysis/economy/out/summary.md` (16 seeds × 7 days,
 1,008 rounds per seed).
 
+## What changed on main since this was written (checked at e59773b, #81)
+
+The design and the simulation below are unchanged. These facts about the code are now different; `file:line`
+citations below point at 1053c8d.
+- **Seven AI traders, not six:** the Simulation trader (#55) bets from the central sim. Each stake is min(100, 10% of
+  the trader's points), not a fixed 100, and a trader sits out under 10 points (`traders.py`, #72).
+- **AI records persist** in the ledger DB (`ai_records`, #72), so a restart no longer resets them. They are still not
+  double-entry, but AI open stakes now count toward the house exposure cap (#81).
+- **clean_sheet closes with its first 5-minute round** (R1 applied, #72) and has a 45 s bet delay, a pause on any line
+  change and a 10% cap (#61). The ~59-minute window in section 7.2 is gone.
+- **Courtsiding defences on every series** (#61): bet delay 5 s on hubs and pulse, 2 s on VIX and Heathrow; suspend on
+  a big feed move; caps 10% on locally observable series, 25% elsewhere.
+- **Crowding settles on the first reading TfL stamped after close** (#72), and the settlement record holds
+  `measuredAt`; a value measured at or before the close voids (#81). Station rounds take about 14 min to settle.
+- **Pricing:** City Pulse walks follow the usual-Saturday curve and its line is the half point nearest the futures'
+  median (#72, #77); hub_surge uses `RelativeRaceSim` (#77). After the 60% ruled-out cap, likelihood weights keep
+  moving the price (#72). `SIM_WEIGHT` defaults to 0.
+- **Local markets** (#71) on 33 real sensors use the same LMSR, the strictest integrity setting (45 s, 10%), at most 12
+  per round.
+- **Restart** rebuilds open hourly markets from their records and reads the position cap from the ledger (#81).
+
 ## The 2-minute version
 
 - **The house makes every market.** It runs a logarithmic market scoring rule (LMSR) market maker

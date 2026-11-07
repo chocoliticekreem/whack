@@ -1,58 +1,61 @@
 ---
 title: Build — what we reuse, what we record, what we need
 date: 2026-11-07
-status: OverWatch live (Vercel + tunnel) · see §0
+status: OverWatch live (Vercel + tunnels) · see §0 · refreshed through #81
 prior_art: https://github.com/chocoliticekreem/mirrorverse (built 2026-10-17 at a VAST hackathon)
 ---
 
 # Build
 
-## 0. Status (Sat 7 Nov, ~19:30)
+## 0. Status (Sat 7 Nov, ~23:50; main at e59773b, #81)
 **Live:** OverWatch at https://overwatchcapital.vercel.app/multiverse. The front end is on Vercel (#41); `/api/city/*`
-reaches the city backend on the laptop through a Cloudflare quick tunnel. City-wide markets run in 5-minute rounds on
-the London clock, priced from 50 futures, settled by real TfL and adsb.lol readings, against 7 AI traders.
-Points only.
+and `/api/sim/*` reach the laptop backend through Cloudflare quick tunnels. City-wide markets run in 5-minute rounds on
+the London clock, priced from 50 futures, settled by real TfL and adsb.lol readings, against 7 AI traders. Points
+only. No PRs are open.
 
-Example settled round (19:15, from `GET /round`): "Waterloo rose most: 99% → 104% of a usual Saturday";
-"City Pulse 29.77 vs line 31.50 → Under 31.5"; "3 holding (BNN 0 · LAM 0 · BIG 1 · OCK 2) vs 0.5 → Over".
+Example settled round (23:45, from `GET /round`): "London VIX 5.57 vs 5.70 → Lower". Station markets for the same
+round show "Betting closed · result about 00:00, when TfL publishes".
 
 | Piece | State | Where (all on `main`) |
 |---|---|---|
-| **Recorder** | Live under `scripts/run-data.sh`, which restarts it if a key feed stalls for 3 min. Polls 83 JamCams; YOLO counts only the 13 market cameras, so counts stay fresh (#27, #33) | `recorder/`, `scripts/run-data.sh` (#11, #22, #27, #30) |
+| **Recorder** | Live under `scripts/run-data.sh`, which restarts it if a key feed stalls for 3 min. Polls 83 JamCams; YOLO counts only the 13 market cameras, so counts stay fresh | `recorder/`, `scripts/run-data.sh` (#11, #22, #27, #30) |
 | **Data health** | Per-feed age and status, YOLO check, `GET /health` on :8052; 16 sources | `services/health/` (#30) |
-| **City markets** | 5-minute rounds. Every round: hub_surge (5 hubs vs a usual Saturday), city_pulse (20 stations, line on a .5), london_vix (higher/lower) or heathrow_stack in its place. Hourly: hub_hour, clean_sheet. 50 futures per market, particle-filter pruning, LMSR (b = 1200). Kalshi-style integrity rules. :8051 | `services/city/` (#33, #40, #42, #43) |
-| **AI traders** | 7, each reading one feed (Tube Crowd, Camera Eye, Line Watcher, Rain Radar, Plane Spotter, The Contrarian, Simulation). Rule-based strategies, not LLMs; they bet through the same LMSR and give a reason citing a real number | `services/city/traders.py` (#33, #42) |
-| **Wallet** | Append-only double-entry SQLite ledger, server-issued player tokens, daily gross-loss limit, stake confirmation, 1 h / 24 h breaks, house exposure cap, odds floor. Wallet panel with P&L and history. 129 city tests | `services/city/ledger.py`, `Wallet.tsx` (#45) |
-| **OverWatch UI** | MapLibre map (OpenFreeMap tiles, extruded buildings) in the style of RAISE, Kalshi × PostHog styling, no emojis, phone layout | `apps/stream/src/app/multiverse/` (#32, #38, #44, #46) |
-| **Oxford Circus multiverse** | Agent simulation on the real street graph: 50 worlds, common random numbers, 5-min horizon, real seed. Produces the London VIX | `services/multiverse/` (#24, #26, #31); also `/multiverse/oxford`, `/multiverse/board` |
-| **Accuracy check** | People forecast ties persistence: latest run (`--windows 6`, 30 real minutes to 20:44 UTC, 48 counts) MAE 2.06 vs 2.04, 79% inside the 80% range. Persistence wins on bus delay (0.34 vs 0.04 min). Central London (`--central --windows 7 --minutes 60`): station MAE 4.14 vs persistence 3.61 on 919 readings, so the sim loses by 15% | `services/multiverse/eval_real.py` (#29, #31) |
-| **Market questions** | Lineup measured on Saturday's data | `docs/questions.md`, `analysis/questions/` (#39) |
+| **City markets** | Every round: hub_surge (5 hubs vs a usual Saturday), city_pulse (20 stations; line = the half point nearest the futures' median), london_vix (higher/lower) or heathrow_stack when the VIX is down. Hourly: hub_hour, clean_sheet (closes with its first round). Station markets settle on the first reading TfL stamped after close, about 14 min later. :8051 | `services/city/` (#33, #40, #42, #72, #77, #81) |
+| **Pricing** | 50 futures per market. City Pulse walks follow TfL's usual-Saturday curve (#72); hub_surge uses `RelativeRaceSim` (mean reversion toward the five-hub average, correlated shocks, Platt softening, #77). Weighted updating keeps prices moving after the 60% ruled-out cap (#72). LMSR b = 1200, fee 5%. `SIM_WEIGHT=0` | `services/city/pricing.py` |
+| **Local markets** | Click anywhere: a pin drops and, within 400 m of one of 33 real sensors (20 TfL Crowding stations, about 13 JamCams with fresh counts), a local market opens for the round, settled only on that sensor. Otherwise a forecast only, no bet | `services/city/local.py` (#71) |
+| **Integrity** | Source and rule on every market, close before settle, void and refund, frozen reading with `measuredAt` (values measured at or before close void). Courtsiding: bet delay per series (45 s clean sheet and local, 5 s hubs and pulse, 2 s VIX and Heathrow), suspend on a feed change, caps 10%/25% | `integrity.py` (#61, #81) |
+| **AI traders** | 7, each reading one feed (Tube Crowd, Camera Eye, Line Watcher, Rain Radar, Plane Spotter, The Contrarian, Simulation). Rule-based, not LLMs. Stake min(100, 10% of points); records persist in the ledger DB | `services/city/traders.py` (#33, #55, #72) |
+| **Wallet** | Append-only double-entry SQLite ledger, server-issued tokens, daily gross-loss limit, stake confirmation (counts pending stakes), breaks, house exposure cap (counts AI stakes), odds floor. Restart rebuilds open hourly markets and reads caps from the ledger | `ledger.py`, `Wallet.tsx` (#45, #70, #81) |
+| **Portfolio** | `/multiverse/portfolio`: cash, equity, P&L, equity curve, open positions, bet history with CSV export, P&L by series, record vs each AI trader, raw ledger | (#65) |
+| **OverWatch UI** | MapLibre dusk-palette 3D map with deck.gl hub columns and arcs at 60 fps (#68); plain-language cards: a question, two buttons, "Bet 100 · win 400" (#69, #73, #78); scrolling exchange ticker (#75); "result about HH:MM" on station cards (#74); traders dropdown, live earnings dropdown, win confetti showing profit, busyness as change vs normal ("Bank −19%") (#78, #80); first-visit "How it works" | `apps/stream/src/app/multiverse/` |
+| **Scenario mode** | "What if…": click a street or station, pick Close this street / Crowd here / Shut station; runs on copies of the central sim (live state unchanged) and shows the implied odds on the map and cards | (#66) |
+| **Oxford Circus multiverse** | Agent simulation on the real street graph: 50 worlds, common random numbers, 5-min horizon. Produces the London VIX; listed in 9 of 9 rounds since the last restart | `services/multiverse/` (#24, #26, #31) |
+| **Central-London sim** | 1,017 streets, 50 worlds, live forecasts, safe what-ifs; general event layer (no hardcoded venues) | `services/multiverse/` (#49, #54, #60) |
+| **Accuracy check** | Oxford Circus (`--windows 6`, 30 min to 23:38 UTC, 48 counts): MAE 1.37 vs persistence 1.35, 79% inside the 80% range; persistence wins on bus delay (0.65 vs 0.99 min). Central London: station MAE 3.94 vs persistence 3.61 (#60). Out-of-sample replay (17:00–21:30): hub_surge Brier 0.755 vs uniform 0.800 | `eval_real.py`, `analysis/judge/replay_score.py` |
+| **Pressure test** | Bots traded 75 min of live rounds on a scratch ledger: 0 voids, 0 fills after close, 120/120 reconciliations; bugs fixed in #81 | `analysis/live_trading/` (#79) |
+| **Docs** | Market structure today (#58), the exchange design target (#67), judge prep (#57, refreshed), steering log | `docs/`, `marketing/steering-log.md` |
 
-**Shipped since the first MVP:** the central-London agent simulation (#54), the general event layer (#49, #60), the
-Simulation trader (#55; its prices run at `SIM_WEIGHT=0` live because the sim still loses to persistence), the futures
-fan (#50), courtsiding defences with bet delay and pause on feed change (#61), and the market-structure spec (#58).
+**Merged since the first MVP (#49–#81):** event layer (#49, #60), futures fan (#50), name and icon (#51, #52), central
+sim and Simulation trader (#54, #55), market structure (#58), courtsiding defences (#61), claim corrections (#63),
+portfolio (#65), scenario mode (#66), exchange design (#67), 3D map (#68), plain cards (#69, #73), stale-login fix
+(#70), click-anywhere markets (#71), judge fixes (#72), result times (#74), ticker (#75), pricing round 2 (#77),
+earnings and traders dropdowns and confetti (#78, #80), live pressure test (#79) and its fixes (#81).
 
-**In progress:**
-1. Fixes from docs/judge-prep.md: the Tube Crowd pricing leak, pruning stalls, AI records lost on restart, settling
-   on TfL's own timestamp, clean sheet closing early, and the VIX listing.
-2. Plain-language market cards and first-visit onboarding.
-3. Click anywhere to trade (a local market only where a real sensor can settle it).
-4. Scenario mode (click a street, pick an action, see the odds move).
-5. Colourful 3D map (deck.gl layers on MapLibre).
-6. Portfolio page.
-7. A live trading pressure test with bot players.
+**In progress:** nothing open. Next, if time allows: re-run the live trading test on main (its pricing findings
+predate #72 and #77).
 
 **Gaps, ranked:**
-1. **The tunnel URL changes on restart.** It's a Cloudflare quick tunnel, so Vercel's `CITY_URL` must be reset each
-   time.
-2. **The laptop is the single host** for the recorder, YOLO, the multiverse and the markets. If it sleeps or goes
-   offline, the site falls back to demo data.
-3. **The futures fan is too technical for new players.** Being moved behind a "Details" tap.
-4. **The VIX market lists only after a 1 h warm-up** of a live multiverse engine. Until then heathrow_stack stands in.
-   At 19:20 the running engine was on a replay spawn, so every round listed heathrow_stack.
-5. **One dry Saturday of data** behind the question design; samples are small and directional.
-6. **`X-Forwarded-For` can be spoofed** past the new-player rate limit (a `debt:` note in `services/city/server.py`).
-7. City futures are statistical walks fitted to today's data. The central sim can supply a share (`SIM_WEIGHT`), but it is set to 0 live until it beats persistence.
+1. **The laptop is the single host** for the recorder, YOLO, both sims and the markets. If it sleeps or goes offline,
+   the site falls back to demo data.
+2. **The tunnel URLs change on restart.** Cloudflare quick tunnels, so Vercel's `CITY_URL` must be reset each time.
+3. **One Saturday of data** behind every number; samples are small and directional.
+4. **The hub copycat result has a wide CI.** Copying Tube Crowd on hubs: +13%, 95% CI −27% to +55% (#77); not proven
+   gone. Fading the Heathrow stack still beats the house out of sample (+66%, n=34).
+5. **The sims have no measured skill.** Central London loses to persistence; the event layer has no skill. Both stay
+   out of the price (`SIM_WEIGHT=0`).
+6. **After a restart**, current 5-minute markets rebuild from fresh data (City Pulse may get a new line under the same
+   id), and pending bets are cancelled.
+7. **`X-Forwarded-For` can be spoofed** past the new-player rate limit (a `debt:` note in `services/city/server.py`).
 8. Port defaults disagree: the city server polls the VIX on :8349, the multiverse defaults to :8049. Set
    `MULTIVERSE_PORT=8349` (or `MULTIVERSE_URL`) as in the run commands below.
 
@@ -65,7 +68,7 @@ cd apps/stream && MULTIVERSE_URL=http://127.0.0.1:8349 npx next dev -H 0.0.0.0 -
 cloudflared tunnel --url http://localhost:8051                 # public backend; put the URL in Vercel CITY_URL
 ```
 Replay instead of live: `python3 services/city/server.py --replay-from 2026-11-07T14:00:00Z`. Tests:
-`python3 -m unittest discover -s services/city` (129), `-s services/multiverse` (127), `-s recorder` (16).
+`python3 -m unittest discover -s services/city` (205), `-s services/multiverse` (132), `-s recorder` (16).
 
 ## 1. Code reuse: approved
 - **The organisers confirmed (Sat 7 Nov) that we can build on Mirrorverse.** It's disclosed in
@@ -128,5 +131,5 @@ Every source can be switched on or off with `--only` / `--skip`. Each AI trader 
 ## 6. Open
 - [ ] Who owns: engine, UI/3D, data recorder, pitch?
 - [x] Where the recorder runs: Anson's laptop (keep it plugged in and awake).
-- [x] Area: central London (5 hubs, 20 stations). The agent simulation covers only the Oxford Circus area so far;
-  scaling it to central London is in progress.
+- [x] Area: central London (5 hubs, 20 stations). The Oxford Circus simulation produces the VIX; the central-London
+  simulation (#54) powers scenario mode and the Simulation trader.
