@@ -11,6 +11,7 @@ Worlds* built on our Mirrorverse London twin.
 | [docs/idea.md](docs/idea.md) | **Start here.** The current idea, what "novel" means here, the ranked shortlist, how we decide |
 | [docs/marshall-wace.md](docs/marshall-wace.md) | The sponsor: brief, judging, who MW are, past winners and why they won |
 | [docs/event.md](docs/event.md) | Logistics: rules, timetable, every track and prize, submission |
+| [docs/data-sources.md](docs/data-sources.md) | Every data source: live vs history, auth, alternative data, city comparison |
 | [docs/build.md](docs/build.md) | What we reuse from Mirrorverse, the feed-recording plan, data sources |
 | [docs/all-tracks-gpt.md](docs/all-tracks-gpt.md), [docs/all-tracks-gemini.md](docs/all-tracks-gemini.md) | James's AI-generated ideas for all four tracks (raw; the takeaways are in idea.md §3b) |
 
