@@ -2,7 +2,7 @@
 title: Devpost submission draft
 event: WHACK 26 (https://warwickhack.co.uk)
 track: Marshall Wace — New Worlds
-status: draft — fill every [FILL] before submitting (Sun 09:00–11:00)
+status: draft — fill every [FILL] and re-check every [VERIFY] against what actually works before submitting (Sun 09:00–11:00)
 ---
 
 # Devpost submission
@@ -38,7 +38,7 @@ The "new world" in the brief is the one nobody can see: the London that hasn't h
   an agent simulation (commuters, tourists, the lunch crowd, bus arrivals) on the real street
   map, seeded from live TfL data, with different assumptions: who sets off, rain, bus delays,
   pavement capacity.
-- **Draws them in 3D** as ghost cities over the real one. Where the worlds agree, the city looks
+- [VERIFY: 3D ghost view not built yet] **Draws them in 3D** as ghost cities over the real one. Where the worlds agree, the city looks
   solid. Where they disagree, it shimmers. That shimmer is the city's uncertainty, made visible.
 - **Lists every world as a stock**, priced by the probability that it's the one that happens.
 - **Reality is the market.** Each new TfL camera frame and bus update reprices every world.
@@ -47,7 +47,7 @@ The "new world" in the brief is the one nobody can see: the London that hasn't h
 - **AI brokers bet too.** Persona agents (a commuter, a tourist, a bus driver, a contrarian)
   submit ideas about the future with a conviction level. Each idea spawns worlds, and reality
   scores every broker's track record, TOPS-style: brokers who keep calling it right get more say.
-- **You can bet**, on points only: buy a world and watch the next frame settle it.
+- [VERIFY: judge betting UI not built yet] **You can bet**, on points only: buy a world and watch the next frame settle it.
 - **Place an event:** drop a closure or crowd surge on a street and watch the multiverse fork.
 
 ## How we built it
@@ -62,9 +62,9 @@ The "new world" in the brief is the one nobody can see: the London that hasn't h
 - **The multiverse:** a particle filter. Worlds share **common random numbers**, so a
   difference between two worlds comes from their assumptions, not noise. Likelihood weighting
   against each observation, delisting below a threshold, then systematic resampling with lineage.
-- **Brokers:** Claude Haiku 4.5, one batched call per observation for every persona, with
+- **Brokers:** [VERIFY: being tuned] Claude Haiku 4.5, one batched call per observation for every persona, with
   strict JSON, validation and a rules fallback. Track records use exponentially decayed scoring.
-- **Front end:** Next.js, plus a three.js 3D twin of London built from OpenStreetMap.
+- **Front end:** Next.js, plus [VERIFY] a three.js 3D twin of London built from OpenStreetMap.
 - **Reuse (disclosed, approved by the organisers):** the London twin, live-feed plumbing and
   base forecast engine come from our earlier project Mirrorverse (built 17 Oct 2026). New at
   WHACK: the multiverse engine, the exchange, the brokers, the recorder and the ghost-world

@@ -1,7 +1,7 @@
 ---
 title: Our idea — the current thinking
 date: 2026-11-07
-status: ideating · track chosen (Marshall Wace) · code reuse approved, not pulled yet
+status: leading idea chosen (Exchange of Worlds) · building on local branch · see build.md §0
 ---
 
 # Our idea
