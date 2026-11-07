@@ -22,10 +22,11 @@ import urllib.request
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import alt  # noqa: E402
-from common import (DATA, RAW, USER_AGENT, HttpError, get_json, http, iso, load_env, sleep_until,  # noqa: E402
+from common import (DATA, RAW, ROOT, USER_AGENT, HttpError, get_json, http, iso, load_env, sleep_until,  # noqa: E402
                     utc_now, write_record)
 
 TFL = "https://api.tfl.gov.uk"
@@ -119,6 +120,17 @@ def props(place: dict) -> dict:
     return {p["key"]: p.get("value") for p in place.get("additionalProperties", [])}
 
 
+SEED = ROOT / "services" / "multiverse" / "seeds" / "oxford-circus.json"
+
+
+def seed_cam_ids(path: Path = SEED) -> set[str]:
+    """The 2-worker YOLO server can't keep 83 cameras fresh, so only count the cameras the market reads."""
+    try:
+        return {c["id"] for c in json.loads(path.read_text())["cams"]}
+    except (OSError, KeyError, ValueError):
+        return set()
+
+
 class Recorder:
     def __init__(self, yolo: bool):
         self.tfl = Tfl()
@@ -132,6 +144,7 @@ class Recorder:
         self.cams_at = 0.0
         self.yolo_url = os.environ.get("JAMCAM_YOLO_URL", "http://127.0.0.1:8047").rstrip("/") if yolo else None
         self.yolo_warned = False
+        self.yolo_ids = seed_cam_ids()
         self.hosts: dict[str, RateLimiter] = {}
         self.hosts_lock = threading.Lock()
         self.carbon_at = 0.0
@@ -347,7 +360,8 @@ class Recorder:
         cams = self.jamcam_list()
         with ThreadPoolExecutor(max_workers=8) as pool:
             rows = list(pool.map(self._head_clip, cams))
-        counts = self._yolo_counts([c["id"] for c in cams])
+        ids = [c["id"] for c in cams]
+        counts = self._yolo_counts([i for i in ids if i in self.yolo_ids] if self.yolo_ids else ids)
         for row in rows:
             if row["id"] in counts:
                 c = counts[row["id"]]
