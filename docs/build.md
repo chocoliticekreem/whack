@@ -29,32 +29,62 @@ prior_art: https://github.com/chocoliticekreem/mirrorverse (built 2026-10-17 at 
 - **UI:** a world cloud or exchange view, an uncertainty map, and the "place an event" button.
 - **Optional:** the lead-lag network over recorded counts; the phone trading page (points only).
 
-## 4. Record the live feeds now (needed for ①, ③ and ④ in idea.md)
-Every hour we don't record is an incident we can never replay or test against. **Start this
-before ideating finishes.** It's a fresh, small script in this repo, with nothing pulled from
-mirrorverse.
+## 4. Data sources (researched and fetched Sat 7 Nov ~11:40)
+**Verdict: stay in London.** It has the most live, free, keyless data of any city checked. The one
+gap is history: almost nothing live is archived, **so we must record from now on.** NYC and
+Singapore have more history but less live data. A history slice from one of them can be a side
+panel, not a reason to switch cities.
 
-| Feed | What to keep | Estimated size for 24h |
+**Mirrorverse already uses** (all keyless): the TfL API (bus arrivals, 889 JamCams + YOLO counts,
+road disruptions, stations, line status, live crowding), police crime (monthly, about 2 months
+behind), EA tide gauges, Open-Meteo weather and air quality, 7 YouTube live cams, and an OSM
+street graph. **It records nothing**, so there is no time series to backtest on.
+
+### Mobility and city state (the observation stream)
+| Source | Endpoint | What / how fresh | History | Auth |
+|---|---|---|---|---|
+| **TfL citywide bus snapshot** | `/Mode/bus/Arrivals?count=1` | 17,314 stops, 4,442 buses **in one call** (15.6 MB, 10 s), about 30 s fresh | none, record it | none |
+| TfL Tube/DLR/Overground arrivals | `/Mode/tube/Arrivals?count=1` | every platform, about 30 s | none | none |
+| **TfL BikePoint (Santander)** | `/BikePoint` | 796 docks, bikes/e-bikes/empty | journey CSVs (about 5 months behind) | none |
+| **TfL crowding** | `/crowding/{naptan}` + `/Live` | live load vs **a typical 15-min profile per weekday** (a built-in prior) | the profiles are the prior | none |
+| TfL road corridor status | `/Road/all/Status` | ~25 A-road corridors | none | none |
+| JamCam clips | `s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/{id}.mp4` | about 1 min fresh, **overwritten in place** | none | none |
+
+### Alternative data (the "satellite images" angle: data nobody points at a city)
+| Source | Endpoint | What / how fresh | History | Auth |
+|---|---|---|---|---|
+| **adsb.lol aircraft** | `api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/{nm}` | every aircraft, 1 s (Heathrow stacks/holding as a city stress signal) | **daily global archives** (github `adsblol/globe_history_2026`) | none (ODbL licence, attribute) |
+| **Elexon BMRS grid** | `data.elexon.co.uk/bmrs/api/v1/...` | GB demand and generation by fuel, 5 min | **years**, by date range | none |
+| Carbon Intensity (London) | `api.carbonintensity.org.uk/regional/regionid/13` | 30 min | any range | none |
+| **Wikipedia pageviews** | hourly dumps `dumps.wikimedia.org/other/pageviews/` (REST is daily only) | attention per place, hourly, about 3 h behind | years | none |
+| Wikipedia live edits | `stream.wikimedia.org/v2/stream/recentchange` | seconds (edit bursts flag incidents) | about 7 days, replayable | none |
+| **GDELT news** | `data.gdeltproject.org/gdeltv2/lastupdate.txt` (15-min files) | geocoded news events + tone | since 2015 | none (the DOC API returns 429, use the files) |
+| Open-Meteo history | `?minutely_15=precipitation&past_days=7`, archive API | 15-min rain | 7–92 days at 15 min; hourly since 1940 | none |
+| EA river/tide gauges | `.../readings?since=` | 15 min | ~28 days in the API | none |
+| Sensor.Community | `data.sensor.community/airrohr/v1/filter/area=...` | citizen PM2.5/temperature, ~5 min | daily CSVs | none |
+| Needs a free key | AISstream (Thames ships), Realtime Trains, Ticketmaster, Windy webcams, Breathe London | | | free signup |
+| Unreliable / skip | OpenSky (no anonymous history), Raspberry Shake (502), Bluesky (few geotags), DfT counts (annual) | | | |
+
+## 5. Starter stack: record now
+One recorder process writing timestamped NDJSON/Parquet per source. Fresh code in this repo.
+
+| Source | Poll | TfL calls/min |
 |---|---|---|
-| TfL JamCams (~150 central cameras, ~5 min refresh) | YOLO people/vehicle counts per snapshot, **no video** | ~45k rows, ~10 MB |
-| TfL road disruptions (every 5 min) | Only snapshots that changed (hash and skip repeats) | tens of MB at most |
-| Bus arrivals (~50 stops, every 1–2 min) | Predicted arrival times; delays worked out later | ~50–100 MB |
-| Optional: still frames near flagged incidents | Demo evidence | under 100 MB |
+| Bus snapshot `/Mode/bus/Arrivals?count=1` | 60 s (timeout ≥ 60 s; keep stop, vehicle, line, time to station only) | 1 |
+| Tube arrivals + line status + road status | 60 s | 3 |
+| BikePoint | 2 min | 0.5 |
+| Crowding live, ~20 key stations (+ typical profiles once) | 5 min | 4 |
+| JamCam clips for 30–50 cameras in our area, through YOLO counts | 60–90 s | 0 (S3) |
+| **Backfill once:** Open-Meteo 7 days at 15 min, EA `since=`, Elexon 2 weeks, adsb.lol 1–2 days | once | — |
 
-- Total **well under 1 GB**, in one SQLite file. These are estimates, so check after the first
-  hour.
-- Run it on a cloud VM, or on a laptop that stays plugged in with `caffeinate -i`, ideally off
-  venue wifi.
-- Get a **free TfL API key**; anonymous use is rate-limited hard.
+The backfill gives **an instant 7–14 day backtest** (e.g. every downpour vs grid demand vs
+flights) without waiting.
 
-## 5. Data sources (all public)
-- **TfL Unified API:** JamCams `/Place/Type/JamCam`, disruptions `/Road/all/Disruption`, bus
-  arrivals `/StopPoint/{id}/Arrivals`, routes `/Line/{id}/Route/Sequence`, line status,
-  station crowding `/crowding/{naptan}`.
-- **OpenStreetMap / Overpass:** roads, buildings, ambulance stations, hospitals.
-- **Open-Meteo:** weather.
-- **Unconventional extras (optional):** aircraft tracking (adsb.lol), ship tracking, Wikipedia
-  edit streams.
+**Gotchas:**
+- About 9 TfL calls/min, under the anonymous ~50/min, but that budget is shared with the app.
+  **Get a free TfL app_key now** (500/min) and keep it in env, never in git.
+- YouTube cams are embed-only under their terms, so keep them to the demo.
+- Attribute adsb.lol (ODbL).
 
 ## 6. Open
 - [ ] Who owns: engine, UI/3D, data recorder, pitch?
