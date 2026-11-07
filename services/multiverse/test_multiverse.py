@@ -306,7 +306,7 @@ class BrokerTest(unittest.TestCase):
         self.assertTrue(out["enabled"])
         self.assertFalse(out["llm"])
         self.assertEqual(out["calls"], [])
-        self.assertEqual({b["source"] for b in out["brokers"]}, {"rules"})
+        self.assertEqual({b["ideaFrom"] for b in out["brokers"]}, {"rules"})
 
     def test_brokers_off_keeps_old_behaviour(self) -> None:
         app = App()
@@ -345,9 +345,11 @@ class VixTest(unittest.TestCase):
         app.spawn({"n": 12})
         for _ in range(fixture.HORIZON + 2):
             out = app.observe({"next": True})
-        self.assertEqual(out["horizonMin"], fixture.HORIZON)
+        self.assertEqual(out["horizon_min"], fixture.HORIZON)
         hist = out["vix_history"]
-        self.assertEqual(out["vix"], hist[-1])
+        self.assertEqual(out["vix"], hist[-1]["vix"])
+        self.assertEqual(out["vix_driver"], hist[-1]["driver"])
+        self.assertTrue(all({"t", "vix"} <= set(h) for h in hist))
         self.assertEqual(hist[0]["driver"], "spawn")
         self.assertIn("new window", [h["driver"] for h in hist])
         self.assertTrue(all(isinstance(h["vix"], float) and h["driver"] for h in hist))
@@ -451,7 +453,9 @@ class FeedBrokerTest(unittest.TestCase):
                 if k not in brokers.FEED_KNOBS[b["feed"]]:
                     self.assertIsNone(idea[k], f"{b['id']} {k}")
         board = bk.leaderboard()
-        self.assertTrue(all(row["feed"] and row["knobs"] for row in board))
+        self.assertTrue(all(row["feed"] and row["knobs"] and row["glyph"] for row in board))
+        self.assertEqual({row["source"] for row in board}, {"aircraft", "rain_now", "grid", "news", "bikepoint",
+                                                            "crowding", "wiki", "bus", "cameras", "contrarian"})
 
 
 if __name__ == "__main__":

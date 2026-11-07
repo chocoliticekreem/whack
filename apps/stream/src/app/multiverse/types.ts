@@ -21,9 +21,25 @@ export interface WorldRow {
   broker: string | null;
 }
 
+export type BrokerSource =
+  | "aircraft"
+  | "rain_now"
+  | "grid"
+  | "news"
+  | "bikepoint"
+  | "crowding"
+  | "wiki"
+  | "bus"
+  | "cameras"
+  | "contrarian";
+
 export interface BrokerRow {
   id: string;
   persona: string;
+  feed: string;
+  glyph: string;
+  ideaFrom: "haiku" | "rules" | null;
+  knobs: string[];
   archetype: string;
   trackRecord: number;
   weight: number;
@@ -32,9 +48,21 @@ export interface BrokerRow {
   mass: number;
   conviction: number | null;
   rationale: string | null;
-  source: "haiku" | "rules" | null;
+  source: BrokerSource | (string & {});
   pnl: number[];
   cumulative: number;
+}
+
+export interface VixPoint {
+  obs: number;
+  ts: number;
+  minute: number;
+  t: number;
+  vix: number;
+  delta: number;
+  driver: string;
+  driverDelta: number;
+  spike: boolean;
 }
 
 export interface ZoneStat {
@@ -84,6 +112,12 @@ export interface MultiverseState {
   camsNow: { camId: string; name: string; mean: number; sd: number }[];
   zones: Zone[];
   brokers: BrokerRow[] | null;
+  horizon_min: number;
+  vix: number | null;
+  vix_history: VixPoint[];
+  vix_driver: string | null;
+  vix_spike: boolean;
+  epochs: number;
   forked?: string[];
   observation?: Observation | null;
   done?: boolean;

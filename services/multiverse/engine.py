@@ -278,6 +278,12 @@ class Multiverse:
         self.vix_history.append(entry)
         return entry
 
+    def vix_state(self, last: int = 60) -> dict:
+        """API shape: vix (number), vix_history [{t, vix, delta, driver, spike, ...}], vix_driver (short string)."""
+        now = self.vix_history[-1] if self.vix_history else None
+        return {"vix": now["vix"] if now else None, "vix_history": self.vix_history[-last:],
+                "vix_driver": now["driver"] if now else None, "vix_spike": bool(now and now["spike"])}
+
     def source_label(self, src: str) -> str:
         return "bus feed" if src == "bus" else f"cam {self.cam_names.get(src, src)}"
 
@@ -670,7 +676,7 @@ class Multiverse:
                 "observations": self.observations[-20:], "board": self.board(),
                 "consensusNow": self.consensus(minute), "consensusHorizon": self.consensus(self.horizon),
                 "camsNow": self.cam_consensus(minute), "epochs": self.epochs,
-                "vix": self.vix_history[-1] if self.vix_history else None, "vix_history": self.vix_history[-60:],
+                "horizon_min": self.horizon, **self.vix_state(),
                 "brokers": self.brokerage.leaderboard(live) if self.brokerage else None,
                 "zones": [{"id": z["id"], "name": z["name"], "x": z["x"], "z": z["z"], "kind": z["kind"]}
                           for z in self.seed["zones"]]}

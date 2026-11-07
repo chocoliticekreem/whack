@@ -16,10 +16,10 @@ from server import App
 def show(state: dict, top: int = 6) -> None:
     print(f"  live {state['live']}  delisted {state['delisted']}  effective worlds {state['effectiveWorlds']}"
           f"  minute +{state['minute']}")
-    v = state.get("vix")
+    v = state["vix_history"][-1] if state.get("vix_history") else None
     if v:
-        print(f"  LONDON VIX {v['vix']:5.1f} ({v['delta']:+.1f}{' SPIKE' if v['spike'] else ''})  moved most by: "
-              f"{v['driver']} ({v['driverDelta']:+.1f})")
+        print(f"  LONDON VIX {state['vix']:5.1f} ({v['delta']:+.1f}{' SPIKE' if v['spike'] else ''})  moved most by: "
+              f"{state['vix_driver']} ({v['driverDelta']:+.1f})")
     for row in state["board"][:top]:
         spark = " ".join(f"{p:.3f}" for p in row["history"][-4:])
         print(f"   {row['id']:<6} {row['price']:.3f}  [{spark}]  {', '.join(row['labels'][:3])}")
@@ -39,10 +39,10 @@ def show_brokers(app: App) -> None:
     print(f"   {'broker':<11} {'data source':<11} {'persona':<24} {'track':>7} {'weight':>6} {'slots':>5} {'conv':>5}  pnl")
     for b in info["brokers"]:
         pnl = " ".join(f"{p:+.2f}" for p in b["pnl"][-4:])
-        print(f"   {b['id']:<11} {b['feed']:<11} {b['persona'][:24]:<24} {b['trackRecord']:>+7.2f} {b['weight']:>6.2f} "
+        print(f"   {b['id']:<11} {b['glyph']} {b['source']:<9} {b['persona'][:24]:<24} {b['trackRecord']:>+7.2f} {b['weight']:>6.2f} "
               f"{b['slots']:>5} {b['conviction'] or 0:>5.2f}  [{pnl}]")
     for b in info["brokers"][:3]:
-        print(f"     \"{b['rationale']}\" ({b['id']}, {b['source']})")
+        print(f"     \"{b['rationale']}\" ({b['id']}, {b['ideaFrom']})")
 
 
 def main() -> None:

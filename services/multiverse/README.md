@@ -78,5 +78,5 @@ from Claude Haiku 4.5, two concurrent calls of 5 brokers per observation; read f
 
 ## API
 
-`POST /spawn {n, horizonMin=5, mode, crnSeed, rngSeed, brokers: "on"|"off"}` · `GET /brokers` · `GET /vix` · `POST /observe {next:true} | {ts, readings, busDelayMin} | {}`
+`POST /spawn {n, horizonMin=5, mode, crnSeed, rngSeed, brokers: "on"|"off"}` · `GET /brokers` · `GET /vix` (`horizon_min`, `vix`, `vix_history` [{t, vix, delta, driver, spike}], `vix_driver`; brokers carry `source` + `glyph`) · `POST /observe {next:true} | {ts, readings, busDelayMin} | {}`
 · `GET /state` · `POST /intervene {kind, zoneId, atMin, note?, prior?}` · `GET /replay?from&to` · `GET /geometry`

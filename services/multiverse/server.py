@@ -134,8 +134,7 @@ class App:
 
     def vix(self) -> dict:
         mv = self.need()
-        return {"vix": mv.vix_history[-1] if mv.vix_history else None, "vix_history": mv.vix_history,
-                "horizonMin": mv.horizon}
+        return {"horizon_min": mv.horizon, **mv.vix_state(last=len(mv.vix_history))}
 
     def brokers(self) -> dict:
         mv = self.need()

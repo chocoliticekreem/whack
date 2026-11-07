@@ -71,6 +71,11 @@ FEED_KNOBS: dict[str, tuple[str, ...]] = {
     "cameras": ("capacityScale",),
     "contrarian": ("movingShare", "touristFactor"),
 }
+# The recorder source each feed reads (the API's `source`) and its glyph.
+SOURCES = {"aviation": "aircraft", "weather": "rain_now", "grid": "grid", "news": "news", "bikes": "bikepoint",
+           "tube": "crowding", "attention": "wiki", "bus": "bus", "cameras": "cameras", "contrarian": "contrarian"}
+GLYPHS = {"aircraft": "✈️", "rain_now": "🌧️", "grid": "⚡", "news": "📰", "bikepoint": "🚲", "crowding": "🚇",
+          "wiki": "📚", "bus": "🚌", "cameras": "📷", "contrarian": "🔄", "insider": "🕵️"}
 # Rules heuristics: holding aircraft above this count bring tourists; demand above this MW means a busy city.
 HOLDING_NORMAL = 8
 TOURIST_PER_HOLDING = 0.04
@@ -560,11 +565,13 @@ class Brokerage:
         rows = []
         for e in sorted(self.book.values(), key=lambda e: (-e["trackRecord"], e["id"])):
             idea = e["idea"] or {}
+            source = SOURCES.get(e["feed"], e["feed"])
             rows.append({"id": e["id"], "persona": e["persona"], "archetype": e["archetype"], "feed": e["feed"],
-                         "knobs": e["knobs"],
+                         "source": source, "glyph": GLYPHS.get(source, "•"), "knobs": e["knobs"],
+                         "ideaFrom": e["source"],
                          "trackRecord": e["trackRecord"], "weight": round(e["weight"], 4), "slots": e["slots"],
                          "liveWorlds": counts.get(e["id"], 0), "mass": round(e["mass"], 4),
                          "conviction": idea.get("conviction"), "rationale": idea.get("rationale"),
                          "idea": {k: v for k, v in idea.items() if k not in ("conviction", "rationale")},
-                         "source": e["source"], "pnl": e["pnl"][-20:], "cumulative": e["cumulative"]})
+                         "pnl": e["pnl"][-20:], "cumulative": e["cumulative"]})
         return rows
