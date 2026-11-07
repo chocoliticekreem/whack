@@ -74,3 +74,6 @@ Hacking window: **24 hours** (Sat 11:00 → Sun 11:00).
 - Judging criteria per category.
 - Wifi details and Discord/comms channel.
 - Whether a team can enter multiple sponsor categories.
+
+## Answered by organisers
+- **Can we build on code from a previous hackathon?** Yes (Sat 7 Nov). Disclose it in the submission.
