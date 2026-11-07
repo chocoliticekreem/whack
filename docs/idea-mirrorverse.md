@@ -27,6 +27,18 @@ prior_art: https://github.com/chocoliticekreem/mirrorverse (built 2026-10-17, VA
 crowd. That validates the direction, so we must clearly go further: a real city, live data,
 several systems, a visible cascade. See [past-winners.md](past-winners.md).
 
+## ⚠ Track choice: we must pick ONE sponsor
+From the opening ceremony: one problem statement per team, judged only by that sponsor in a
+3-minute slot. Mirrorverse touches three of the four:
+| Track | Fit | Prize |
+|---|---|---|
+| **Marshall Wace, New Worlds** | The multiverse / "parallel present" framing. The novelty bar is high | iPad + Pencil + merch (per member? unconfirmed) |
+| **incident.io, live-feed agent with personality** | **Near-literal match for the October build**: live TfL cameras, an agent reacting in the moment, the persona chat crowd | Portable monitor, **each member** |
+| Brevan Howard, an AI researcher that tells a real discovery from a lucky one | Only the backtest/credibility angle | Apple Watch, each member |
+
+Decide this deliberately, not by default. MW gives the most creative room. incident.io is the
+easiest fit with the code we're allowed to reuse.
+
 ## ⚠ Steering check: is it *novel*, or just on theme?
 This year's brief asks for "something novel no one has seen before" (see the brief comparison
 in marshall-wace-track.md). An honest read:

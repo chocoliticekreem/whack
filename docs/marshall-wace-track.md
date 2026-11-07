@@ -19,8 +19,9 @@ sources:
 >
 > Please come and chat to us if you're looking for inspiration!
 
-- **Prize:** the slide shows an **iPad + Apple Pencil**, so expect iPads for the winning team.
-  Unconfirmed: per-member or one per team.
+- **Prize (from the slide):** iPad + Apple Pencil, plus MW merch (T-shirt, fleece, gilet, North
+  Face duffel). Unconfirmed: per member or one per team. The other three sponsors all say
+  "each member".
 - **Judging criteria (from the second slide):**
   > We'd like to see:
   > - **Creativity**
@@ -30,8 +31,11 @@ sources:
   > **Do what you're interested in!**
 
   No weighting was given. Ask at the stand.
-- **Talk:** Sat 14:00. The slide says to go and talk to them for inspiration. Do it early (Sat
-  afternoon) and pitch our idea to them. It costs nothing, and judges remember teams that came by.
+- **Sat 14:00, OC0.01: a workshop, not a talk.** It's a "System Design Workshop: Data Ingestion
+  Platform", with its own **prizes to win**. Go, as the whole team if possible. It shows what MW
+  engineers care about (ingesting messy data at scale), and the judges will be there. The slide
+  also says to come and chat for inspiration, so pitch our one-liner to them afterwards.
+- **Judging:** a strict **3-minute** slot with MW. Live code on a laptop, talked through.
 
 ## Who Marshall Wace are
 - London-based alternatives manager, founded 1997 by Paul Marshall and Ian Wace. ~$85bn AUM.
@@ -42,8 +46,13 @@ sources:
   empowered to do things differently."
 - TOPS framing: Talent, Operations, Products, Stewardship. Stewardship covers UN PRI signatory
   status and ESG engagement.
-- Hiring: Technology Internship and Technology Graduate programmes (software, infrastructure,
-  data engineering). The judges are likely engineers from these teams.
+- From their slides: **$92.6bn AUM**, 782+ people, **~200 developers**. Flat, meritocratic: "as
+  much responsibility and autonomy as you can handle".
+- Roles: 10-week internship (2027/2028 grads), 6-month AI placement (London), and a rotational
+  graduate scheme (London, NY, Hong Kong, Singapore).
+- **What they look for:** a strong communicator, passion for technology, a STEM degree,
+  critical thinking. **What they don't:** knowledge of finance, or a computer science degree.
+  So the judges value clear communication and real curiosity over finance polish.
 
 ## How MW have run this track at other hackathons
 | Event | MW challenge | Prize | Note |
