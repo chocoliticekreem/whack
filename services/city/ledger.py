@@ -779,6 +779,34 @@ def get_routes(ledger: Ledger, q: dict, player: str) -> dict:
             "/history": lambda: ledger.history(player, q.get("limit") or 100)}
 
 
+def versus(ledger: Ledger, player: str, markets: dict) -> dict:
+    """The player's head-to-head P&L against each AI trader on settled, non-void markets both bet on. AI bets live
+    only in the exchange's memory (`markets`, id -> Market), so this covers markets settled since it started."""
+    with ledger.lock:
+        rows = ledger.db.execute("SELECT b.market, b.settles_at, b.stake, b.payout, s.outcome FROM bets b JOIN "
+                                 "settlements s ON s.bet_id = b.id WHERE b.player = ? AND s.outcome <> 'void'",
+                                 (ledger.require(player),)).fetchall()
+    mine: dict[str, int] = {}
+    for r in rows:
+        m = markets.get(r["market"])
+        if m is not None and m.settles_at == r["settles_at"] and m.result and m.result["winner"] is not None:
+            mine[m.id] = mine.get(m.id, 0) + (r["payout"] - r["stake"] if r["outcome"] == "won" else -r["stake"])
+    out: dict[str, dict] = {}
+    for mid, you in mine.items():
+        theirs: dict[str, float] = {}
+        for b in markets[mid].ai_bets:
+            won = b["option"] == markets[mid].result["winner"]
+            theirs[b["trader"]] = theirs.get(b["trader"], 0) + (b["stake"] * b["odds"] if won else 0) - b["stake"]
+        for tid, them in theirs.items():
+            t = out.setdefault(tid, {"trader": tid, "markets": 0, "won": 0, "lost": 0, "tied": 0, "pnl": 0,
+                                     "theirPnl": 0})
+            t["markets"] += 1
+            t["won" if you > them else "lost" if you < them else "tied"] += 1
+            t["pnl"] += you
+            t["theirPnl"] += round(them)
+    return {"versus": sorted(out.values(), key=lambda t: -t["markets"])}
+
+
 def post_routes(ledger: Ledger, body: dict, player: str) -> dict:
     """Wallet writes. `player` has already proved its token."""
     return {"/limits": lambda: ledger.set_limit(player, body.get("dailyLoss")),

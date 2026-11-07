@@ -375,6 +375,7 @@ export function WalletPanel({
                 <span className="wl-note">
                   {wallet?.player.nickname ?? player} · points only, no real money
                 </span>
+                <a className="wl-note" href="/multiverse/portfolio">Full portfolio and history</a>
               </div>
               <button type="button" className="wl-x" aria-label="Close wallet" onClick={onClose}>
                 <X size={18} />

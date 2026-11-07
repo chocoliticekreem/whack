@@ -818,5 +818,39 @@ class SharedDb(unittest.TestCase):
         L.close()
 
 
+class Versus(LedgerCase):
+    """GET /versus: head-to-head P&L against each AI trader on settled markets both bet on."""
+
+    @staticmethod
+    def market(mid, winner, ai_bets, settles_at=SETTLES):
+        from types import SimpleNamespace
+        return SimpleNamespace(id=mid, settles_at=settles_at, result={"winner": winner}, ai_bets=ai_bets)
+
+    def test_scores_shared_markets_only(self):
+        a = self.bet(market="m1", option="yes", stake=100, odds=2.0)["betId"]
+        b = self.bet(market="m2", option="no", stake=100, odds=2.0)["betId"]
+        c = self.bet(market="m3", option="yes", stake=50, odds=2.0)["betId"]
+        self.L.settle_bets([a], "yes", "r")
+        self.L.settle_bets([b], "yes", "r")
+        self.L.settle_bets([c], None, "void")
+        markets = {
+            "m1": self.market("m1", "yes", [{"trader": "tube", "option": "no", "stake": 100, "odds": 2.0}]),
+            "m2": self.market("m2", "yes", [{"trader": "tube", "option": "yes", "stake": 100, "odds": 3.0},
+                                            {"trader": "rain", "option": "no", "stake": 100, "odds": 2.0}]),
+            "m3": self.market("m3", None, [{"trader": "tube", "option": "yes", "stake": 100, "odds": 2.0}]),
+        }
+        got = {t["trader"]: t for t in lg.versus(self.L, "alice", markets)["versus"]}
+        self.assertEqual(got["tube"], {"trader": "tube", "markets": 2, "won": 1, "lost": 1, "tied": 0,
+                                       "pnl": 0, "theirPnl": 100})
+        self.assertEqual((got["rain"]["markets"], got["rain"]["tied"]), (1, 1))
+
+    def test_ignores_a_reused_market_id_from_another_round(self):
+        a = self.bet(market="m1", option="yes")["betId"]
+        self.L.settle_bets([a], "yes", "r")
+        markets = {"m1": self.market("m1", "yes", [{"trader": "tube", "option": "no", "stake": 100, "odds": 2.0}],
+                                     settles_at=SETTLES + 86_400_000)}
+        self.assertEqual(lg.versus(self.L, "alice", markets), {"versus": []})
+
+
 if __name__ == "__main__":
     unittest.main()

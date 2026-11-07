@@ -21,7 +21,7 @@ from typing import Any
 import signals
 from data import MULTIVERSE_URL, SIM_POLL_S, SIM_URL, SimFeed, Store, feeds, fetch_vix, load_hotspots, raw_root
 from exchange import Clock, Exchange
-from ledger import AuthError, Ledger, LedgerInUse, get_routes, post_routes
+from ledger import AuthError, Ledger, LedgerInUse, get_routes, post_routes, versus
 
 HOST = os.environ.get("CITY_HOST") or "127.0.0.1"
 PORT = int(os.environ.get("CITY_PORT", "8051"))
@@ -187,6 +187,8 @@ class Handler(BaseHTTPRequestHandler):
             self.run(lambda: self.positions(q))
         elif path in WALLET_GET:  # wallet hook: reads prove the token and never create a player
             self.run(lambda: get_routes(EX.ledger, q, self.player(q.get("player")))[path]())
+        elif path == "/versus":
+            self.run(lambda: versus(EX.ledger, self.player(q.get("player")), EX.markets))
         elif path in routes:
             self.run(routes[path])
         else:
