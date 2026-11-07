@@ -57,7 +57,7 @@ small tag badges, and colour-coded tiers.
   ```
 - **Labels:** VT323, uppercase, letter-spacing ~0.14em (e.g. 28px with ~3.9px tracking).
   Secondary labels use `--ink-dim`.
-- **Chromatic-aberration headline** (for "THE EXCHANGE OF WORLDS" or the VIX number):
+- **Chromatic-aberration headline** (for the wordmark or the VIX number):
   ```css
   text-shadow: -2px 0 var(--cyan), 2px 0 var(--pink);
   ```

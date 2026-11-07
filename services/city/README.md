@@ -11,13 +11,14 @@ python3 -m unittest discover -s services/city
 ```
 
 Env: `CITY_PORT` (8051), `CITY_RAW` (recorder root; default `data/raw` of the main checkout), `CITY_LOG=1` logs requests,
-`MULTIVERSE_URL` (default `http://127.0.0.1:8349`; live mode polls its `GET /vix` every 15 s for the London VIX).
+`MULTIVERSE_URL` (default `http://127.0.0.1:8349`; live mode polls its `GET /vix` every 15 s for the London VIX; the
+multiverse server itself defaults to :8049, so start it with `MULTIVERSE_PORT=8349` or set this).
 CORS allows localhost:3047, :3349 and :3849.
 
 ## Endpoints
 
-`GET /hotspots /traders /markets /round /leaderboard /stats /signals`, `POST /settle {id}`,
-`POST /bet {player, market, option, stake}`, `POST /score {player, name, points}`. The response shapes are in the city
+`GET /health /hotspots /traders /markets /round /leaderboard /stats /signals`, `POST /settle {id}`,
+`POST /bet {player, market, option, stake}` (with `X-Player-Token`, see Wallet below). The response shapes are in the city
 contract (shared with the UI); `/stats` is the settled count per series (real reading vs void), calibration tables and
 the favourite's price at open. `/round` lists the current round's markets, the open hourly `headlines` and the previous
 round's results. Every market carries `signals` (1–2 visible clues, shapes in `signals.py`); `/signals` is the top

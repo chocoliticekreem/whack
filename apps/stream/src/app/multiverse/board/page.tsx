@@ -4,7 +4,7 @@ import { MultiverseClient } from "../multiverse-client";
 import "../theme.css";
 
 export const metadata: Metadata = {
-  title: "Exchange of Worlds · Details",
+  title: "OverWatch · Oxford Circus board",
   description: "Parallel Londons, repriced by reality.",
 };
 

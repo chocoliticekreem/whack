@@ -19,7 +19,8 @@ from millions of people's choices. Everyone sees the same public data, so the ed
 - **No:** planned closures, engineering works, "will TfL close X".
 
 With that rule there is no insider to police. The only other edge, a faster data feed, is closed
-because betting stops 60–90 s before each settlement window.
+because betting stops 60 s before settlement, and crowding markets settle on the first reading published after bets
+close.
 
 ## Why people would play
 - **Useful:** the market is a live commute forecast ("King's Cross peaks at 18:20, leave at 18:35").
@@ -37,7 +38,7 @@ because betting stops 60–90 s before each settlement window.
 | "It's gambling" | It launches as a points-only forecasting game. Real money comes only where licensed. Loss limits, reality checks and self-exclusion are built in |
 | "Profiting from misery" | No markets on harm: no accidents, crime, injuries, protests or emergencies |
 | "Surveillance" | Counts only, no faces, aggregated across many cameras |
-| "Rigged" | City-scale aggregates one person can't move. Settled on a median over a window. Positions capped at 25%. Halts on sudden jumps |
+| "Rigged" | City-scale aggregates one person can't move. Settled on a published reading inside a fixed window, else void. Positions capped at 25%. Halts on sudden jumps |
 | "Is it legit?" | Every market shows its exact source and rule. The settled reading is frozen and shown |
 
 ## Roadmap
@@ -58,10 +59,10 @@ because betting stops 60–90 s before each settlement window.
 ## Built for real money from day one
 | Requirement | Status |
 |---|---|
-| A ledger where entries are never edited and every movement balances | In build (wallet) |
-| Each bet settles exactly once, and a repeated request can't double it | In build (wallet) |
-| Client money kept separate (cash, money held in open bets, the house's money) | In build (wallet) |
-| Responsible play: loss limits, reality checks, self-exclusion | In build (wallet) |
+| A ledger where entries are never edited and every movement balances | Done (#45) |
+| Each bet settles exactly once, and a repeated request can't double it | Done (#45) |
+| Client money kept separate (cash, money held in open bets, the house's money) | Done (#45) |
+| Responsible play: loss limits, reality checks, self-exclusion | Partly done (#45): daily loss limit, large-stake confirmation, 1 h / 24 h breaks. Reality checks and self-exclusion later |
 | Published settlement source and rule, with the settled reading frozen | Done |
 | Market integrity: position cap, settling on a window, halts on stale data and sudden jumps | Done |
 | Peer-to-peer order book with market makers (no house risk) | Later: today's automatic market maker is the stepping stone |

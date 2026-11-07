@@ -1,146 +1,136 @@
 ---
 title: Our idea — the current thinking
 date: 2026-11-07
-status: OverWatch · MVP live on main · see build.md §0
+status: OverWatch · live at overwatchcapital.vercel.app/multiverse · see build.md §0
 ---
 
 # Our idea
 
 Built on **Mirrorverse**, our October build: a live mirror of real London fed by TfL cameras,
-buses and disruptions (see [build.md](build.md)). This doc covers *what we make with it*.
+buses and disruptions (see [build.md](build.md)). This doc covers *what we make with it*. The ★ section,
+"Why simulate" and "Superseded ideas" are current; §1–§5 are Saturday morning's reasoning, kept as history.
 
-## ★ The pitch (consolidated)
-**OverWatch**, built on Mirrorverse. One product in three layers. The image leads
-and the mechanism comes after.
+## ★ The pitch (current, as shipped)
+**OverWatch: a live stock exchange on London's next five minutes.** Every price is 50 simulated futures of the city,
+ruled out live by real TfL data, traded against six AI traders that each read one stream of alternative data
+(TOPS-style). The London VIX is the city's fear index.
 
-| Layer | What it is | Role in the pitch |
+Live at https://overwatchcapital.vercel.app/multiverse. Points only, never real money.
+
+| Layer | What ships today | Role in the pitch |
 |---|---|---|
-| **1. The worlds** (engine) | 50 parallel versions of Oxford Circus, **5 min ahead**, forked from live TfL data, repriced every minute | *The new world*: futures that don't exist yet |
-| **2. The market** (betting) | Every world is a stock; price = probability it happens. Each real camera frame reprices it, and wrong worlds are **delisted** | *The interaction*: judges bet, reality settles it |
-| **3. The brokers** (TOPS) | AI agents, **each reading one alternative-data stream** (flights, rain, grid, news, bikes, Tube crowding, Wikipedia), bet on the futures they believe in. Reality scores their track record, so the market learns **which data has alpha on a city** | *The MW hook*: their founding idea, pointed at a city |
-| **Output: the London VIX** | The spread across worlds as one live uncertainty index | *The new data* |
+| **1. The futures** (engine) | Each market runs 50 futures from the latest real readings. City markets use statistical walks fitted to today's data; the London VIX comes from the agent simulation of Oxford Circus on the real street graph (50 worlds, common random numbers) | *The new world*: futures that don't exist yet |
+| **2. The market** (exchange) | City-wide 5-minute rounds on the London clock. Each new reading prunes the futures that disagree with it (particle-filter style), and LMSR turns the survivors and the bets into prices. Kalshi-style rules: a source and rule on every market, betting closes before settle, settlement on a window, void and refund | *The interaction*: you bet, reality settles it |
+| **3. The traders** (TOPS) | 6 AI traders, each reading one live feed: Tube Crowd (station crowding), Camera Eye (the VIX), Line Watcher (Tube status), Rain Radar (rain), Plane Spotter (Heathrow holding stacks), The Contrarian (where the points are going). Each bets through the same LMSR and states a reason citing a real number | *The MW hook*: their founding idea, pointed at a city |
+| **Output: the London VIX** | The price-weighted spread of predicted crowds across the simulated worlds, as one index | *The new data* |
 
-**Rule:** lead with the stock-market image. Say TOPS once, after it lands. Betting is how
-judges touch it, not the point. Points only, never real money.
+**Every round lists:**
+- **hub_surge:** "Which hub surges most by HH:MM?" 5 hubs (Oxford Circus, King's Cross, Piccadilly Circus,
+  Waterloo, Bank) against their usual Saturday.
+- **city_pulse:** over/under on average busyness across 20 TfL stations, with the line on a .5.
+- **london_vix:** higher or lower. When the VIX is unavailable or in its first hour, **heathrow_stack** (planes
+  holding over Heathrow) stands in.
+- **Hourly headlines:** hub_hour (which hub ends the hour furthest above its usual) and clean_sheet (do all Tube
+  lines on Good Service stay Good for the hour).
 
-**The upgrade that makes the market real (adopted):**
-1. **Brokers are data sources, not personalities.** This is alpha capture done properly: TOPS
-   works because each broker has *different information*. Each AI broker reads ONE
-   unconventional feed:
-   - 🛩️ aviation: Heathrow holding stacks (adsb.lol)
-   - 🌧️ weather: 15-min rain
-   - ⚡ grid: national demand (Elexon)
-   - 📰 news: geocoded GDELT events
-   - 🚲 bikes: Santander docks emptying
-   - 🚇 Tube: crowding vs the typical day
-   - 📚 attention: Wikipedia edits and views on West End articles
+**Rule:** lead with the stock-exchange image. Say TOPS once, after it lands. Betting is how people touch it, not the
+point.
 
-   They talk in character, but **the market discovers which data actually has alpha on a city.**
-   The leaderboard is a live ranking of alternative data.
-2. **The headline output is the VIX for London:** the spread of prices across worlds rolled into
-   one live index of how uncertain the city's next five minutes are. Calm on a Sunday morning,
-   spiking when it rains or a line goes down. *"Here's London's fear index right now, and here's
-   what moved it."*
+**10 s:** "A live stock exchange on London's next five minutes. Every price is 50 simulated futures, ruled out live
+by real TfL data. You trade against six AI traders, each reading one live feed."
 
-**Pitch (current):**
-> "We built the VIX for London. Fifty parallel futures, simulated live and drawn in 3D, priced
-> by a market. The brokers are AI agents, each reading a different stream of alternative data:
-> flights, rain, the power grid, the news. Reality settles every trade, so the market discovers
-> which data actually has alpha on a city. Starting with London. The world is the exchange."
+**30 s:** "Every five minutes OverWatch lists new markets on London: which of five hubs surges most against a usual
+Saturday, whether the city's pulse across 20 stations ends over or under the line, and whether the London VIX goes up
+or down *(creativity)*. Each price comes from 50 simulated futures. Every new TfL reading rules some out, and an LMSR
+market maker prices what's left *(technical)*. Six AI traders, each reading one feed (Tube crowding, Tube status,
+rain, planes over Heathrow), bet against you and say why, and real data settles every market on the map
+*(presentation)*. It's Marshall Wace's TOPS idea pointed at a city."
 
-**100 words (the startup framing: London is market #1, the world is the vision):**
-> Prediction markets like Polymarket and Kalshi price the questions someone thought to ask. **We
-> price the world itself, starting with London.**
+**100 words:**
+> Prediction markets like Polymarket and Kalshi price the questions someone thought to ask. **OverWatch prices a
+> city's next five minutes, starting with London.**
 >
-> OverWatch forks the city into parallel futures. They're simulated live from TfL
-> cameras and buses and drawn in 3D as ghost cities over the real one. Every future is a stock.
-> A **market maker**, our reality-tracking engine, quotes each world's probability. AI brokers
-> bet with conviction, TOPS-style. Every real camera frame settles the trades, and wrong worlds
-> shatter.
+> Every five minutes it lists markets on central London: which hub surges, the city's pulse, the London VIX. Each
+> price comes from 50 simulated futures that real TfL data rules out as it arrives. Six AI traders, each reading one
+> stream of alternative data, bet against you and explain why, TOPS-style. Real readings settle every market under
+> published rules, on a double-entry ledger built for real money later.
 >
-> The result: **a live price for every possible next five minutes of a city.** London is our first
-> market. **The world is the exchange.**
+> Nobody knows the outcome in advance. The edge is reading the data better.
 
-- **Why no problem statement is needed:** it borrows a trajectory judges already believe in
-  (prices beat pundits, which Polymarket and Kalshi made mainstream) and extends it from
-  questions people write to every state of a physical system, generated automatically.
-- **The market maker is the rigour:** a slice of worlds no broker owns, which only tracks
-  reality. Brokers can be wrong; the market maker keeps prices honest.
-- **Q&A:** *"Real betting?"* No, points only; the product is the forecast. *"Why not one
-  model?"* One model is one guess; a market of worlds is the whole distribution, plus which
-  assumptions reality is rejecting, live.
+**Close:** "Marshall Wace built TOPS to find out which brokers to trust. We built it to find out which data reads a
+city best."
 
-**10 s** (technical · presentation · creativity):
-"50 parallel Londons, **simulated live from TfL data**, **drawn in 3D**, and **traded like
-stocks**. Reality is the market."
+**Q&A, honestly:**
+- *"Is the forecast accurate?"* On real Oxford Circus camera counts the simulation ties "nothing changes" (MAE 2.4 vs
+  2.4 over 30 minutes, 77% inside its 80% range; `eval_real.py`). It doesn't beat it yet. The markets are built to
+  stay uncertain: strikes are placed so the favourite opens well under 85%.
+- *"Real betting?"* No. Points only. The ledger is built so real money would need a licence, not a rewrite
+  (business.md).
+- *"Can someone know the answer?"* We list only outcomes that emerge from many people, never one person's decision
+  (business.md).
 
-**30 s:**
-"Right now we're simulating 50 versions of Oxford Circus, five minutes from now. Each is a full
-agent simulation on the real street map, seeded from live TfL cameras and buses *(technical)*.
-You see them in 3D as ghost cities over real London: where they agree it's solid, where they
-disagree it shimmers *(presentation)*. Every world is a stock, priced by how likely it is. AI
-brokers bet on them, and every real camera frame reprices the market. Wrong worlds shatter, and
-brokers who called it gain track record. It's Marshall Wace's TOPS idea, pointed at a city
-*(creativity)*."
+**Horizon: 5-minute rounds.** The floor is how fast reality reports back: TfL crowding publishes every 5 minutes;
+cameras, buses and Tube status every minute. A judge sees one or two settlements inside the 3-minute slot.
 
-**Close:** "Marshall Wace built TOPS to find out which brokers to trust. We built it to find out
-which London is real."
-
-**Horizon: 5-minute markets, repriced every minute.** The floor is how fast reality reports
-back: about one observation a minute (bus and Tube ~30 s, JamCams ~1 min, recorder polls every
-60 s). One minute is too short (counts barely move, worlds look identical, YOLO noise beats the
-signal). Five minutes lets worlds genuinely disagree, and **a judge sees 2–3 live repricings
-inside the 3-minute slot.** Sped-up replay is the backup if a feed stalls.
-
-**Mapped to MW's three criteria (the idea ties them together):**
+**Mapped to MW's three criteria:**
 | Criterion | What delivers it | What the judge sees |
 |---|---|---|
-| **Creativity** (the idea) | A stock exchange of possible futures, with AI brokers held to account TOPS-style | "I've never seen that" |
-| **Technical complexity** (the engine) | Live TfL feeds → 50 simulated worlds on the real street graph with common random numbers → likelihood repricing → broker track records | "That's hard, and it works" |
-| **Presentation** (the visualisation) | **The 3D twin of real London with the parallel worlds as ghost layers.** On each camera frame the wrong worlds shatter and fade, and the survivors glow | "That looks incredible" |
+| **Creativity** (the idea) | A stock exchange on a city's next five minutes, AI traders that each read one alternative-data feed (TOPS-style), and a fear index for London | "I've never seen that" |
+| **Technical complexity** (the engine) | A 16-source recorder (YOLO on 13 cameras) → 50 futures per market, pruned live → LMSR → settlement under Kalshi-style integrity rules on a double-entry ledger; an agent simulation with common random numbers for the VIX | "That's hard, and it works" |
+| **Presentation** (the visualisation) | A MapLibre map of London in the style of RAISE, Kalshi × PostHog market cards. Picking a market flies to its hubs; on settle the winner lights up and the payout pops | "That looks good, and I get it" |
 
-**The visualisation:**
-- Real London in 3D around Oxford Circus (OSM buildings and streets, from the Mirrorverse twin).
-- **Ghost crowds:** each live world's people and buses as translucent particles, brightness set
-  by its price. Where worlds agree the city looks solid; where they disagree it shimmers.
-  **The shimmer is the uncertainty, made visible.**
-- **The kill moment:** a camera frame lands, a pulse goes out from that camera, the contradicted
-  worlds shatter, the survivors snap into focus, and the board reprices.
-- **Placing an event:** click a street, a red fork ripples out, and the cloud splits.
+**3-minute demo:**
+1. **0:00:** the map and this round's markets. "This is London's next five minutes, priced."
+2. **0:20:** pick hub_surge. The hubs light up on the map, and the card shows each hub against its usual Saturday. A
+   judge bets.
+3. **0:50:** the AI traders' bets and reasons on the card ("Bank is at 84% of a usual Saturday, the furthest below:
+   it catches up"). The TOPS line goes here.
+4. **1:30:** a round settles on the real TfL reading. The card shows the frozen reading and the wallet updates.
+5. **2:00 technical:** one line per layer: feeds → 50 futures → pruning → LMSR → settlement, then the VIX and the
+   simulation.
+6. **2:40 close:** the TOPS line.
 
-**Visual references, from God's Eye View** ([repo](https://github.com/bilawalsidhu/gods-eye-view), MIT):
-- **Take: one shader look.** Its GLSL "reskin reality" looks (FLIR thermal, night vision, CRT,
-  noir) are why it went viral. A thermal or noir treatment on the ghost worlds makes the
-  shimmer and shatter moment hit harder. Small, self-contained shaders are the cheapest thing to
-  bring into our three.js twin, with MIT attribution.
-- **Take: a scripted camera ("scene director").** Pre-authored camera moves for a reliable
-  backup demo video and the Devpost GIFs.
-- **Take: detection-box overlays** on the camera frames that reprice the market (YOLO boxes
-  are already there).
-- **Avoid:** opening on a satellite globe of live flights. "Live public data on a 3D globe" is
-  *its* identity, and judges have probably seen it (#1 on GitHub Trending, Aug 2026). **It shows
-  the present; we show the futures and let reality price them.** Lead with the multiverse,
-  not the map.
-- **Don't adopt its codebase.** It's Cesium + Vue, our twin is three.js + React, and merging
-  them would eat the night.
+## Why simulate, not just read data
+Owner's direction: the digital twin and the agent simulation must earn their place beyond looks, with no
+special-cased scenarios, and the scope is central London, not one junction. **Status: today the agent simulation
+covers only the Oxford Circus area and produces the London VIX. Items marked (in progress) are being built now and
+are not shipped** (build.md §0).
 
-**3-minute demo (open on the visual):**
-1. **0:00 presentation:** the 3D twin, shimmering. "These are the 50 Londons that could exist
-   in five minutes. The blur is how uncertain the city is right now."
-2. **0:20 creativity:** cut to the board. "Every one is a stock. Its price is the chance it
-   happens. Buy one." A judge bets.
-3. **0:45 the moment:** a frame lands. Worlds shatter in 3D, prices jump on the board, with the
-   reason given.
-4. **1:20 brokers:** "Our AI brokers bet too. The bus driver has called it three frames
-   running." The TOPS line goes here.
-5. **2:00 technical:** one line per layer, on the architecture: live feeds → simulation →
-   repricing → track records.
-6. **2:40 close:** "Marshall Wace built TOPS to find out which brokers to trust. We built it to
-   find out which London is real."
+**Data looks backwards; simulation looks forwards.** Sensors (13 cameras, 20 stations) show what already happened,
+and statistical futures only extend trends. The agent simulation on the real street graph can:
+1. **Price shocks before sensors see them** (in progress): any event from the feeds (TfL line disruptions, road
+   closures, fixtures ending at any venue, crowding surges) becomes a simulation input by one general rule, and the
+   markets reprice minutes before the cameras and station counts move.
+2. **Answer what-ifs with no data** (in progress): a scenario mode where a user drops a closure or an event anywhere
+   in central London and sees every open market reprice.
+3. **Fill gaps between sensors** (in progress): crowd estimates along the street graph. Settlement still uses real
+   sensors only.
+4. **Check the data** (in progress): a sensor reading the model says is impossible flags the market and halts it
+   (integrity).
+5. **Explain prices** (in progress): show where the simulated crowd is heading.
+6. **B2B** (later): councils, TfL and event organisers stress-test interventions, priced (stage 3 in business.md).
 
-**Build gap:** the prototype's `/multiverse` page has a 2D zone map. Wiring the worlds into the
-3D twin as ghost layers is the highest-value presentation task. Do it after the broker layer
-lands (same page).
+**The Simulation trader** (in progress): an AI trader that bets from the simulation's forecast. Its P&L against the
+data-only traders answers live whether a model of the city beats raw data. That's Marshall Wace's question (model vs
+signal), asked about a city.
+
+**Positioning:** data settles, the simulation forecasts. The twin is the scenario room, not decoration.
+
+## Superseded ideas (history)
+Kept for the reasoning; none of these ship on the main page.
+- **Exchange of Worlds board** (#24, still at `/multiverse/board`): every simulated world of Oxford Circus listed as
+  a stock, priced by its probability, with 10 data-source brokers (Claude Haiku 4.5 when a key is set, rules
+  otherwise) scored TOPS-style. Dropped as the front page because a first-time viewer couldn't read it in seconds.
+  Its engine survives as the London VIX, and the broker idea became the six city traders.
+- **3D ghost worlds** (#25): parallel worlds drawn as translucent crowds over a three.js twin, shimmering where they
+  disagree and shattering when a camera frame lands. The "Which London is real?" game is still at
+  `/multiverse/oxford`. The city view moved to MapLibre (#44) because the three.js twin was too heavy for a
+  city-wide view.
+- **Trade London** (#32): the first city-wide version, renamed OverWatch and restyled (#38).
+- **Judge-betting page:** a separate phone page for judges to buy worlds. Replaced by betting on the main page with a
+  server-side wallet (#45).
+- **Single-camera and bus markets** (#33): decided or random at 5 minutes, and answerable by anyone standing there.
+  Replaced by the data-backed lineup in questions.md (#40, #42).
 
 ## 1. Where we are
 - **Track: Marshall Wace.** We chose it on purpose over incident.io, which fits the old code more
@@ -190,7 +180,7 @@ futures."*
   update.
 - **Risk:** lowest. Everything else builds on it.
 
-### ② The Exchange of Worlds (the presentation layer, clones TOPS)
+### ② An exchange of futures (the presentation layer, clones TOPS; became OverWatch)
 > "Marshall Wace built TOPS to work out which brokers to trust. We built it to work out which
 > London is real. Every parallel London is a stock: its price is the chance it's the world we're
 > living in."
