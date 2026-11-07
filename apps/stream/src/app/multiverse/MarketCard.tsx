@@ -1,12 +1,14 @@
 "use client";
 
 import { Bus, Camera, Check, CloudRain, Shuffle, TrafficCone, TrainFront, X, type LucideIcon } from "lucide-react";
-import { useState, type MouseEvent } from "react";
+import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 import { countdown, fmtPts, londonClock, type MyBet, type Settled } from "./city-store";
 import type { Market, Trader } from "./city-types";
 import { MarketClues, usualGhost } from "./Clues";
 import { FuturesFan } from "./FuturesFan";
 import { WhatIfLine, type WhatIfOdds } from "./Scenario";
+import { plainLabel, plainResult, plainTitle } from "./plain";
 
 export type Phase = "open" | "halted" | "locked" | "awaiting" | "settled" | "void";
 
@@ -18,15 +20,6 @@ export function phaseOf(m: Market, now: number, result: Settled | undefined): Ph
   if (now < m.settlesAt) return "locked";
   return "awaiting";
 }
-
-const STATUS: Record<Phase, string> = {
-  open: "Open",
-  halted: "Paused",
-  locked: "Locked",
-  awaiting: "Waiting for result",
-  settled: "Settled",
-  void: "Void",
-};
 
 const STAKES = [50, 100] as const;
 
@@ -101,6 +94,206 @@ function sourceLine(m: Market): string {
   return `TfL, settles ${londonClock(m.settlesAt, true)}`;
 }
 
+/** The reference stake every button prices its payout at, so the buttons compare at a glance. */
+const REF_STAKE = 100;
+
+function clockText(phase: Phase, m: Market, now: number): string {
+  if (phase === "halted") return `Paused · closes ${londonClock(m.closesAt)}`;
+  if (phase === "locked") return `Betting closed · result in ${countdown(m.settlesAt - now)}`;
+  if (phase === "awaiting") return "Waiting for the result";
+  return `Ended ${londonClock(m.settlesAt)}`;
+}
+
+function MyLine({ m, bet, now }: { m: Market; bet: MyBet; now: number }) {
+  if (bet.done === "won") {
+    return (
+      <p className="tl-mine" data-result="won">
+        You won <b className="tl-data">{fmtPts(bet.payout)}</b>
+      </p>
+    );
+  }
+  if (bet.done === "lost") {
+    return (
+      <p className="tl-mine" data-result="lost">
+        You lost <span className="tl-data">{fmtPts(bet.stake)}</span>
+      </p>
+    );
+  }
+  if (bet.done === "void") {
+    return (
+      <p className="tl-mine" data-result="void">
+        Refunded <span className="tl-data">{fmtPts(bet.stake)}</span>
+      </p>
+    );
+  }
+  const left = bet.pending ? Math.ceil((bet.pending.fillsAt - now) / 1000) : 0;
+  return (
+    <p className="tl-mine" data-pending={bet.pending ? true : undefined}>
+      You: <b className="tl-data">{fmtPts(bet.stake)}</b> on {plainLabel(m, bet.option)}
+      <span className="tl-mine-sub">
+        {bet.pending ? (
+          left > 0 ? (
+            <>
+              {" "}
+              · pending, fills in <span className="tl-data">{left}s</span>
+            </>
+          ) : (
+            " · filling…"
+          )
+        ) : (
+          <>
+            {" "}
+            · locked in to win <span className="tl-data">{fmtPts(bet.payout)}</span>
+          </>
+        )}
+      </span>
+    </p>
+  );
+}
+
+function Details({
+  m,
+  phase,
+  result,
+  traders,
+  history,
+  onClose,
+}: {
+  m: Market;
+  phase: Phase;
+  result: Settled | undefined;
+  traders: Map<string, Trader>;
+  history: Record<string, number[]>;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+  const fut = m.futures?.paths.length ? m.futures : undefined;
+  const lead = m.options.reduce((best, o, i) => (o.prob > m.options[best].prob ? i : best), 0);
+  const aiResult = new Map(result?.aiResults.map((a) => [a.trader, a.won]));
+  const ig = m.integrity;
+  // Why: the exchange appends its fair-play text to the rule; it gets its own section here.
+  const rule = (m.rule ?? "Settles on the first official reading at the settle time. No reading means void and every stake is refunded.").split(
+    / Bets fill \d/,
+  )[0];
+  const ended = phase === "settled" || phase === "void";
+  return (
+    <div
+      className="tl-modal-bg tl-sheet-bg"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
+    >
+      <div className="tl-modal tl-sheet" role="dialog" aria-modal aria-label="Market details" onClick={(e) => e.stopPropagation()}>
+        <div className="tl-board-head">
+          <h2>{plainTitle(m)}</h2>
+          <button type="button" className="tl-stake-x" aria-label="Close" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+        <p className="tl-d-exact">{m.question}</p>
+        {result && <p className="tl-d-reading">Result: {result.reading}</p>}
+
+        <section className="tl-d-sec">
+          <h3>{ended ? "Final chances" : "Chances now"}</h3>
+          <ul className="tl-d-opts">
+            {m.options.map((o) => {
+              const plain = plainLabel(m, o.id);
+              return (
+                <li key={o.id}>
+                  <span className="tl-d-opt-name">
+                    <b>{plain}</b>
+                    {plain !== o.label && <span className="tl-muted"> ({o.label})</span>}
+                    {fut && (
+                      <span className="tl-d-count">
+                        {fut.byOption[o.id] ?? 0} of {fut.n} simulated futures
+                      </span>
+                    )}
+                  </span>
+                  <span className="tl-data">{Math.round(o.prob * 100)}%</span>
+                  <span className="tl-data tl-muted">×{o.odds.toFixed(1)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+
+        <section className="tl-d-sec">
+          <h3>How it is decided</h3>
+          <p>{rule}</p>
+          <p className="tl-muted">Source: {sourceLine(m)}</p>
+        </section>
+
+        {fut && phase !== "void" && (
+          <section className="tl-d-sec">
+            <h3>Simulated futures</h3>
+            <FuturesFan f={fut} settled={phase === "settled"} overUnder={m.kind === "overunder"} />
+            <p className="tl-muted">Prices come from these futures and move with every bet.</p>
+          </section>
+        )}
+
+        {(m.signals ?? []).length > 0 && (
+          <section className="tl-d-sec">
+            <h3>Clues</h3>
+            <MarketClues signals={m.signals} />
+          </section>
+        )}
+
+        {m.aiBets.length > 0 && (
+          <section className="tl-d-sec">
+            <h3>AI traders</h3>
+            <ul className="tl-d-ai">
+              {m.aiBets.map((b) => {
+                const t = traders.get(b.trader);
+                const r = aiResult.get(b.trader);
+                return (
+                  <li key={b.trader} data-result={r == null ? undefined : r ? "won" : "lost"}>
+                    <Badge id={b.trader} name={t?.name ?? b.trader} small />
+                    <span>
+                      <b>{t?.name ?? b.trader}</b> backs {plainLabel(m, b.option)}
+                      {r === true && " · won"}
+                      {r === false && " · lost"}
+                      <span className="tl-d-why">{b.why}</span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        )}
+
+        <section className="tl-d-sec">
+          <h3>Price since open</h3>
+          <div className="tl-rule-price">
+            <span>
+              {plainLabel(m, m.options[lead].id)} <span className="tl-data">{Math.round(m.options[lead].prob * 100)}%</span>
+            </span>
+            <Spark lines={m.options.map((o) => history[o.id] ?? [o.prob])} lead={lead} ghost={usualGhost(m.signals)} />
+          </div>
+        </section>
+
+        {ig && (
+          <section className="tl-d-sec">
+            <h3>Fair play</h3>
+            <p className="tl-muted">
+              Bets fill {ig.delayS} s after you place them, at the price then; if the market pauses or closes first the bet is
+              cancelled and your stake is untouched.
+              {ig.suspendsOn.length > 0 && ` The market pauses for ${ig.coolOffS} s whenever ${ig.suspendsOn.join(" or ")}.`} Max{" "}
+              {ig.capPct}% of your points in this market.
+            </p>
+          </section>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function MarketCard({
   market: m,
   now,
@@ -117,7 +310,6 @@ export function MarketCard({
   onStake,
   onConfirm,
   onCancel,
-  onTip,
   whatIf,
 }: {
   market: Market;
@@ -135,101 +327,63 @@ export function MarketCard({
   onStake: (s: number | "all") => void;
   onConfirm: () => void;
   onCancel: () => void;
+  /** Kept for City's mount; the AI traders' reasons now live in the details sheet. */
   onTip: (t: TipTarget | null) => void;
   /** Scenario mode: what-if prices beside the live ones. */
   whatIf?: WhatIfOdds;
 }) {
-  const [rules, setRules] = useState(false);
+  const [sheet, setSheet] = useState<HTMLElement | null>(null);
   const phase = phaseOf(m, now, result);
-  const lead = m.options.reduce((best, o, i) => (o.prob > m.options[best].prob ? i : best), 0);
-  const leader = m.options[lead];
   const canBet = phase === "open" && !bet;
   const stakeN = stake === "all" ? points : Math.min(stake, points);
   const drafted = m.options.find((o) => o.id === draft);
-  const aiResult = new Map(result?.aiResults.map((a) => [a.trader, a.won]));
-  const fut = m.futures?.paths.length ? m.futures : undefined;
-  const countOf = (id: string) => (fut ? `${fut.byOption[id] ?? 0} of ${fut.alive} futures` : null);
-
-  const tip = (e: MouseEvent<HTMLElement>, trader: string, why: string) => {
-    e.stopPropagation();
-    onTip({ trader, why, el: e.currentTarget });
-  };
-
   const n = m.options.length;
   const sideOf = (i: number) => (n === 2 && i === 1 ? "no" : "yes");
   const draftedSide = sideOf(m.options.findIndex((o) => o.id === draft));
+  const ended = phase === "settled" || phase === "void";
 
   return (
     <article className="tl-market" data-phase={phase} data-selected={selected || undefined} onClick={onSelect}>
       <header className="tl-m-top">
-        <span className="tl-status" data-phase={phase}>
-          <span className="tl-status-dot" />
-          {STATUS[phase]}
-        </span>
-        <span className="tl-m-clock">
-          {phase === "open" && (
+        <span className="tl-m-clock" data-phase={phase}>
+          {phase === "open" ? (
             <>
-              Closes in <span className="tl-data">{countdown(m.closesAt - now)}</span>
+              <span className="tl-data">{countdown(m.closesAt - now)}</span> left to bet
             </>
+          ) : (
+            clockText(phase, m, now)
           )}
-          {phase === "locked" && (
-            <>
-              Settles in <span className="tl-data">{countdown(m.settlesAt - now)}</span>
-            </>
-          )}
-          {(phase === "settled" || phase === "void") && <span className="tl-data">{londonClock(m.settlesAt)}</span>}
         </span>
+        <button
+          type="button"
+          className="tl-rules-btn"
+          onClick={(e) => {
+            e.stopPropagation();
+            setSheet(e.currentTarget.closest<HTMLElement>(".tl"));
+          }}
+        >
+          Details
+        </button>
       </header>
 
-      <h3 className="tl-q">{m.question}</h3>
+      <h3 className="tl-q">{plainTitle(m)}</h3>
 
       {whatIf && <WhatIfLine odds={whatIf} />}
 
-      <MarketClues signals={m.signals} />
-
-      {phase !== "settled" && phase !== "void" && (
-        <div className="tl-m-lead">
-          <span className="tl-big tl-num">{Math.round(leader.prob * 100)}%</span>
-          <span className="tl-lead-label">{leader.label}</span>
-        </div>
-      )}
-
-      {phase === "settled" && result && <p className="tl-reading">{result.reading}</p>}
-      {fut && phase !== "void" && <FuturesFan f={fut} settled={phase === "settled"} overUnder={m.kind === "overunder"} />}
-      {phase === "void" && (
-        <p className="tl-reading" data-void>
-          No data, every stake refunded. {result?.localVoid ? "The feed never reported." : result?.reading}
+      {ended ? (
+        <p className="tl-outcome" data-void={phase === "void" || undefined}>
+          {phase === "settled" && result ? plainResult(m, result) : "No result: every stake refunded"}
         </p>
-      )}
-
-      <div className="tl-opts" data-n={n}>
-        {m.options.map((o, i) => {
-          const backers = m.aiBets.filter((b) => b.option === o.id);
-          const mine = bet?.option === o.id;
-          const state =
-            phase === "settled"
-              ? o.id === result?.winner
-                ? "won"
-                : "lost"
-              : draft === o.id || mine
-                ? "picked"
-                : "idle";
-          return (
-            <div key={o.id} className="tl-optcol" data-state={state}>
-              {n !== 2 && (
-                <>
-                  <span className="tl-opt-name">
-                    {state === "won" && <Check size={14} strokeWidth={3} />}
-                    {o.label}
-                    {fut && <span className="tl-opt-count">{countOf(o.id)}</span>}
-                  </span>
-                  <span className="tl-opt-pct tl-data">{Math.round(o.prob * 100)}%</span>
-                </>
-              )}
+      ) : (
+        <div className="tl-opts" data-n={n}>
+          {m.options.map((o, i) => {
+            const picked = draft === o.id || bet?.option === o.id;
+            return (
               <button
+                key={o.id}
                 type="button"
                 className="tl-opt"
-                data-state={state}
+                data-state={picked ? "picked" : "idle"}
                 data-side={sideOf(i)}
                 disabled={!canBet}
                 onClick={(e) => {
@@ -238,53 +392,29 @@ export function MarketCard({
                 }}
               >
                 <span className="tl-opt-label">
-                  {n === 2 && state === "won" && <Check size={14} strokeWidth={3} />}
-                  {n === 2 ? o.label : "Buy"}
+                  {picked && <Check size={15} strokeWidth={3} aria-label="Your pick" />}
+                  {plainLabel(m, o.id)}
                 </span>
-                <span className="tl-opt-odds tl-data">×{o.odds.toFixed(1)}</span>
+                <span className="tl-opt-meta">
+                  <span className="tl-opt-pct">
+                    <span className="tl-data">{Math.round(o.prob * 100)}%</span> chance
+                  </span>
+                  <span className="tl-opt-pay">
+                    <span className="tl-data">{REF_STAKE}</span> pts wins <span className="tl-data">{fmtPts(REF_STAKE * o.odds)}</span>
+                  </span>
+                </span>
               </button>
-              {fut && n === 2 && (
-                <span className="tl-opt-count">
-                  <span className="tl-data">{Math.round(o.prob * 100)}%</span> · {countOf(o.id)}
-                </span>
-              )}
-              {(backers.length > 0 || mine) && (
-                <span className="tl-backers">
-                  {mine && bet && (
-                    <span className="tl-backer tl-backer-you">
-                      You <span className="tl-data">{fmtPts(bet.stake)}</span>
-                    </span>
-                  )}
-                  {backers.map((b) => {
-                    const t = traders.get(b.trader);
-                    const r = aiResult.get(b.trader);
-                    return (
-                      <span
-                        key={b.trader}
-                        role="button"
-                        tabIndex={0}
-                        className="tl-backer"
-                        data-result={r === undefined ? undefined : r ? "won" : "lost"}
-                        onMouseEnter={(e) => tip(e, b.trader, b.why)}
-                        onMouseLeave={() => onTip(null)}
-                        onClick={(e) => tip(e, b.trader, b.why)}
-                      >
-                        <Badge id={b.trader} name={t?.name ?? b.trader} small />
-                        {t?.name ?? b.trader}
-                      </span>
-                    );
-                  })}
-                </span>
-              )}
-            </div>
-          );
-        })}
-      </div>
+            );
+          })}
+        </div>
+      )}
+
+      {canBet && !drafted && <p className="tl-hint">Tap an answer, choose your points, then confirm.</p>}
 
       {canBet && drafted && (
         <div className="tl-stake" onClick={(e) => e.stopPropagation()}>
           <div className="tl-stake-row">
-            <div className="tl-seg" role="group" aria-label="Stake">
+            <div className="tl-seg" role="group" aria-label="Points to bet">
               {STAKES.map((s) => (
                 <button key={s} type="button" className="tl-stake-btn tl-data" data-on={stake === s || undefined} disabled={points < s} onClick={() => onStake(s)}>
                   {s}
@@ -299,9 +429,9 @@ export function MarketCard({
             </button>
           </div>
           <button type="button" className="tl-confirm" data-side={draftedSide} disabled={stakeN <= 0} onClick={onConfirm}>
-            Stake {fmtPts(stakeN)} on {drafted.label}
+            Bet {fmtPts(stakeN)} on {plainLabel(m, drafted.id)}
             <span className="tl-confirm-win">
-              to win <span className="tl-data">{fmtPts(stakeN * drafted.odds)}</span>
+              wins <span className="tl-data">{fmtPts(stakeN * drafted.odds)}</span>
             </span>
           </button>
           {m.integrity && m.integrity.delayS > 0 && (
@@ -312,57 +442,13 @@ export function MarketCard({
         </div>
       )}
 
-      {bet && (
-        <p className="tl-mine" data-result={bet.done}>
-          {!bet.done && bet.pending && (
-            <>
-              Pending · <b className="tl-data">{fmtPts(bet.stake)}</b> on {bet.label}
-              {bet.pending.fillsAt > now ? <> · fills in <span className="tl-data">{Math.ceil((bet.pending.fillsAt - now) / 1000)}s</span></> : " · filling…"}
-            </>
-          )}
-          {!bet.done && !bet.pending && (
-            <>
-              Your bet: <b className="tl-data">{fmtPts(bet.stake)}</b> on {bet.label}, pays <b className="tl-data">{fmtPts(bet.payout)}</b>
-            </>
-          )}
-          {bet.done === "won" && (
-            <>
-              You won <b className="tl-data">+{fmtPts(bet.payout)}</b>
-            </>
-          )}
-          {bet.done === "lost" && <>You lost {fmtPts(bet.stake)}</>}
-          {bet.done === "void" && <>Refunded {fmtPts(bet.stake)}</>}
-        </p>
-      )}
+      {bet && <MyLine m={m} bet={bet} now={now} />}
 
-      <footer className="tl-src">
-        <span className="tl-src-line">{sourceLine(m)}</span>
-        <button
-          type="button"
-          className="tl-rules-btn"
-          onClick={(e) => {
-            e.stopPropagation();
-            setRules((r) => !r);
-          }}
-          aria-expanded={rules}
-        >
-          Rules
-        </button>
-      </footer>
-      {rules && (
-        <div className="tl-rule">
-          <p>
-            {m.rule ?? "Settles on the first official reading at the settle time. No reading means void and every stake is refunded."}{" "}
-            Prices come from {m.futures?.n ?? 50} simulated futures and move with every bet.
-          </p>
-          <div className="tl-rule-price">
-            <span>
-              {leader.label}, price since open <span className="tl-data">{Math.round(leader.prob * 100)}%</span>
-            </span>
-            <Spark lines={m.options.map((o) => history[o.id] ?? [o.prob])} lead={lead} ghost={usualGhost(m.signals)} />
-          </div>
-        </div>
-      )}
+      {sheet &&
+        createPortal(
+          <Details m={m} phase={phase} result={result} traders={traders} history={history} onClose={() => setSheet(null)} />,
+          sheet,
+        )}
     </article>
   );
 }

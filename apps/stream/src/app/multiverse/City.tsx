@@ -16,6 +16,7 @@ import {
 } from "./city-store";
 import type { BetResponse, CitySignals, Hotspot, LeaderRow, Market, MarketsResponse, SettleResponse, Trader } from "./city-types";
 import { CityStrip } from "./Clues";
+import { HowItWorks } from "./HowItWorks";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
 import { cancelNote, usePendingFills, type Fill } from "./pending-bets";
 import { Scenario, type WhatIfOdds } from "./Scenario";
@@ -23,7 +24,8 @@ import { WalletPanel, createPlayer, setNickname, useServerWallet, useStakeConfir
 
 const POLL_MS = 3000;
 const SETTLE_POLL_MS = 2500;
-const GIVE_UP_MS = 120_000;
+// Only used when the exchange is unreachable; while it answers, its own void rule decides.
+const GIVE_UP_MS = 600_000;
 const SHOW_SETTLED_MS = 25_000;
 const HISTORY_CAP = 200;
 
@@ -272,8 +274,10 @@ export function City() {
       if (settling.current.has(m.id)) continue;
       settling.current.add(m.id);
       const attempt = async () => {
+        let reachable = false;
         try {
           const r = await call<SettleResponse>(mock, "settle", { id: m.id });
+          reachable = r.ok;
           if (r.ok && r.data.settled) {
             applyResult(m, r.data);
             return;
@@ -281,7 +285,7 @@ export function City() {
         } catch {
           // Network blip: retry below until the give-up deadline.
         }
-        if (Date.now() > m.settlesAt + GIVE_UP_MS) {
+        if (!reachable && Date.now() > m.settlesAt + GIVE_UP_MS) {
           applyResult(m, { settled: true, winner: null, reading: "No data — void", aiResults: [], void: true, localVoid: true });
           return;
         }
@@ -502,6 +506,7 @@ export function City() {
           )}
         </div>
         <div className="tl-bar-right">
+          <HowItWorks />
           <button type="button" className="tl-board-btn tl-whatif" aria-pressed={scenarioOpen} onClick={() => setScenarioOpen((o) => !o)}>
             What if…
           </button>
