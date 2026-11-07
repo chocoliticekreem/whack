@@ -81,6 +81,8 @@ function saveScore(id: string, score: Score) {
   }
 }
 
+const firstSentence = (text: string) => text.split(/(?<=[.!?])\s+/)[0];
+
 const framesLeft =(s: MultiverseState) => s.replay.frames - s.replay.cursor;
 
 interface Round {
@@ -141,6 +143,7 @@ export function Game() {
   const [reveal, setReveal] = useState<Reveal | null>(null);
   const [score, setScore] = useState<Score>({ you: 0, ai: 0 });
   const [details, setDetails] = useState(false);
+  const [intro, setIntro] = useState(false);
   const pending = useRef<Promise<MultiverseState> | null>(null);
   const answered = useRef<MultiverseState | null>(null);
   const gameId = useRef("");
@@ -273,7 +276,7 @@ export function Game() {
       </div>
 
       <div className="mvg-top">
-        <header className="mvg-card mvg-title">
+        <header className="mvg-card mvg-title" data-open={intro || undefined} onClick={() => setIntro(false)}>
           <h1>Which London is real?</h1>
           <p>
             We simulate {state?.n ?? N_FUTURES} possible futures of Oxford Circus, 5 minutes ahead. Every minute, real
@@ -292,7 +295,7 @@ export function Game() {
             </span>
             <span className="mvg-dot" />
             <span>
-              AI forecasters <b>{score.ai}</b>
+              AI<span className="mvg-desk-only"> forecasters</span> <b>{score.ai}</b>
             </span>
           </div>
         )}
@@ -308,6 +311,16 @@ export function Game() {
             <span className="mvg-caption">Columns on the map: crowd in 5 min, pinker where the futures disagree</span>
           </aside>
         )}
+
+        <button
+          type="button"
+          className="mvg-help"
+          onClick={() => setIntro((o) => !o)}
+          aria-expanded={intro}
+          aria-label="What is this game?"
+        >
+          ?
+        </button>
       </div>
 
       <section className="mvg-card mvg-panel" aria-live="polite">
@@ -331,8 +344,11 @@ export function Game() {
             <div className="mvg-head">
               {phase === "pick" && (
                 <>
-                  <h2>Which future happens next? Pick one.</h2>
-                  <p className="mvg-muted">
+                  <h2>
+                    <span className="mvg-desk-only">Which future happens next? Pick one.</span>
+                    <span className="mvg-phone-only">{round.q.ask}</span>
+                  </h2>
+                  <p className="mvg-muted mvg-desk-only">
                     {round.q.ask} You are playing against {round.ai.name}. Real London decides.
                   </p>
                 </>
@@ -342,7 +358,7 @@ export function Game() {
                   <h2>
                     Real London answers in <span className="mvg-num">0:{String(left).padStart(2, "0")}</span>
                   </h2>
-                  <p className="mvg-muted">
+                  <p className="mvg-muted mvg-desk-only">
                     {round.ai.name} picked “{round.titles[round.ai.bin]}”. Waiting for the next minute of camera and bus data.
                   </p>
                 </>
@@ -351,11 +367,18 @@ export function Game() {
                 <>
                   <h2 className={result.you ? "mvg-win" : undefined}>
                     {result.you ? <Check size={22} strokeWidth={2.5} /> : <X size={22} strokeWidth={2.5} />}
-                    {result.you ? "You called it" : `Not this time: ${round.titles[result.winner].toLowerCase()}`}
+                    {result.you ? (
+                      "You called it"
+                    ) : (
+                      <span>
+                        Not this time<span className="mvg-desk-only">: {round.titles[result.winner].toLowerCase()}</span>
+                      </span>
+                    )}
                   </h2>
-                  <p className="mvg-muted">
+                  <p className="mvg-muted mvg-desk-only">
                     {result.why} {round.ai.name} {result.ai ? "got it right" : "got it wrong"}.
                   </p>
+                  <p className="mvg-muted mvg-phone-only mvg-evidence">{firstSentence(result.why)}</p>
                 </>
               )}
             </div>
@@ -377,7 +400,9 @@ export function Game() {
                     <Icon size={22} strokeWidth={1.8} className="mvg-icon" />
                     <span className="mvg-future-title">{round.titles[i]}</span>
                     <span className="mvg-muted mvg-num">
-                      {phase === "reveal" ? `now ${pct(m)} likely` : `${pct(m)} likely`}
+                      {phase === "reveal" && <span className="mvg-desk-only">now </span>}
+                      {pct(m)}
+                      <span className="mvg-desk-only"> likely</span>
                     </span>
                     <span className="mvg-tags">
                       {pick === i && <span className="mvg-tag-you">You</span>}
@@ -390,7 +415,7 @@ export function Game() {
             </div>
             {phase === "reveal" && (
               <div className="mvg-foot">
-                <span className="mvg-muted">Next round starts in a few seconds</span>
+                <span className="mvg-muted mvg-desk-only">Next round starts in a few seconds</span>
                 <button type="button" className="mvg-btn" onClick={advance}>
                   Next round
                 </button>
