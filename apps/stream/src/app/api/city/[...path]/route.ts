@@ -3,7 +3,7 @@ import { mockHandle } from "../mock";
 const CITY_URL = process.env.CITY_URL ?? "http://127.0.0.1:8051";
 // Why: exact paths only, so nothing a caller puts in [...path] can reach any other upstream path.
 const GET_ROUTES = new Set(["hotspots", "traders", "markets", "round", "signals", "leaderboard", "stats",
-  "wallet", "ledger", "positions", "history", "bet"]);
+  "wallet", "ledger", "positions", "history", "bet", "versus"]);
 const POST_ROUTES = new Set(["settle", "bet", "limits", "break", "player/new", "player/name"]);
 const NO_STORE = { "cache-control": "no-store" };
 

@@ -69,8 +69,9 @@ class Identity(HttpCase):
         pid, token = self.new_player()
         other, other_token = self.new_player()
         self.assertEqual(self.call(f"/wallet?player={pid}", token=token)[1]["cash"], GRANT)
+        self.assertEqual(self.call(f"/versus?player={pid}", token=token)[1], {"versus": []})
         for bad in (None, "", "wrong", other_token):
-            for path in ("/wallet", "/positions", "/history", "/ledger"):
+            for path in ("/wallet", "/positions", "/history", "/ledger", "/versus"):
                 self.assertEqual(self.call(f"{path}?player={pid}", token=bad)[0], 401, (path, bad))
             for path, body in (("/limits", {"dailyLoss": 100}), ("/break", {"hours": 1}), ("/player/name", {"name": "x"})):
                 self.assertEqual(self.call(path, {"player": pid} | body, token=bad)[0], 401, (path, bad))
