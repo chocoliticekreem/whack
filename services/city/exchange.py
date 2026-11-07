@@ -249,6 +249,12 @@ class Exchange:
                 self.sat_out[tid] = (m.settles_at, traders.sit_out(tid, self.store, now, round_markets))
                 continue
             option, why = pick
+            cap = POSITION_CAP * max(0, self.record[tid]["points"])
+            held = sum(b["stake"] for b in m.ai_bets if b["trader"] == tid)
+            if held + traders.STAKE > cap:
+                self.sat_out[tid] = (m.settles_at, f"Sitting out: position cap {cap:g} points per market "
+                                                   f"({POSITION_CAP:.0%} of its {self.record[tid]['points']} points)")
+                continue
             try:
                 shares, odds = self.quote(m, option, traders.STAKE)
             except WalletError:
@@ -305,7 +311,8 @@ class Exchange:
 
     def market_json(self, m: mk.Market, now: int) -> dict:
         out = {"id": m.id, "kind": m.kind, "question": m.question, "hotspots": m.hotspots,
-               "closesAt": m.closes_at, "settlesAt": m.settles_at, "futures": fan.futures_json(m, self.store, now),
+               "closesAt": m.closes_at, "settlesAt": m.settles_at,
+               "futures": fan.futures_json(m, self.store, now) | {"fromSim": m.futures.from_sim},
                "options": self.options_json(m),
                "aiBets": [{k: b[k] for k in ("trader", "option", "why", "stake", "odds")} for b in m.ai_bets],
                "source": m.source, "rule": m.rule, "status": self.status(m, now),

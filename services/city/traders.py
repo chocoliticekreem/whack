@@ -1,4 +1,4 @@
-"""Six rule-based AI traders. Each reads exactly one feed and bets only on the series that feed informs (PLAYS),
+"""Seven rule-based AI traders. Each reads exactly one feed and bets only on the series that feed informs (PLAYS),
 saying why in one line that cites the real number it saw. A trader with nothing to go on sits the round out and says
 so. Deterministic: no LLM calls. The rules are the cues measured in docs/questions.md.
 
@@ -10,7 +10,7 @@ import re
 
 import signals
 from data import Store, day_name, local_time
-from markets import Market, pulse_of
+from markets import Market, pulse_of, sim_view
 from pricing import MIN_MS, RAIN_MM, bracket_of
 
 STAKE = 100
@@ -36,6 +36,10 @@ TRADERS = [
     {"id": "contrarian", "name": "The Contrarian", "emoji": "🙃", "feed": "bets",
      "watches": "Where players and the other traders are putting their points",
      "style": "Fades the favourite of any series and takes the best-priced alternative."},
+    {"id": "sim", "name": "Simulation", "emoji": "🧭", "feed": "sim",
+     "watches": "Agent simulation of central London (50 worlds on the street graph)",
+     "style": "Backs the option the simulation's forecast rates most above the market's price, only with an edge of "
+              "5 points or more."},
 ]
 BY_ID = {t["id"]: t for t in TRADERS}
 
@@ -196,9 +200,26 @@ def contrarian(m: Market, store: Store, now: int, ctx: dict):
     return alt, f"Fading the crowd: {reason}; taking {m.label(alt)} at {pct(prices[alt])}"
 
 
-PLAYS = {"tube": {"hub_surge": tube_surge, "city_pulse": tube_pulse, "hub_hour": tube_hour, "oxford-busy": tube_busy},
+SIM_EDGE = 0.05
+
+
+def sim_trade(m: Market, store: Store, now: int, ctx: dict):
+    """The option whose probability under the simulation's forecast beats its price by the most, if by 5+ points."""
+    view = sim_view(m, store, now)
+    if not view:
+        return None
+    prices = m.prices()
+    best = max(prices, key=lambda o: view["probs"][o] - prices[o])
+    if view["probs"][best] - prices[best] < SIM_EDGE:
+        return None
+    return best, (f"Simulation: {view['detail'][best]}; {m.label(best)} in {pct(view['probs'][best])} of its draws "
+                  f"vs the market's {pct(prices[best])}")
+
+
+PLAYS = {"tube":{"hub_surge": tube_surge, "city_pulse": tube_pulse, "hub_hour": tube_hour, "oxford-busy": tube_busy},
          "cams": {"london_vix": cams_vix}, "lines": {"clean_sheet": lines_clean},
-         "rain": {"city_pulse": rain_pulse, "oxford-busy": rain_busy}, "bus": {"heathrow_stack": bus_stack}}
+         "rain": {"city_pulse": rain_pulse, "oxford-busy": rain_busy}, "bus": {"heathrow_stack": bus_stack},
+         "sim": {"hub_surge": sim_trade, "city_pulse": sim_trade, "hub_hour": sim_trade, "london_vix": sim_trade}}
 
 
 def decide(tid: str, m: Market, store: Store, now: int, ctx: dict):
@@ -215,6 +236,10 @@ def sit_out(tid: str, store: Store, now: int, current: list[Market]) -> str:
         return "Waiting until halfway through the round to fade the favourites"
     if not any(m.sub in PLAYS[tid] for m in current):
         return f"Sitting out: no series this round is informed by its feed ({BY_ID[tid]['watches']})"
+    if tid == "sim":
+        if store.sim(now) is None:
+            return f"Sitting out: {store.sim_why_none(now)}"
+        return "Sitting out: no option this round is priced 5+ points below the simulation's probability"
     if tid == "rain":
         last = store.latest("rain_now", now)
         if not last:

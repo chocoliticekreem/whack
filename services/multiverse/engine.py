@@ -9,6 +9,7 @@ worlds are live again. A parent splits its price with its children, so prices al
 from __future__ import annotations
 
 import copy
+import hashlib
 import math
 import random
 import time
@@ -50,6 +51,11 @@ MOVE_MID = 0.6
 BIKE_GAIN = 3.0
 BIKE_SD = 0.2
 FEED_LABELS = {"bus": "bus feed", "rain": "rain radar", "crowding": "tube crowding", "bikes": "bike docks"}
+# Per-station busyness (models that forecast stations, e.g. central): live TfL percentageOfBaseline vs the world's
+# anchored forecast, on the log scale. 0.05 targets ~80 % of +5 min readings inside the 80 % range (eval_real.py
+# --central). Each station is its own likelihood part, floored at OUTLIER_LL like a camera.
+STATION_SD = 0.05
+STATION_PREFIX = "station:"
 EXTRA_KEYS = ("rainMmH", "crowding", "crowdingTypical", "bikesOut")
 NEUTRAL = {"rainAtMin": None, "touristFactor": 1.0, "movingShare": MOVE_MID}
 FORK_PRIOR = 0.5
@@ -100,6 +106,24 @@ def log_likelihood_crowding(tourist_factor: float, crowding: float, typical: flo
 
 def implied_moving_share(bikes_out: float) -> float:
     return MOVE_MID + BIKE_GAIN * bikes_out
+
+
+def log_likelihood_station(predicted: float, observed: float) -> float:
+    return max(OUTLIER_LL, -0.5 * (math.log(max(observed, 1e-3) / max(predicted, 1e-3)) / STATION_SD) ** 2)
+
+
+def anchored_station(raw: list[float], anchor: tuple[int, float] | None,
+                     pre: list[float] | None = None) -> list[float]:
+    """The world's busyness path scaled to pass through the last reading: persistence of the live/model ratio,
+    so worlds differ by how they expect busyness to move (trend, placed events), not by its level. A reading
+    taken before the epoch (negative minute) is matched against `pre` (the minutes before 0), so an event that
+    starts after the reading still moves the forecast."""
+    if anchor is None or not raw:
+        return raw
+    ma, va = anchor
+    base = pre[ma] if ma < 0 and pre and -ma <= len(pre) else raw[min(max(ma, 0), len(raw) - 1)]
+    k = va / base if base > 1e-6 else 1.0
+    return [round(v * k, 4) for v in raw]
 
 
 def log_likelihood_bikes(moving_share: float, bikes_out: float) -> float:
@@ -192,11 +216,11 @@ def _group(items: list[tuple[str | None, dict | None]]) -> dict[str | None, int]
     return out
 
 
-def kernel_sds(ws: list[dict], horizon: int) -> dict[str, float]:
+def kernel_sds(ws: list[dict], horizon: int, ranges: dict | None = None) -> dict[str, float]:
     """KERNEL_H x the price-weighted sd of each knob across ws (floored at KERNEL_MIN of its range)."""
     total = sum(w["price"] for w in ws) or 1.0
     out = {}
-    for k, (lo, hi) in [*worlds.RANGES.items(), ("rainAtMin", (0.0, float(horizon)))]:
+    for k, (lo, hi) in [*(ranges or worlds.RANGES).items(), ("rainAtMin", (0.0, float(horizon)))]:
         vals = [(w["price"], float(w["assumptions"][k])) for w in ws if w["assumptions"].get(k) is not None]
         mass = sum(p for p, _ in vals) or total
         mean = sum(p * v for p, v in vals) / mass if vals else 0.0
@@ -265,6 +289,12 @@ def seed_anchors(seed: dict) -> tuple[dict[str, tuple[int, float]], dict[str, in
     return anchors, taken
 
 
+def seed_station_anchors(seed: dict) -> dict[str, tuple[int, float]]:
+    """Each station's last live reading, at the minute it was taken (0 or before the seed)."""
+    return {s["naptan"]: (min(0, round((int(s.get("liveAt") or seed["at"]) - seed["at"]) / 60_000)), float(s["live"]))
+            for s in seed.get("stations", []) if s.get("live") is not None}
+
+
 def anchored(raw: list[float], anchor: tuple[int, float] | None, ref: list[float] | None = None) -> list[float]:
     """Persistence plus the world's modelled change: the last real count, moved by how much more (or less)
     this world's count changes since that minute than the market's average world (sqrt scale, `ref` = the
@@ -320,10 +350,19 @@ def reseed(seed: dict, ts_ms: int, readings: dict[str, float]) -> dict:
     return s
 
 
+def slim(a: dict) -> dict:
+    """Assumptions for the API: placed interventions by id (their resolved segment lists can be long)."""
+    return a if not a.get("interventions") else dict(a, interventions=[iv.get("id") for iv in a["interventions"]])
+
+
 class Multiverse:
     def __init__(self, seed: dict, n: int = DEFAULT_N, horizon: int = DEFAULT_HORIZON, crn_seed: int = 47,
-                 rng_seed: int = 7, brokerage: brokers.Brokerage | None = None) -> None:
+                 rng_seed: int = 7, brokerage: brokers.Brokerage | None = None, model: Any = None) -> None:
         self.seed, self.n, self.horizon, self.crn_seed = seed, n, horizon, crn_seed
+        self.model = model or worlds
+        self.st_anchors = seed_station_anchors(seed)
+        self.station_names = {s["naptan"]: s.get("name") or s["naptan"] for s in seed.get("stations", [])}
+        self.applied: list[dict] = []
         self.rng = random.Random(rng_seed)
         self.zone_ids = [z["id"] for z in seed["zones"]]
         self.zone_names = {z["id"]: z["name"] for z in seed["zones"]}
@@ -344,11 +383,28 @@ class Multiverse:
         self.ref: dict[str, list[float]] = {}
         self.last_bus: float | None = None
 
-    def run(self, assumptions: dict) -> dict:
-        run = worlds.run_world(self.seed, assumptions, self.horizon, self.crn_seed)
+    def sim_horizon(self) -> int:
+        return self.horizon + getattr(self.model, "FORECAST_MIN", 0)
+
+    def finish_run(self, run: dict) -> dict:
         run["rawCams"] = run["cams"]
         run["cams"] = anchor_cams(run["rawCams"], self.anchors, self.ref)
+        if "stations" in run:
+            run["rawStations"] = run["stations"]
+            pre = run.get("stationsPre", {})
+            run["stations"] = {n: anchored_station(v, self.st_anchors.get(n), pre.get(n))
+                               for n, v in run["rawStations"].items()}
         return run
+
+    def run(self, assumptions: dict) -> dict:
+        return self.finish_run(self.model.run_world(self.seed, assumptions, self.sim_horizon(), self.crn_seed))
+
+    def run_batch(self, batch: list[dict]) -> list[dict]:
+        """Runs for many assumption sets at once: in parallel when the model offers run_many."""
+        many = getattr(self.model, "run_many", None)
+        if many is None or len(batch) < 2:
+            return [self.run(a) for a in batch]
+        return [self.finish_run(r) for r in many(self.seed, batch, self.sim_horizon(), self.crn_seed)]
 
     def bus_prior(self, assumptions: dict) -> dict:
         """Shrink a new world's bus delay toward the latest observed delay; before any reading, a real seed
@@ -360,14 +416,16 @@ class Multiverse:
             b *= REAL_BUS_PRIOR_SCALE
         return dict(assumptions, busDelayMin=round(max(0.0, b), 3))
 
-    def new_world(self, assumptions: dict, parent: dict | None, price: float, born: int) -> dict:
+    def new_world(self, assumptions: dict, parent: dict | None, price: float, born: int,
+                  run: dict | None = None) -> dict:
         t0 = time.perf_counter()
-        assumptions = self.bus_prior(assumptions)
-        run = self.run(assumptions)
+        if run is None:
+            assumptions = self.bus_prior(assumptions)
+            run = self.run(assumptions)
         w = {"id": f"W-{self.next_ticker}", "parent": parent["id"] if parent else None,
              "generation": parent["generation"] + 1 if parent else 0, "status": "live", "price": price,
              "logWeight": math.log(price) if price > 0 else -math.inf, "history": [round(price, 5)],
-             "assumptions": assumptions, "labels": worlds.describe(assumptions, self.zone_names),
+             "assumptions": assumptions, "labels": self.model.describe(assumptions, self.zone_names),
              "run": run, "trail": [], "bornAtObs": born, "delistReason": None,
              "broker": parent.get("broker") if parent else None, "protectedUntilObs": 0,
              "simMs": round((time.perf_counter() - t0) * 1000, 1)}
@@ -380,10 +438,13 @@ class Multiverse:
         if self.brokerage:
             self.spawn_brokered()
         else:
-            for _ in range(self.n):
+            batch = []
+            for i in range(self.n):
                 rng = random.Random(self.rng.random())
-                a = worlds.sample_assumptions(rng, self.horizon, self.zone_ids)
-                self.worlds.append(self.new_world(a, None, 1.0 / self.n, 0))
+                a = self.with_applied(self.model.sample_assumptions(rng, self.horizon, self.zone_ids), i)
+                batch.append(self.bus_prior(a))
+            for a, run in zip(batch, self.run_batch(batch)):
+                self.worlds.append(self.new_world(a, None, 1.0 / self.n, 0, run))
         self.reanchor()
         self.spawn_ms = round((time.perf_counter() - t0) * 1000)
         self.mark_vix(0, self.seed["at"], 0, "spawn", 0.0)
@@ -395,12 +456,12 @@ class Multiverse:
         ideas = bk.refresh(self.broker_context(0, None, None), 0)
         slots = bk.slots(self.n)
         for _ in range(bk.mm_slots):
-            a = worlds.sample_assumptions(random.Random(self.rng.random()), self.horizon, self.zone_ids)
+            a = self.model.sample_assumptions(random.Random(self.rng.random()), self.horizon, self.zone_ids)
             self.worlds.append(self.new_world(a, None, 1.0 / self.n, 0))
         for bid, k in slots.items():
             for _ in range(k):
                 rng = random.Random(self.rng.random())
-                donor = worlds.sample_assumptions(rng, self.horizon, self.zone_ids)
+                donor = self.model.sample_assumptions(rng, self.horizon, self.zone_ids)
                 a = brokers.assumptions_from_idea(ideas[bid], rng, self.horizon, self.zone_ids, donor)
                 w = self.new_world(a, None, 1.0 / self.n, 0)
                 w["broker"] = bid
@@ -434,6 +495,9 @@ class Multiverse:
                 "vix_driver": now["driver"] if now else None, "vix_spike": bool(now and now["spike"])}
 
     def source_label(self, src: str) -> str:
+        if src.startswith(STATION_PREFIX):
+            nap = src[len(STATION_PREFIX):]
+            return f"{self.station_names.get(nap, nap)} crowding"
         return FEED_LABELS.get(src) or f"cam {self.cam_names.get(src, src)}"
 
     def broker_label(self, bid: str) -> str:
@@ -448,7 +512,8 @@ class Multiverse:
             lw = [(math.log(pr) if pr > 0 else -math.inf) + sum(p["ll"] for p in ps if p["cam"] == src)
                   for pr, ps in zip(prior, parts)]
             out[self.source_label(src)] = self.vix_of(live, normalise(lw)) - vix_before
-        lw = [(math.log(pr) if pr > 0 else -math.inf) + sum(p["ll"] for p in ps if p["cam"] not in FEED_LABELS)
+        lw = [(math.log(pr) if pr > 0 else -math.inf)
+              + sum(p["ll"] for p in ps if p["cam"] not in FEED_LABELS and not p["cam"].startswith(STATION_PREFIX))
               for pr, ps in zip(prior, parts)]
         out[ALL_CAMS] = self.vix_of(live, normalise(lw)) - vix_before
         return out
@@ -474,11 +539,16 @@ class Multiverse:
         if ts > self.seed["at"] + self.horizon * 60_000:
             last = next((o for o in reversed(self.observations) if o.get("readings") and o["ts"] > self.seed["at"]), None)
             base = (last["ts"], last["readings"]) if last and ts - last["ts"] <= self.horizon * 60_000 else (ts, frame["readings"])
-            self.roll(reseed(self.seed, *base))
+            model_reseed = getattr(self.model, "reseed", None)
+            if model_reseed is None:
+                self.roll(reseed(self.seed, *base))
+            else:
+                self.roll(model_reseed(self.seed, *base, {n: v for n, (_, v) in self.st_anchors.items()}))
         if frame.get("feeds") is not None:
             self.feeds = frame["feeds"]
         self.adopt_counts(frame.get("lastCounts"))
-        return self.observe(ts, frame["readings"], frame.get("busDelayMin"), {k: frame.get(k) for k in EXTRA_KEYS})
+        return self.observe(ts, frame["readings"], frame.get("busDelayMin"), {k: frame.get(k) for k in EXTRA_KEYS},
+                            stations=frame.get("stations"))
 
     def live(self) -> list[dict]:
         return [w for w in self.worlds if w["status"] == "live"]
@@ -488,7 +558,8 @@ class Multiverse:
 
     def world_loglik(self, w: dict, minute: int, readings: dict[str, float],
                      bus_delay: float | None, extras: dict | None = None,
-                     anchoring: tuple[dict, dict] | None = None) -> tuple[float, list[dict]]:
+                     anchoring: tuple[dict, dict] | None = None,
+                     stations: dict[str, float] | None = None) -> tuple[float, list[dict]]:
         """`anchoring` (anchors, average world): score against what was in force at that frame (history),
         not the current one."""
         parts = []
@@ -508,13 +579,19 @@ class Multiverse:
             parts.append({"cam": "bus", "predicted": assumed, "observed": bus_delay,
                           "ll": log_likelihood_bus(assumed, bus_delay)})
         parts += feed_parts(w["assumptions"], minute, extras)
+        for nap, observed in (stations or {}).items():
+            series = w["run"].get("stations", {}).get(nap)
+            if series:
+                predicted = series[min(minute, len(series) - 1)]
+                parts.append({"cam": STATION_PREFIX + nap, "predicted": predicted, "observed": observed,
+                              "ll": log_likelihood_station(predicted, observed)})
         return sum(p["ll"] for p in parts), parts
 
     def recombine(self, a: dict, rng: random.Random) -> dict:
         if rng.random() >= CROSSOVER:
             return a
         partner = self.before[systematic_resample([w["price"] for w in self.before], 1, rng)[0]]["assumptions"]
-        knob = rng.choice(list(worlds.RANGES))
+        knob = rng.choice(list(self.model.RANGES))
         return a | {knob: partner[knob]}
 
     def history_loglik(self, w: dict) -> float:
@@ -522,13 +599,14 @@ class Multiverse:
         return sum(self.world_loglik(w, m, r, b, x, a)[0] for m, r, b, x, a in self.epoch_obs)
 
     def observe(self, ts_ms: int, readings: dict[str, float], bus_delay: float | None = None,
-                extras: dict | None = None) -> dict:
+                extras: dict | None = None, stations: dict[str, float] | None = None) -> dict:
         minute = self.minute_of(ts_ms)
         live = self.live()
         compared = [c for c in readings if c in self.cam_names]
+        stations = {n: float(v) for n, v in (stations or {}).items() if n in self.station_names and v is not None}
         obs_index = len(self.observations) + 1
         extras = {k: (extras or {}).get(k) for k in EXTRA_KEYS}
-        if not compared and bus_delay is None and not feed_parts(NEUTRAL, minute, extras):
+        if not compared and bus_delay is None and not stations and not feed_parts(NEUTRAL, minute, extras):
             obs = {"index": obs_index, "ts": ts_ms, "minute": minute, "compared": 0, "busDelayMin": None,
                    **extras, "delisted": [], "spawned": []}
             self.observations.append(obs)
@@ -540,7 +618,7 @@ class Multiverse:
         vix_before = self.vix_of(live, prior)
         all_parts = []
         for w in live:
-            ll, parts = self.world_loglik(w, minute, readings, bus_delay, extras)
+            ll, parts = self.world_loglik(w, minute, readings, bus_delay, extras, stations=stations)
             all_parts.append(parts)
             w["logWeight"] += ll
             worst = min(parts, key=lambda p: p["ll"]) if parts else None
@@ -559,10 +637,11 @@ class Multiverse:
                 w["delistReason"] = self.reason(w, minute)
                 w["delistedAtObs"] = obs_index
                 w["price"] = 0.0
+                w["run"].pop("segments", None)
                 delisted.append(w["id"])
         survivors = self.live()
         self.reprice(survivors)
-        self.update_anchors(ts_ms, {c: readings[c] for c in compared}, bus_delay)
+        self.update_anchors(ts_ms, {c: readings[c] for c in compared}, bus_delay, stations)
         if self.brokerage:
             spawned, cut = self.rebalance(obs_index, minute, readings, bus_delay,
                                           int(MAX_DELIST_SHARE * len(live)) - len(delisted))
@@ -577,14 +656,20 @@ class Multiverse:
         self.mark_vix(obs_index, ts_ms, minute, driver, effects.get(driver, 0.0))
         obs = {"index": obs_index, "ts": ts_ms, "minute": minute, "compared": len(compared),
                "busDelayMin": bus_delay, **extras, "delisted": delisted, "spawned": spawned,
-               "readings": {c: readings[c] for c in compared}}
+               "readings": {c: readings[c] for c in compared}, **({"stations": stations} if stations else {})}
         self.observations.append(obs)
         return obs
 
-    def update_anchors(self, ts_ms: int, readings: dict[str, float], bus_delay: float | None) -> None:
+    def update_anchors(self, ts_ms: int, readings: dict[str, float], bus_delay: float | None,
+                       stations: dict[str, float] | None = None) -> None:
         """After scoring a frame: its counts become the cameras' anchors and every live forecast re-anchors."""
         if bus_delay is not None:
             self.last_bus = bus_delay
+        if stations:
+            self.st_anchors |= {n: (self.minute_of(ts_ms), v) for n, v in stations.items()}
+            for w in self.live():
+                raw, pre = w["run"].get("rawStations", {}), w["run"].get("stationsPre", {})
+                w["run"]["stations"] = {n: anchored_station(v, self.st_anchors.get(n), pre.get(n)) for n, v in raw.items()}
         if not readings or not is_real(self.seed):
             return
         self.anchors |= {c: (self.minute_of(ts_ms), v) for c, v in readings.items()}
@@ -640,17 +725,20 @@ class Multiverse:
         children: dict[int, int] = {}
         for i in picks:
             children[i] = children.get(i, 0) + 1
-        spawned = []
+        plans = []
         for i, k in children.items():
             parent = survivors[i]
             share = parent["price"] / (k + 1)
             parent["price"], parent["logWeight"] = share, math.log(share)
             for _ in range(k):
-                a = worlds.jitter_assumptions(parent["assumptions"], random.Random(self.rng.random()),
-                                              self.horizon, self.zone_ids)
-                child = self.new_world(a, parent, share, obs_index)
-                self.worlds.append(child)
-                spawned.append(child["id"])
+                a = self.model.jitter_assumptions(parent["assumptions"], random.Random(self.rng.random()),
+                                                  self.horizon, self.zone_ids)
+                plans.append((self.bus_prior(a), parent, share))
+        spawned = []
+        for (a, parent, share), run in zip(plans, self.run_batch([a for a, _, _ in plans])):
+            child = self.new_world(a, parent, share, obs_index, run)
+            self.worlds.append(child)
+            spawned.append(child["id"])
         return spawned
 
     def rebalance(self, obs_index: int, minute: int, readings: dict[str, float],
@@ -742,8 +830,8 @@ class Multiverse:
         """One market-maker child of `parent` from the kernel (times `scale`), priced on the whole epoch."""
         live = self.live()
         rng = random.Random(self.rng.random())
-        sds = {k: v * scale for k, v in kernel_sds(live, self.horizon).items()}
-        a = worlds.jitter_assumptions(parent["assumptions"], rng, self.horizon, self.zone_ids, sds)
+        sds = {k: v * scale for k, v in kernel_sds(live, self.horizon, self.model.RANGES).items()}
+        a = self.model.jitter_assumptions(parent["assumptions"], rng, self.horizon, self.zone_ids, sds)
         child = self.new_world(a, parent, 0.0, obs_index)
         child["broker"] = None
         child["logWeight"] = self.history_loglik(child) + parent["logWeight"] - self.history_loglik(parent)
@@ -757,7 +845,7 @@ class Multiverse:
         Each child is priced on the whole epoch's evidence, plus its parent's offset (event priors)."""
         live = self.live()
         self.reprice(live)
-        sds = kernel_sds(live, self.horizon)
+        sds = kernel_sds(live, self.horizon, self.model.RANGES)
         plans: list[tuple[dict, str | None, dict | None]] = []
         for owner, group in _group(own).items():
             mine = [w for w in owned[owner] if w["status"] == "live"]
@@ -770,7 +858,7 @@ class Multiverse:
         spawned = []
         for parent, owner, idea in plans:
             rng = random.Random(self.rng.random())
-            a = worlds.jitter_assumptions(parent["assumptions"], rng, self.horizon, self.zone_ids, sds)
+            a = self.model.jitter_assumptions(parent["assumptions"], rng, self.horizon, self.zone_ids, sds)
             if owner is None and self.before:
                 a = self.recombine(a, rng)
             if idea is not None:
@@ -811,6 +899,84 @@ class Multiverse:
         self.vix_history[-1]["driverDelta"] = self.vix_history[-1]["delta"]
         return forked
 
+    def carries(self, world_id: str, iv: dict) -> bool:
+        """Whether a world takes an applied intervention: all do at prior 1 (placed by a user); at a lower prior
+        (a derived event) a fixed coin per (world, event) decides, so the market holds worlds with and without it
+        and the readings price the event in or out."""
+        prior = float(iv.get("prior", 1.0))
+        if prior >= 1.0:
+            return True
+        h = hashlib.sha1(f"{self.crn_seed}|{world_id}|{iv['id']}".encode()).digest()
+        return int.from_bytes(h[:4], "big") / 2 ** 32 < prior
+
+    def with_applied(self, a: dict, offset: int = 0) -> dict:
+        """A world drawn from the prior takes the applied interventions it carries (its coin uses the id it will
+        get: the next ticker plus its place in the batch)."""
+        if not self.applied:
+            return a
+        have = {iv["id"] for iv in a.get("interventions", [])}
+        wid = f"W-{self.next_ticker + offset}"
+        return dict(a, interventions=list(a.get("interventions", []))
+                    + [iv for iv in self.applied if iv["id"] not in have and self.carries(wid, iv)])
+
+    def set_applied(self, ivs: list[dict], driver: str = "events") -> bool:
+        """Make `ivs` the applied interventions (resolved by the model, kept in assumptions["interventions"]).
+        A world keeps carrying an id it carried (updated to the new version) and drops ids no longer applied; a
+        new id goes to the worlds `carries` picks. Children inherit their parent's set. Only worlds whose set
+        changed re-run; prices stay. Forked what-ifs are untouched. False when nothing changed."""
+        sig = lambda xs: sorted((iv["id"], iv.get("magnitude"), iv.get("startMs"), iv.get("endMs")) for iv in xs)  # noqa: E731
+        if sig(ivs) == sig(self.applied):
+            return False
+        old = {iv["id"] for iv in self.applied}
+        self.applied = list(ivs)
+        changed = []
+        for w in self.live():
+            mine = w["assumptions"].get("interventions", [])
+            had = {iv["id"] for iv in mine}
+            kept = [iv for iv in mine if iv["id"] not in old]
+            take = [iv for iv in self.applied if (iv["id"] in had) if iv["id"] in old] + \
+                   [iv for iv in self.applied if iv["id"] not in old and self.carries(w["id"], iv)]
+            if sig(kept + take) != sig(mine):
+                w["assumptions"] = dict(w["assumptions"], interventions=kept + take)
+                w["labels"] = self.model.describe(w["assumptions"], self.zone_names)
+                changed.append(w)
+        for w, run in zip(changed, self.run_batch([w["assumptions"] for w in changed])):
+            w["run"] = run
+        self.reanchor()
+        self.mark_vix(len(self.observations), self.observations[-1]["ts"] if self.observations else self.seed["at"],
+                      self.now_minute(), driver, 0.0)
+        self.vix_history[-1]["driverDelta"] = self.vix_history[-1]["delta"]
+        return True
+
+    def apply(self, iv: dict, mode: str = "all", weight: float = FORK_PRIOR) -> list[str]:
+        """One resolved intervention. mode "all": every world (live and future) carries it, re-run, prices kept;
+        returns the live world ids. mode "fork": every live world forks a what-if child carrying it, priced at
+        `weight` of its parent (the parent keeps the rest), protected through the next observation."""
+        if mode == "all":
+            self.set_applied([x for x in self.applied if x["id"] != iv["id"]] + [iv], f"applied {iv['kind']}")
+            return [w["id"] for w in self.live()]
+        if mode != "fork":
+            raise ValueError("mode must be all or fork")
+        if not 0 < weight < 1:
+            raise ValueError("weight must be between 0 and 1")
+        parents = sorted(self.live(), key=lambda w: -w["price"])[: self.n * MAX_LIVE_FACTOR // 2]
+        batch = [dict(p["assumptions"], interventions=list(p["assumptions"].get("interventions", [])) + [iv])
+                 for p in parents]
+        forked = []
+        for parent, a, run in zip(parents, batch, self.run_batch(batch)):
+            child = self.new_world(a, parent, parent["price"] * weight, len(self.observations), run)
+            child["broker"] = None
+            child["protectedUntilObs"] = len(self.observations) + 1
+            parent["price"] *= 1 - weight
+            parent["logWeight"] = math.log(parent["price"]) if parent["price"] > 0 else -math.inf
+            self.worlds.append(child)
+            forked.append(child["id"])
+        self.reanchor()
+        self.mark_vix(len(self.observations), self.observations[-1]["ts"] if self.observations else self.seed["at"],
+                      self.now_minute(), f"what-if {iv['kind']}", 0.0)
+        self.vix_history[-1]["driverDelta"] = self.vix_history[-1]["delta"]
+        return forked
+
     def roll(self, new_seed: dict) -> None:
         """Past the horizon: re-run every live world from the new epoch, keeping prices and lineage.
 
@@ -820,10 +986,13 @@ class Multiverse:
         self.seed = new_seed
         self.epoch_obs = []
         self.anchors, self.anchor_ms = seed_anchors(new_seed)
-        for w in self.live():
-            w["assumptions"] = worlds.shift_assumptions(w["assumptions"], elapsed)
-            w["labels"] = worlds.describe(w["assumptions"], self.zone_names)
-            w["run"] = self.run(w["assumptions"])
+        self.st_anchors = seed_station_anchors(new_seed) or self.st_anchors
+        live = self.live()
+        for w in live:
+            w["assumptions"] = self.model.shift_assumptions(w["assumptions"], elapsed)
+            w["labels"] = self.model.describe(w["assumptions"], self.zone_names)
+        for w, run in zip(live, self.run_batch([w["assumptions"] for w in live])):
+            w["run"] = run
         self.reanchor()
         self.placed_events = [dict(e, atMin=max(0.0, e["atMin"] - elapsed)) for e in self.placed_events]
         self.epochs += 1
@@ -864,7 +1033,7 @@ class Multiverse:
         for w in sorted(self.worlds, key=lambda w: (w["status"] != "live", -w["price"])):
             rows.append({k: w[k] for k in ("id", "parent", "generation", "status", "price", "history", "labels",
                                            "delistReason", "bornAtObs", "simMs", "broker")}
-                        | {"assumptions": w["assumptions"], "trail": w["trail"][-3:], "events": w["run"]["events"][:4]})
+                        | {"assumptions": slim(w["assumptions"]), "trail": w["trail"][-3:], "events": w["run"]["events"][:4]})
         return rows
 
     def state(self) -> dict:

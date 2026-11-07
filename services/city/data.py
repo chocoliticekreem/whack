@@ -29,6 +29,10 @@ STALE_S = {"crowding": 360, "rain_now": 360, "line_status": 180, "jamcams": 180,
            "scrape_fixtures": 3600, "vix": 180}
 BUS_DUE_S = 300
 MULTIVERSE_URL = os.environ.get("MULTIVERSE_URL", "http://127.0.0.1:8349").rstrip("/")
+SIM_URL = os.environ.get("SIM_URL", "http://127.0.0.1:8449").rstrip("/")
+SIM_POLL_S = 30
+SIM_MAX_AGE_MS = 3 * 60_000
+SIM_HORIZONS = (5, 15, 60)
 WEEKDAYS = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
@@ -171,6 +175,66 @@ def fetch_vix(url: str = MULTIVERSE_URL, timeout: float = 2.0) -> dict | None:
     return data if isinstance(data, dict) and isinstance(data.get("vix_history"), list) else None
 
 
+def reduce_sim(state: Any) -> dict | None:
+    """Central-London agent simulation GET /state -> {ts, base, area, vix, stations {naptan: {name, hub, h: {mean,
+    p10, p90}}}} in % of usual (TfL typical day). `base` is the sim's own now; horizon h means base + h min. None
+    when the state has no usable station forecast."""
+    if not isinstance(state, dict) or not isinstance(state.get("forecast"), dict):
+        return None
+    seed_at, minute = num(state.get("seedAt")), num(state.get("minute"))
+    if seed_at is None or minute is None:
+        return None
+    base = int(seed_at + minute * 60_000)
+    stations = {}
+    for row in state["forecast"].get("stations") or []:
+        hz = {}
+        for h in SIM_HORIZONS:
+            f = row.get(f"+{h}") or {}
+            m, lo, hi = num(f.get("mean")), num(f.get("p10")), num(f.get("p90"))
+            if m is not None and lo is not None and hi is not None and m > 0 and hi >= lo:
+                hz[str(h)] = {"mean": m, "p10": lo, "p90": hi}
+        if row.get("naptan") and hz:
+            stations[row["naptan"]] = {"name": row.get("name") or row["naptan"], "hub": row.get("hub"), "h": hz}
+    if not stations:
+        return None
+    return {"ts": int(num(state.get("liveTs")) or base), "base": base, "area": state.get("area") or "",
+            "vix": num(state.get("vix")), "stations": stations}
+
+
+def fetch_sim(url: str = SIM_URL, timeout: float = 3.0) -> dict | None:
+    """GET <sim>/state, reduced by reduce_sim. None on any failure (down, timeout, bad JSON, no forecast)."""
+    try:
+        with urllib.request.urlopen(f"{url}/state", timeout=timeout) as resp:
+            return reduce_sim(json.loads(resp.read()))
+    except (OSError, ValueError, urllib.error.URLError):
+        return None
+
+
+class SimFeed:
+    """The last good simulation forecast: `now(ms)` returns it while it is at most 3 min old, else None."""
+
+    def __init__(self, fetch: Callable[[], dict | None] = fetch_sim):
+        self.fetch = fetch
+        self.last: dict | None = None
+
+    def poll(self) -> bool:
+        got = self.fetch()
+        if got is not None:
+            self.last = got
+        return got is not None
+
+    def now(self, now_ms: int) -> dict | None:
+        if self.last is None or not 0 <= now_ms - self.last["ts"] <= SIM_MAX_AGE_MS:
+            return None
+        return self.last
+
+    def why_none(self, now_ms: int) -> str:
+        if self.last is None:
+            return f"the city simulation at {SIM_URL} has not answered"
+        return (f"the city simulation's last forecast is {(now_ms - self.last['ts']) / 60_000:.0f} min old "
+                f"(over 3 min is stale)")
+
+
 class Store:
     """Per source: a sorted list of (ts_ms, snapshot). Hour files are parsed once; the open hour is re-read
     from where it left off when its mtime changes."""
@@ -183,6 +247,14 @@ class Store:
         self.files: dict[Path, tuple[float, int]] = {}
         self.profile: dict[str, dict[str, dict[str, float]]] = {}
         self.profile_file: Path | None = None
+        self.sim_feed: SimFeed | None = None
+
+    def sim(self, now: int) -> dict | None:
+        """The fresh central-London simulation forecast (live mode only), else None."""
+        return self.sim_feed.now(now) if self.sim_feed else None
+
+    def sim_why_none(self, now: int) -> str:
+        return self.sim_feed.why_none(now) if self.sim_feed else "the city simulation is only read in live mode"
 
     @property
     def cam_names(self) -> dict[str, str]:

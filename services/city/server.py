@@ -19,7 +19,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import signals
-from data import MULTIVERSE_URL, Store, feeds, fetch_vix, load_hotspots, raw_root
+from data import MULTIVERSE_URL, SIM_POLL_S, SIM_URL, SimFeed, Store, feeds, fetch_vix, load_hotspots, raw_root
 from exchange import Clock, Exchange
 from ledger import AuthError, Ledger, LedgerInUse, get_routes, post_routes
 
@@ -93,6 +93,14 @@ def vix_poller() -> None:
             with LOCK:
                 EX.store.ingest_vix(got)
         time.sleep(VIX_POLL_S)
+
+
+def sim_poller(feed: SimFeed) -> None:
+    """Live only: refresh the central-London simulation forecast every SIM_POLL_S outside the lock (one reference
+    swap, so the market never waits on the sim)."""
+    while True:
+        feed.poll()
+        time.sleep(SIM_POLL_S)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -208,13 +216,19 @@ def main() -> None:
         ledger = open_ledger(start is not None)  # wallet hook: CITY_LEDGER_DB, default services/city/data/ledger.db
     except LedgerInUse as exc:
         sys.exit(str(exc))
-    EX = Exchange(Store(root, hotspots), Clock(start), hotspots, ledger)
+    store = Store(root, hotspots)
+    if start is None:
+        store.sim_feed = SimFeed()
+        store.sim_feed.poll()
+    EX = Exchange(store, Clock(start), hotspots, ledger)
     recovered = EX.recover()
     EX.tick()
     threading.Thread(target=ticker, daemon=True).start()
     if start is None:
         threading.Thread(target=vix_poller, daemon=True).start()
-    mode = f"replay from {args.replay_from} at 12x" if start else f"live, VIX from {MULTIVERSE_URL}"
+        threading.Thread(target=sim_poller, args=(store.sim_feed,), daemon=True).start()
+    mode = (f"replay from {args.replay_from} at 12x" if start
+            else f"live, VIX from {MULTIVERSE_URL}, city simulation from {SIM_URL}")
     print(f"city markets on {HOST}:{PORT} ({mode}, data {root}, ledger {ledger.path}, "
           f"{recovered['pending']} open bets to settle from data, {recovered['refunded']} refunded)", file=sys.stderr)
     Server((HOST, PORT), Handler).serve_forever()

@@ -19,6 +19,7 @@ import zlib
 from dataclasses import dataclass
 from typing import Callable
 
+import data
 import pricing
 from data import STALE_S, Store, day_name, local_time
 from pricing import MIN_MS
@@ -286,6 +287,113 @@ def fmt_vs(v: float) -> str:
     return f"{v * 100:.0f}%"
 
 
+# ---------------------------------------------------------------- the central-London agent simulation
+
+SIM_DRAWS = 4000
+SIM_SALT = 0x5157
+
+
+def race_pick(order: list[str], vs: dict[str, float], open_vs: dict[str, float] | None) -> str:
+    """The race winner by the settle rules: highest vs usual (hub_hour) or biggest rise since open (hub_surge, when
+    open_vs is given); a tie goes to the first in `order`."""
+    score = {h: vs[h] - (open_vs[h] if open_vs else 0.0) for h in order}
+    return max(order, key=lambda h: (score[h], -order.index(h)))
+
+
+def pulse_from(draw: dict[str, float], snap: dict, store: Store, ts0: int, t_end: int) -> float | None:
+    """City Pulse at t_end if each station the sim covers lands on its drawn vs usual and every other station keeps
+    its vs usual from the reading at ts0 (live % scaled by its typical day)."""
+    vals = []
+    for nap, live in snap.items():
+        typ_t = store.typical(nap, t_end)
+        if nap in draw and typ_t:
+            vals.append(draw[nap] * typ_t)
+            continue
+        typ0 = store.typical(nap, ts0)
+        vals.append(live * typ_t / typ0 if typ_t and typ0 else live)
+    return pulse_of(dict(zip(snap, vals)))
+
+
+def blend_hubs(sim: pricing.RaceSim, store: Store, spots: list[dict], now: int, t_end: int, mid: str) -> None:
+    fc = store.sim(now)
+    n = pricing.sim_count()
+    if not fc or not n:
+        return
+    rng = random.Random(seed_of(mid) ^ SIM_SALT)
+    draws = pricing.sim_draws(fc, [h["naptan"] for h in spots], t_end, rng, n)
+    if draws:
+        pricing.blend_race(sim, [{h["naptan"]: d[h["naptan"]] for h in spots} for d in draws], rng)
+
+
+def blend_pulse(sim: pricing.ScalarSim, store: Store, snap_at: tuple[int, dict], now: int, t_end: int,
+                mid: str) -> None:
+    fc = store.sim(now)
+    n = pricing.sim_count()
+    if not fc or not n:
+        return
+    ts0, snap = snap_at
+    naps = [nap for nap in snap if nap in fc["stations"]]
+    rng = random.Random(seed_of(mid) ^ SIM_SALT)
+    draws = pricing.sim_draws(fc, naps, t_end, rng, n) if naps else None
+    finals = [p for d in draws if (p := pulse_from(d, snap, store, ts0, t_end))] if draws else []
+    if len(finals) == n:
+        pricing.blend_scalar(sim, finals, rng)
+
+
+def spread(fc: dict, nap: str, t_end: int) -> str:
+    mu, sd = pricing.sim_dist(fc, nap, t_end)
+    return (f"{fc['stations'][nap]['name']} {mu * 100:.0f}% of usual at {local_time(t_end)} "
+            f"(p10 {(mu - pricing.Z90 * sd) * 100:.0f}, p90 {(mu + pricing.Z90 * sd) * 100:.0f})")
+
+
+def sim_view(m: Market, store: Store, now: int) -> dict | None:
+    """What the simulation says about a market now: {probs {option: P under the sim's forecast}, detail {option:
+    the forecast in words}}, or None when the sim is stale or cannot inform this series."""
+    fc = store.sim(now)
+    last = store.latest("crowding", now)
+    if not fc:
+        return None
+    rng = random.Random(seed_of(m.id) ^ SIM_SALT ^ now)
+    if m.sub in ("hub_surge", "hub_hour") and last:
+        t_end = now + crowd_horizon(last[0], m.settles_at, now) * MIN_MS
+        hubs = m.option_ids()
+        naps = [m.spec["stations"][h] for h in hubs]
+        draws = pricing.sim_draws(fc, naps, t_end, rng, SIM_DRAWS)
+        if not draws:
+            return None
+        open_vs = m.spec["open"] if m.sub == "hub_surge" else None
+        counts = {h: 0 for h in hubs}
+        for d in draws:
+            counts[race_pick(hubs, {h: d[nap] for h, nap in zip(hubs, naps)}, open_vs)] += 1
+        detail = {}
+        for h, nap in zip(hubs, naps):
+            frm = f", from {fmt_vs(open_vs[h])} at open" if open_vs else ""
+            detail[h] = spread(fc, nap, t_end) + frm
+        return {"probs": {h: c / len(draws) for h, c in counts.items()}, "detail": detail}
+    if m.sub == "city_pulse" and last and pulse_of(last[1]):
+        t_end = now + crowd_horizon(last[0], m.settles_at, now) * MIN_MS
+        naps = [nap for nap in last[1] if nap in fc["stations"]]
+        draws = pricing.sim_draws(fc, naps, t_end, rng, SIM_DRAWS) if naps else None
+        pulses = sorted(p for d in draws or [] if (p := pulse_from(d, last[1], store, last[0], t_end)))
+        if not pulses:
+            return None
+        over = sum(p > m.spec["line"] for p in pulses) / len(pulses)
+        q = lambda f: pulses[int(f * (len(pulses) - 1))]  # noqa: E731
+        text = (f"City Pulse {q(0.5):.1f} at {local_time(t_end)} (p10 {q(0.1):.1f}, p90 {q(0.9):.1f}; {len(naps)} "
+                f"of {len(last[1])} stations simulated) vs a {m.spec['line']:.1f} line")
+        return {"probs": {"over": over, "under": 1 - over}, "detail": {"over": text, "under": text}}
+    if m.sub == "london_vix" and fc.get("vix") is not None and data.MULTIVERSE_URL == data.SIM_URL:
+        st = vix_state(store, now)
+        deltas = pricing.deltas_at(st.get("history") or [], 5)
+        if len(deltas) < MIN_DELTAS:
+            return None
+        sd = max(statistics.pstdev(deltas), 0.05)
+        over = 1 - 0.5 * (1 + math.erf((m.spec["line"] - fc["vix"]) / (sd * math.sqrt(2))))
+        text = f"its VIX is {fc['vix']:.2f} now (5-min moves sd {sd:.2f}) vs a {m.spec['line']:.2f} line"
+        return {"probs": {"over": over, "under": 1 - over}, "detail": {"over": text, "under": text}}
+    return None
+
+
 # ---------------------------------------------------------------- S1 hub_surge (every round)
 
 
@@ -301,6 +409,7 @@ def build_hub_surge(mid: str, store: Store, spots: list[dict], now: int, settles
     typ0 = [store.typical(h["naptan"], ts0) for h in spots]
     typ_t = [store.typical(h["naptan"], t_end) or t0 for h, t0 in zip(spots, typ0)]
     sim = pricing.RaceSim(stations, now, minutes, random.Random(seed_of(mid)), typ0, typ_t, "gain")
+    blend_hubs(sim, store, spots, now, t_end, mid)
     spec = hub_spec(store, spots, stations, ts0, snap)
     day = spec["day"]
     rule = (f"Each hub's vs usual = its live TfL busyness ÷ its typical {day} for that 15-min band (TfL Crowding "
@@ -353,6 +462,7 @@ def build_city_pulse(mid: str, store: Store, spots: list[dict], now: int, settle
     mu, sd = pricing.fit_log_walk([(ts, math.log(p)) for ts, p in hist], 0.01, 0.002, 0.05)
     minutes = crowd_horizon(last[0], settles_at, now)
     sim = pricing.ScalarSim(p0, mu, sd, now, minutes, random.Random(seed_of(mid)), pulse_of, line)
+    blend_pulse(sim, store, last, now, now + minutes * MIN_MS, mid)
     hhmm = local_time(settles_at)
     rule = (f"City Pulse = 100 × the mean live TfL busyness (% of baseline) over the {PULSE_STATIONS} TfL Crowding "
             f"stations, in {crowd_settle_rule(settles_at)}. Fewer than {PULSE_MIN_STATIONS} stations reporting → "
@@ -538,6 +648,7 @@ def build_hub_hour(mid: str, store: Store, spots: list[dict], now: int, settles_
         if max(pricing.Futures(sim, [h["id"] for h in spots]).probs().values()) <= HEADLINE_CAP:
             break
         stations = [(a, b, x, mu, sd * 1.3) for a, b, x, mu, sd in stations]
+    blend_hubs(sim, store, spots, now, now + minutes * MIN_MS, mid)
     spec = hub_spec(store, spots, stations, ts0, snap)
     day = spec["day"]
     rule = (f"Each hub's vs usual = its live TfL busyness ÷ its typical {day} for that 15-min band. The hub with the "
