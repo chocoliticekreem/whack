@@ -92,6 +92,26 @@ futures."*
 **Recommendation:** ① as the engine + ② on stage + ③ if the recording gives a signal. The
 Oxford St crash is the "place an event" button. If ② runs late, ① is a complete demo on its own.
 
+## 3b. What other teams will pitch (from James's AI research: `all-tracks-gpt.md`, `all-tracks-gemini.md`)
+- **Both GPT and Gemini independently suggested the same MW idea:** "find the voids between
+  research fields and synthesise the missing link" (Terra Incognita / Latent Space Voyager).
+  If two models give it unprompted, many teams will get it too. **Treat it as crowded.**
+- **GPT's top MW pick, ForkWorld, is a what-if branching city that is *fictional*.** That
+  validates our space. Our edge is what a fictional sim can't claim: **the real city, live, with
+  reality pruning the worlds, through MW's own TOPS mechanism.**
+
+**Borrowed from ForkWorld (good ideas, our setting):**
+1. **"The average looks fine. Follow this person."** Pick one simulated commuter and show why
+   their day differs between two worlds. It turns a cloud of statistics into a story.
+2. **Controlled randomness (common random numbers):** worlds share the same random draws except
+   the one thing that differs, so a difference between worlds is caused by that change, not by
+   noise. A real technical point to state in the 3 minutes.
+3. **An explanation trail:** every outcome links back to the events that produced it ("why did
+   this world die?").
+
+Optional, from Brevan Howard's "Mirage": validate the pruning against a **null model** (run it
+on shuffled data and show it no longer picks a winner). Strong credibility if time allows.
+
 ## 4. Decide, don't ideate forever
 1. Each of us writes 5 "what if London…" questions, and we pick the top 2.
 2. Gut-check: say the one-liner to 3 strangers (another team, a mentor, MW at 14:00). Leaning in
