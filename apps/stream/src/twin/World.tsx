@@ -112,7 +112,8 @@ function ConditionsChip({ conditions, embedded }: { conditions: Conditions; embe
   );
 }
 
-export function World() {
+/** `bare` drops the twin's own HUD and live layers so a page can draw its own overlay; `children` render inside the scene. */
+export function World({ bare = false, children }: { bare?: boolean; children?: ReactNode } = {}) {
   const [toggles] = useState(readToggles);
   // Why: inside the stream page's iframe the host draws its "New tab" toolbar over the top edge.
   const [embedded] = useState(() => typeof window !== "undefined" && window.self !== window.top);
@@ -123,7 +124,7 @@ export function World() {
   const settings = useDemoSettings();
   const scenario = useScenario((s) => s.scenario);
   const geometry = useGeometryLoader();
-  useRecentre();
+  useRecentre(!bare);
   const fly = useCameraStore((s) => s.fly);
   const preset = useCameraStore((s) => s.preset);
   useEffect(() => {
@@ -198,17 +199,17 @@ export function World() {
             <Module name="Parks" toggles={toggles}>
               <Parks />
             </Module>
-            {(settings.estimate || scenario) && (
+            {!bare && (settings.estimate || scenario) && (
               <Module name="Traffic" toggles={toggles}>
                 <Traffic respondersOnly={!settings.estimate} />
               </Module>
             )}
-            {settings.estimate && (
+            {!bare && settings.estimate && (
               <Module name="Pedestrians" toggles={toggles}>
                 <Pedestrians />
               </Module>
             )}
-            {settings.boats && (
+            {!bare && settings.boats && (
               <Module name="Boats" toggles={toggles}>
                 <Boats />
               </Module>
@@ -216,26 +217,31 @@ export function World() {
             <Module name="Landmarks" toggles={toggles}>
               <Landmarks />
             </Module>
+            {children}
           </GeometryContext.Provider>
         )}
-        <group key={`live-${version}`}>
-          <Module name="Bankside" toggles={toggles}>
-            <Bankside />
-          </Module>
-          <Module name="Live" toggles={toggles}>
-            <LiveLayers />
-          </Module>
-        </group>
+        {!bare && (
+          <group key={`live-${version}`}>
+            <Module name="Bankside" toggles={toggles}>
+              <Bankside />
+            </Module>
+            <Module name="Live" toggles={toggles}>
+              <LiveLayers />
+            </Module>
+          </group>
+        )}
         <Module name="Post" toggles={toggles}>
           <Post />
         </Module>
       </Canvas>
 
       <div className="pointer-events-none absolute inset-0 z-10">
-        <div className="absolute left-5 top-5 flex flex-col gap-0.5">
-          <span className="text-[11px] font-medium uppercase tracking-[0.2em] text-white/50">Digital twin</span>
-          <span className="text-lg font-semibold text-white">{area}, London</span>
-        </div>
+        {!bare && (
+          <div className="absolute left-5 top-5 flex flex-col gap-0.5">
+            <span className="text-[11px] font-medium uppercase tracking-[0.2em] text-white/50">Digital twin</span>
+            <span className="text-lg font-semibold text-white">{area}, London</span>
+          </div>
+        )}
         {geometry.status === "loading" && (
           <div className="absolute inset-0 flex items-center justify-center">
             <div className="flex items-center gap-3 rounded-full border border-white/10 bg-black/60 px-5 py-2.5 text-sm text-white/85 backdrop-blur-md">
@@ -257,7 +263,7 @@ export function World() {
           className="absolute inset-0 bg-[#1c2546]"
           style={{ opacity: swapping ? 1 : 0, transition: `opacity ${SWAP_FADE_MS}ms ease`, pointerEvents: "none" }}
         />
-        <ConditionsChip conditions={conditions} embedded={embedded} />
+        {!bare && <ConditionsChip conditions={conditions} embedded={embedded} />}
         {toggles.stats && gpu && (
           <div
             title={gpu}
@@ -270,12 +276,16 @@ export function World() {
             </span>
           </div>
         )}
-        <div className="absolute bottom-3 left-3 right-3 z-30 flex flex-wrap items-end gap-1.5 sm:bottom-16 sm:left-5 sm:right-auto sm:gap-2">
-          <PresetButtons />
-          <ViewBar />
-        </div>
-        <LiveHud />
-        <DevPanel />
+        {!bare && (
+          <>
+            <div className="absolute bottom-3 left-3 right-3 z-30 flex flex-wrap items-end gap-1.5 sm:bottom-16 sm:left-5 sm:right-auto sm:gap-2">
+              <PresetButtons />
+              <ViewBar />
+            </div>
+            <LiveHud />
+            <DevPanel />
+          </>
+        )}
       </div>
     </div>
   );

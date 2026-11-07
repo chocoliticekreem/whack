@@ -68,8 +68,9 @@ export function useGeometryLoader(): GeometryState {
  * Follows the streamer: once they are more than RECENTRE_M from the origin, the next area's geometry
  * and field are fetched in the background, then the origin swaps behind a short fade.
  */
-export function useRecentre() {
+export function useRecentre(enabled = true) {
   useEffect(() => {
+    if (!enabled) return;
     let active = true;
     const check = () => {
       const { streamer } = useLive.getState();
@@ -93,7 +94,7 @@ export function useRecentre() {
       active = false;
       unsub();
     };
-  }, []);
+  }, [enabled]);
 }
 
 export const GeometryContext = createContext<TwinGeometry | null>(null);
