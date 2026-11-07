@@ -1891,3 +1891,62 @@
     display: none;
   }
 }
+
+/* Exchange-style tape: two copies of the items scroll left forever; hover pauses it. */
+.tl-ticker {
+  display: flex;
+  width: max-content;
+  height: 100%;
+  animation: tl-tape 45s linear infinite;
+}
+
+.tl-strip:hover .tl-ticker {
+  animation-play-state: paused;
+}
+
+.tl-ticker-track {
+  display: flex;
+  align-items: center;
+  gap: var(--s5);
+  padding-right: var(--s5);
+  white-space: nowrap;
+}
+
+.tl-tick {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.tl-tick-name {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.tl-tick-chg,
+.tl-tick-note {
+  color: var(--muted);
+}
+
+.tl-tick[data-dir="up"] .tl-tick-chg {
+  color: var(--yes);
+}
+
+.tl-tick[data-dir="down"] .tl-tick-chg {
+  color: var(--no);
+}
+
+@keyframes tl-tape {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tl-ticker {
+    animation: none;
+  }
+}

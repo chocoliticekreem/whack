@@ -46,7 +46,8 @@ function footballText(f: NonNullable<CitySignals["football"]>, hubName: (id: str
   return [`${f.home} ${f.score} ${f.away}`, status, heading && `fans heading for ${shortHub(heading)}`].filter(Boolean).join(", ");
 }
 
-/** The calm top strip: hubs vs a usual day, the Tube board, the latest football result. Nothing when there is no data. */
+/** The top ticker: each hub vs a usual day, the Tube board and the latest football result, scrolling like an
+ *  exchange tape. Nothing when there is no data. */
 export function CityStrip({ signals }: { signals: CitySignals | null }) {
   const hubs = signals?.hubs?.hubs.length ? signals.hubs : null;
   const lines = signals?.lines ?? null;
@@ -54,30 +55,44 @@ export function CityStrip({ signals }: { signals: CitySignals | null }) {
   if (!hubs && !lines && !football) return null;
   const hubName = (id: string) => hubs?.hubs.find((h) => h.id === id)?.name;
   const worst = lines ? worstLine(lines) : undefined;
+  const items = (
+    <>
+      {hubs?.hubs.map((h) => {
+        const delta = Math.round((h.vsUsual - 1) * 100);
+        return (
+          <span key={h.id} className="tl-tick" data-dir={delta > 0 ? "up" : delta < 0 ? "down" : undefined}>
+            <span className="tl-tick-name">{h.name}</span>
+            <span className="tl-data">{Math.round(h.vsUsual * 100)}%</span>
+            <span className="tl-tick-chg tl-data">
+              {delta > 0 ? "▲" : delta < 0 ? "▼" : "•"}
+              {Math.abs(delta)}
+            </span>
+          </span>
+        );
+      })}
+      {lines && (
+        <span className="tl-tick" title={worst?.reason || undefined}>
+          <span className="tl-tick-name">Tube</span>
+          <span className="tl-data">
+            {lines.good}/{lines.of}
+          </span>
+          <span className="tl-tick-note">{worst ? `${worst.name} ${worst.desc.toLowerCase()}` : "all normal"}</span>
+        </span>
+      )}
+      {football && (
+        <span className="tl-tick">
+          <Nums text={footballText(football, hubName)} />
+        </span>
+      )}
+    </>
+  );
   return (
-    <div className="tl-strip" role="region" aria-label="London right now">
-      <div className="tl-strip-row">
-        {hubs && (
-          <span className="tl-strip-item">
-            {hubs.hubs.map((h, i) => (
-              <span key={h.id} className="tl-strip-hub" data-low={h.furthestBelow || undefined}>
-                {i > 0 && <span className="tl-strip-dot">·</span>}
-                {h.name} <Nums text={busyText(h.vsUsual, i === 0 ? hubs.day : undefined)} />
-                {h.furthestBelow && <span className="tl-strip-note">(quietest vs usual)</span>}
-              </span>
-            ))}
-          </span>
-        )}
-        {lines && (
-          <span className="tl-strip-item" title={worst?.reason || undefined}>
-            <Nums text={linesText(lines)} />
-          </span>
-        )}
-        {football && (
-          <span className="tl-strip-item">
-            <Nums text={footballText(football, hubName)} />
-          </span>
-        )}
+    <div className="tl-strip" role="region" aria-label="London right now, busyness vs a usual day">
+      <div className="tl-ticker">
+        <div className="tl-ticker-track">{items}</div>
+        <div className="tl-ticker-track" aria-hidden>
+          {items}
+        </div>
       </div>
     </div>
   );

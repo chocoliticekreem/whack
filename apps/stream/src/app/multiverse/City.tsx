@@ -495,7 +495,6 @@ export function City() {
               <span className="tl-desk"> London</span>
             </span>
           </span>
-          {!mock && <span className="lm-hint tl-desk">Click anywhere to trade that spot</span>}
         </div>
         <div className="tl-wallet tl-num" aria-label="Your points">
           <span className="tl-pts">
