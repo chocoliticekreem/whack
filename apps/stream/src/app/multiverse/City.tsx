@@ -2,11 +2,7 @@
 
 import { Flame, Trophy, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { LIVE_SETTINGS, setDemoSettings } from "@/platform/demo";
-import { setCurrentOrigin } from "@/twin/config";
-import { useOrigin } from "@/twin/origin";
-import { World } from "@/twin/World";
-import { CITY_ORIGIN, City3D, flyToHotspots, type Pop } from "./City3D";
+import { CityMapGL, flyToHotspots, type Pop } from "./CityMapGL";
 import {
   START_POINTS,
   defaultName,
@@ -20,10 +16,6 @@ import {
 } from "./city-store";
 import type { BetResponse, Hotspot, LeaderRow, Market, MarketsResponse, SettleResponse, Trader } from "./city-types";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
-
-// Why: this module only loads in the browser (ssr: false), so the twin is re-centred before World first renders.
-setCurrentOrigin(CITY_ORIGIN);
-useOrigin.setState({ origin: CITY_ORIGIN });
 
 const POLL_MS = 3000;
 const SETTLE_POLL_MS = 2500;
@@ -64,8 +56,7 @@ function core(hubs: Hotspot[]): Hotspot[] {
 }
 
 function frame(hubs: Hotspot[]) {
-  if (isPhone()) flyToHotspots(core(hubs), { x: -0.03, z: 0.09, zoom: 2.1, steep: true });
-  else flyToHotspots(hubs, { x: -0.26, z: 0.05, zoom: 1, steep: false });
+  flyToHotspots(isPhone() ? core(hubs) : hubs);
 }
 
 function useNow(ms = 500) {
@@ -112,9 +103,6 @@ function healthOf(feeds: MarketsResponse["feeds"], offline: boolean): Health {
 export function City() {
   const now = useNow();
   const [mock, setMock] = useState(forcedMock);
-
-  // Real London is dark by 17:00 in November; daylight keeps the hotspots readable for judges.
-  useEffect(() => setDemoSettings({ ...LIVE_SETTINGS, time: "day" }), []);
   const [offline, setOffline] = useState(false);
   const [hotspots, setHotspots] = useState<Hotspot[]>([]);
   const [traders, setTraders] = useState<Trader[]>([]);
@@ -391,9 +379,7 @@ export function City() {
   return (
     <div className="tl" onClick={() => setTip(null)}>
       <div className="tl-world">
-        <World bare>
-          {hotspots.length > 0 && <City3D hotspots={hotspots} active={active} winner={glow} pop={pop} />}
-        </World>
+        <CityMapGL hotspots={hotspots} active={active} winner={glow} pop={pop} />
       </div>
 
       <header className="tl-bar">
