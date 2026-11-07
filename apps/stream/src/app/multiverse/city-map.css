@@ -256,7 +256,30 @@
   }
 }
 
+/* Says what the % on each hub tag means, so it is not read as a chance. */
+.cm-legend {
+  position: absolute;
+  z-index: 5;
+  left: calc(var(--side-w) + var(--s4));
+  bottom: var(--s4);
+  margin: 0;
+  padding: 4px 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  box-shadow: var(--shadow-tag);
+  color: var(--ink-2);
+  font-size: 12px;
+  pointer-events: none;
+}
+
 @media (max-width: 720px) {
+  .cm-legend {
+    left: var(--s3);
+    bottom: calc(52dvh + var(--s2));
+    font-size: 11px;
+  }
+
   .cm-hub-tag {
     height: 22px;
     padding: 0 6px;

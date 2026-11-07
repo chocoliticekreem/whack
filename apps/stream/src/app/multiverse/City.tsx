@@ -20,6 +20,7 @@ import { HowItWorks } from "./HowItWorks";
 import { LocalMarket } from "./LocalMarket";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
 import { cancelNote, usePendingFills, type Fill } from "./pending-bets";
+import { plainSettle, plainWatches, recordText } from "./plain";
 import { Scenario, type WhatIfOdds } from "./Scenario";
 import { WalletPanel, createPlayer, setNickname, useServerWallet, useStakeConfirm } from "./Wallet";
 
@@ -246,13 +247,12 @@ export function City() {
           streak: isVoid ? w.streak : won ? w.streak + 1 : 0,
           bets: { ...w.bets, [m.id]: { ...bet, done } },
         };
-        const winLabel = m.options.find((o) => o.id === res.winner)?.label ?? "";
         const key = Date.now();
         setToast({
           key,
           good: won,
           text: isVoid ? `Refunded ${fmtPts(bet.stake)}` : won ? `+${fmtPts(bet.payout)}` : `−${fmtPts(bet.stake)}`,
-          sub: isVoid ? "No data — market void" : res.reading.includes(winLabel) ? res.reading : `${winLabel} · ${res.reading}`,
+          sub: plainSettle(m, res, isVoid ? "void" : won ? "won" : "lost", fmtPts(isVoid || !won ? bet.stake : bet.payout)),
         });
         window.setTimeout(() => setToast((t) => (t?.key === key ? null : t)), 4500);
         if (winHub) setPop({ key, hotspot: winHub, text: won ? `+${fmtPts(bet.payout)}` : `−${fmtPts(bet.stake)}`, good: won });
@@ -558,7 +558,7 @@ export function City() {
 
       <aside className="tl-ai">
         <div className="tl-ai-head">
-          <b>{traders.length || 6} AI traders.</b> Each reads one live London feed and bets against you.
+          <b>{traders.length || 6} computer traders.</b> Each one watches one live London data feed and bets against you.
         </div>
         <div className="tl-ai-list">
           {traders.map((t) => (
@@ -576,10 +576,13 @@ export function City() {
               <Badge id={t.id} name={t.name} />
               <span className="tl-trader-text">
                 <b>{t.name}</b>
-                <span className="tl-muted">{t.watches}</span>
+                <span className="tl-muted">{plainWatches(t.id, t.watches)}</span>
               </span>
-              <span className="tl-rec tl-data" aria-label={`${t.record.won} won, ${t.record.lost} lost`}>
-                {t.record.won}–{t.record.lost}
+              <span className="tl-rec">
+                <span>{recordText(t.record.won, t.record.lost)}</span>
+                <span>
+                  <span className="tl-data">{fmtPts(t.points)}</span> pts
+                </span>
               </span>
             </button>
           ))}
@@ -678,9 +681,7 @@ export function City() {
           <div className="tl-tip-head">
             <Badge id={tipTrader.id} name={tipTrader.name} />
             <b>{tipTrader.name}</b>
-            <span className="tl-rec tl-data">
-              {tipTrader.record.won} won, {tipTrader.record.lost} lost
-            </span>
+            <span className="tl-rec">{recordText(tipTrader.record.won, tipTrader.record.lost)}</span>
           </div>
           <div>
             <span className="tl-muted">Reads</span> {tipTrader.watches}
@@ -713,7 +714,7 @@ export function City() {
             }}
           >
             <h2>Your trader name</h2>
-            <p className="tl-muted">Shown on the leaderboard next to the AI traders.</p>
+            <p className="tl-muted">Shown on the leaderboard next to the computer traders.</p>
             <input value={nameInput} onChange={(e) => setNameInput(e.target.value)} maxLength={18} autoFocus aria-label="Trader name" />
             <button type="submit" className="tl-confirm">
               Place my bet
@@ -743,7 +744,7 @@ export function City() {
                       {r.name}
                       {me && " (you)"}
                     </span>
-                    <span className="tl-kind">{r.kind === "ai" ? "AI trader" : "Player"}</span>
+                    <span className="tl-kind">{r.kind === "ai" ? "Computer trader" : "Player"}</span>
                     <b className="tl-data">{fmtPts(r.points)}</b>
                   </li>
                 );

@@ -29,7 +29,7 @@ function Summary({ data }: { data: Data }) {
   return (
     <section className="pf-card pf-span">
       <header className="pf-card-head">
-        <h2>Account summary</h2>
+        <h2>Your points at a glance</h2>
         <span className="pf-sub tl-num">As of {londonClock(w.asOf, true)} London</span>
       </header>
       <div className="pf-stats">
@@ -53,7 +53,7 @@ function Positions({ positions, markets }: { positions: Position[]; markets: Dat
     <section className="pf-card pf-span">
       <header className="pf-card-head">
         <h2>
-          Open positions <span className="pf-count tl-num">{positions.length}</span>
+          Bets still running <span className="pf-count tl-num">{positions.length}</span>
         </h2>
       </header>
       {positions.length === 0 ? (
@@ -137,7 +137,7 @@ function Breakdown({ rows, versus, traders }: { rows: BetRow[]; versus: Versus[]
   return (
     <section className="pf-card pf-span">
       <header className="pf-card-head">
-        <h2>Breakdown by series</h2>
+        <h2>How you did on each kind of question</h2>
       </header>
       <div className="pf-split">
         <div>
@@ -184,7 +184,7 @@ function Breakdown({ rows, versus, traders }: { rows: BetRow[]; versus: Versus[]
           )}
         </div>
         <div>
-          <h3>You vs the AI traders</h3>
+          <h3>You vs the computer traders</h3>
           <p className="pf-sub">Head-to-head P&amp;L on settled markets you both bet on, since the exchange last started.</p>
           {versus == null ? (
             <p className="pf-empty">The exchange does not serve head-to-head records yet.</p>
@@ -244,7 +244,7 @@ function Activity({ entries }: { entries: Entry[] }) {
     <section className="pf-card pf-span">
       <header className="pf-card-head">
         <h2>
-          Activity log <span className="pf-count tl-num">{entries.length}</span>
+          Every points movement <span className="pf-count tl-num">{entries.length}</span>
         </h2>
         <span className="pf-sub">Every ledger entry on your account, newest first. Read-only.</span>
       </header>

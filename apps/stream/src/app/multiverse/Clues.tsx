@@ -2,6 +2,7 @@
 
 import { Fragment } from "react";
 import type { CitySignals, HubsVsUsual, LineBoard, Signal, UsualTrend } from "./city-types";
+import { busyText } from "./plain";
 
 const pct = (v: number) => `${Math.round(v * 100)}%`;
 const signed = (v: number, dp = 1) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v).toFixed(dp)}`;
@@ -35,8 +36,8 @@ function worstLine(board: LineBoard) {
 
 function linesText(board: LineBoard): string {
   const worst = worstLine(board);
-  const head = `${board.good} of ${board.of} lines Good`;
-  return worst ? `${head} · ${worst.name} ${worst.desc.toLowerCase()}` : head;
+  const head = `Tube: ${board.good} of ${board.of} lines running normally`;
+  return worst ? `${head} · ${worst.name}: ${worst.desc.toLowerCase()}` : head;
 }
 
 function footballText(f: NonNullable<CitySignals["football"]>, hubName: (id: string) => string | undefined): string {
@@ -58,12 +59,11 @@ export function CityStrip({ signals }: { signals: CitySignals | null }) {
       <div className="tl-strip-row">
         {hubs && (
           <span className="tl-strip-item">
-            <span className="tl-muted">Vs a usual {hubs.day}</span>
             {hubs.hubs.map((h, i) => (
               <span key={h.id} className="tl-strip-hub" data-low={h.furthestBelow || undefined}>
                 {i > 0 && <span className="tl-strip-dot">·</span>}
-                {shortHub(h.name)} <span className="tl-data">{pct(h.vsUsual)}</span>
-                {h.furthestBelow && <span className="tl-strip-note">furthest below</span>}
+                {h.name} <Nums text={busyText(h.vsUsual, i === 0 ? hubs.day : undefined)} />
+                {h.furthestBelow && <span className="tl-strip-note">(quietest vs usual)</span>}
               </span>
             ))}
           </span>
