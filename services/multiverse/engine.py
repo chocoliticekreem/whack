@@ -24,11 +24,34 @@ VIX_SCALE = 100.0
 VIX_SPIKE_REL = 0.2
 VIX_SPIKE_ABS = 2.0
 DELIST_FRACTION = 0.1
-# Counts compared on the sqrt scale: Poisson noise gives sd 0.5 there; model error adds MODEL_SD.
+# Counts compared on the sqrt scale: Poisson noise gives sd 0.5 there; model error adds MODEL_SD. On real
+# data (anchored forecasts) 0.4 puts ~80 % of fresh YOLO counts inside the market's 80 % range (eval_real.py);
+# the synthetic fixture keeps FIXTURE_MODEL_SD, its raw simulator series being the truth plus Poisson noise.
 POISSON_SD = 0.5
-MODEL_SD = 1.0
+MODEL_SD = 0.4
+FIXTURE_MODEL_SD = 1.0
 OUTLIER_LL = -4.5
 BUS_SD_MIN = 2.0
+# A camera forecast is the last real count moved by the world's modelled change, at most this much per
+# minute on the sqrt scale (9 people can become 8.4-9.6 in a minute, not 58).
+ANCHOR_STEP_SQRT = 0.1
+# A new world's bus delay is pulled this far from its draw toward the latest observed delay (0 = all the way).
+BUS_SHRINK = 0.2
+REAL_BUS_PRIOR_SCALE = 0.1
+# Non-camera evidence. Rain: Open-Meteo rate at or above RAIN_MM_H counts as raining; a world that disagrees
+# pays RAIN_MISS_LL. Crowding: live/typical station busyness reads as the tourist factor. Bikes: the share of
+# dock bikes gone since the window start maps linearly onto the moving share around MOVE_MID.
+RAIN_MM_H = 0.1
+RAIN_MISS_LL = -3.0
+CROWD_SD = 0.3
+# debt: bikes -> moving share is a hand-set linear map (0.6 + 3 x share gone). ceiling: a heuristic, not
+# fitted. upgrade: when a week of bikepoint + camera history exists, fit the gain against camera counts.
+MOVE_MID = 0.6
+BIKE_GAIN = 3.0
+BIKE_SD = 0.2
+FEED_LABELS = {"bus": "bus feed", "rain": "rain radar", "crowding": "tube crowding", "bikes": "bike docks"}
+EXTRA_KEYS = ("rainMmH", "crowding", "crowdingTypical", "bikesOut")
+NEUTRAL = {"rainAtMin": None, "touristFactor": 1.0, "movingShare": MOVE_MID}
 FORK_PRIOR = 0.5
 MAX_LIVE_FACTOR = 2
 # A sharp frame can price out most of the market at once; keep at least 40 % so lineages stay diverse.
@@ -51,15 +74,56 @@ HEAVY = 0.1
 FRESH_SHARE = 2
 
 
-def log_likelihood_counts(predicted: float, observed: float) -> float:
+def log_likelihood_counts(predicted: float, observed: float, model_sd: float | None = None) -> float:
     """Gaussian on the sqrt scale with an outlier floor: real YOLO counts at 352x288 miss people, and a walking
     group crossing a short segment spikes the model, so one camera can cost a world at most OUTLIER_LL."""
-    sd2 = POISSON_SD ** 2 + MODEL_SD ** 2
+    sd2 = POISSON_SD ** 2 + (MODEL_SD if model_sd is None else model_sd) ** 2
     return max(OUTLIER_LL, -0.5 * (math.sqrt(max(observed, 0.0)) - math.sqrt(max(predicted, 0.0))) ** 2 / sd2)
 
 
 def log_likelihood_bus(assumed_delay: float, observed_delay: float) -> float:
     return -0.5 * ((assumed_delay - observed_delay) / BUS_SD_MIN) ** 2
+
+
+def log_likelihood_rain(rain_at_min: float | None, minute: int, rain_mm_h: float) -> float:
+    """Raining now (radar) vs the world's rain onset: agreeing costs nothing, disagreeing RAIN_MISS_LL."""
+    world_wet = rain_at_min is not None and rain_at_min <= minute
+    return 0.0 if world_wet == (rain_mm_h >= RAIN_MM_H) else RAIN_MISS_LL
+
+
+def log_likelihood_crowding(tourist_factor: float, crowding: float, typical: float) -> float:
+    """Station busyness over its typical level for this weekday and band vs the world's tourist factor
+    (log scale, sd CROWD_SD), floored at OUTLIER_LL."""
+    ratio = max(crowding, 1e-3) / typical
+    return max(OUTLIER_LL, -0.5 * (math.log(max(tourist_factor, 1e-3) / ratio) / CROWD_SD) ** 2)
+
+
+def implied_moving_share(bikes_out: float) -> float:
+    return MOVE_MID + BIKE_GAIN * bikes_out
+
+
+def log_likelihood_bikes(moving_share: float, bikes_out: float) -> float:
+    """Bikes leaving the docks near Oxford Circus since the window start vs the world's moving share."""
+    return max(OUTLIER_LL, -0.5 * ((moving_share - implied_moving_share(bikes_out)) / BIKE_SD) ** 2)
+
+
+def feed_parts(a: dict, minute: int, extras: dict | None) -> list[dict]:
+    """Likelihood parts from the non-camera observations; a missing reading adds no term."""
+    ex = extras or {}
+    parts = []
+    if ex.get("rainMmH") is not None:
+        wet = a.get("rainAtMin") is not None and a["rainAtMin"] <= minute
+        parts.append({"cam": "rain", "predicted": 1.0 if wet else 0.0, "observed": ex["rainMmH"],
+                      "ll": log_likelihood_rain(a.get("rainAtMin"), minute, ex["rainMmH"])})
+    if ex.get("crowding") is not None and ex.get("crowdingTypical"):
+        parts.append({"cam": "crowding", "predicted": float(a["touristFactor"]),
+                      "observed": round(ex["crowding"] / ex["crowdingTypical"], 3),
+                      "ll": log_likelihood_crowding(float(a["touristFactor"]), ex["crowding"], ex["crowdingTypical"])})
+    if ex.get("bikesOut") is not None:
+        parts.append({"cam": "bikes", "predicted": float(a["movingShare"]),
+                      "observed": round(implied_moving_share(ex["bikesOut"]), 3),
+                      "ll": log_likelihood_bikes(float(a["movingShare"]), ex["bikesOut"])})
+    return parts
 
 
 def normalise(log_weights: list[float]) -> list[float]:
@@ -179,6 +243,67 @@ def pick_driver(effects: dict[str, float]) -> str:
     return max(groups, key=lambda g: abs(effects[g])) if groups else best
 
 
+def is_real(seed: dict) -> bool:
+    return str(seed.get("source", "")).startswith("real")
+
+
+def seed_anchors(seed: dict) -> tuple[dict[str, tuple[int, float]], dict[str, int]]:
+    """Each counted camera's last real count, at minute 0 of the seed's epoch, and when it was taken (ms).
+    A camera with no count yet starts from the mean of the counted ones (taken at -1, so any count replaces it).
+    Real seeds only: the synthetic fixture's counts come from the simulator itself, so its raw series is exact."""
+    if not is_real(seed):
+        return {}, {}
+    cams = [c for c in seed.get("cams", [])
+            if (c.get("counted") or c.get("at")) and isinstance(c.get("people"), (int, float))]
+    anchors = {c["id"]: (0, float(c["people"])) for c in cams}
+    taken = {c["id"]: int(c.get("at") or seed["at"]) for c in cams}
+    if cams:
+        mean = sum(v for _, v in anchors.values()) / len(anchors)
+        for c in seed.get("cams", []):
+            if c["id"] not in anchors:
+                anchors[c["id"]], taken[c["id"]] = (0, mean), -1
+    return anchors, taken
+
+
+def anchored(raw: list[float], anchor: tuple[int, float] | None, ref: list[float] | None = None) -> list[float]:
+    """Persistence plus the world's modelled change: the last real count, moved by how much more (or less)
+    this world's count changes since that minute than the market's average world (sqrt scale, `ref` = the
+    market's mean sqrt series), at most ANCHOR_STEP_SQRT per minute.
+
+    Why relative: on real counts the simulator's change shared by every world (drift away from the seed's
+    inferred street loads, spikes on short segments: 9.8 -> 58 a minute apart) has no skill against
+    persistence; what separates worlds is their assumptions, i.e. the deviation from the average world."""
+    if anchor is None or not raw:
+        return raw
+    ma, va = anchor
+    ref = ref or [0.0] * len(raw)
+    dev = [math.sqrt(max(r, 0.0)) - (ref[m] if m < len(ref) else 0.0) for m, r in enumerate(raw)]
+    base = dev[min(ma, len(dev) - 1)]
+    out = []
+    for m, d in enumerate(dev):
+        cap = ANCHOR_STEP_SQRT * abs(m - ma)
+        step = max(-cap, min(cap, d - base))
+        out.append(round(max(0.0, math.sqrt(max(va, 0.0)) + step) ** 2, 2))
+    return out
+
+
+def anchor_cams(raw_cams: dict[str, list[float]], anchors: dict[str, tuple[int, float]],
+                ref: dict[str, list[float]] | None = None) -> dict[str, list[float]]:
+    return {cid: anchored(series, anchors.get(cid), (ref or {}).get(cid)) for cid, series in raw_cams.items()}
+
+
+def mean_sqrt(ws: list[dict], prices: list[float]) -> dict[str, list[float]]:
+    """The market's average world, per camera and minute, on the sqrt scale (price-weighted over `ws`)."""
+    total = sum(prices) or 1.0
+    out: dict[str, list[float]] = {}
+    for w, p in zip(ws, prices):
+        for cid, series in w["run"]["rawCams"].items():
+            acc = out.setdefault(cid, [0.0] * len(series))
+            for m, v in enumerate(series[:len(acc)]):
+                acc[m] += math.sqrt(max(v, 0.0)) * p / total
+    return out
+
+
 def reseed(seed: dict, ts_ms: int, readings: dict[str, float]) -> dict:
     """A new epoch: the latest camera counts become the starting state on the same street graph."""
     s = copy.deepcopy(seed)
@@ -210,15 +335,35 @@ class Multiverse:
         self.epochs = 0
         self.brokerage = brokerage
         self.placed_events: list[dict] = []
-        self.epoch_obs: list[tuple[int, dict[str, float], float | None]] = []
+        self.epoch_obs: list[tuple[int, dict[str, float], float | None, dict | None]] = []
         self.before: list[dict] = []
         self.origin_ms = seed["at"]
         self.feeds: dict[str, Any] = {}
         self.vix_history: list[dict] = []
+        self.anchors, self.anchor_ms = seed_anchors(seed)
+        self.ref: dict[str, list[float]] = {}
+        self.last_bus: float | None = None
+
+    def run(self, assumptions: dict) -> dict:
+        run = worlds.run_world(self.seed, assumptions, self.horizon, self.crn_seed)
+        run["rawCams"] = run["cams"]
+        run["cams"] = anchor_cams(run["rawCams"], self.anchors, self.ref)
+        return run
+
+    def bus_prior(self, assumptions: dict) -> dict:
+        """Shrink a new world's bus delay toward the latest observed delay; before any reading, a real seed
+        scales the 0-8 min prior to 0-0.8 (the arrivals proxy reads 0-1 min on a normal day)."""
+        b = float(assumptions["busDelayMin"])
+        if self.last_bus is not None:
+            b = self.last_bus + BUS_SHRINK * (b - self.last_bus)
+        elif is_real(self.seed):
+            b *= REAL_BUS_PRIOR_SCALE
+        return dict(assumptions, busDelayMin=round(max(0.0, b), 3))
 
     def new_world(self, assumptions: dict, parent: dict | None, price: float, born: int) -> dict:
         t0 = time.perf_counter()
-        run = worlds.run_world(self.seed, assumptions, self.horizon, self.crn_seed)
+        assumptions = self.bus_prior(assumptions)
+        run = self.run(assumptions)
         w = {"id": f"W-{self.next_ticker}", "parent": parent["id"] if parent else None,
              "generation": parent["generation"] + 1 if parent else 0, "status": "live", "price": price,
              "logWeight": math.log(price) if price > 0 else -math.inf, "history": [round(price, 5)],
@@ -239,6 +384,7 @@ class Multiverse:
                 rng = random.Random(self.rng.random())
                 a = worlds.sample_assumptions(rng, self.horizon, self.zone_ids)
                 self.worlds.append(self.new_world(a, None, 1.0 / self.n, 0))
+        self.reanchor()
         self.spawn_ms = round((time.perf_counter() - t0) * 1000)
         self.mark_vix(0, self.seed["at"], 0, "spawn", 0.0)
 
@@ -288,7 +434,7 @@ class Multiverse:
                 "vix_driver": now["driver"] if now else None, "vix_spike": bool(now and now["spike"])}
 
     def source_label(self, src: str) -> str:
-        return "bus feed" if src == "bus" else f"cam {self.cam_names.get(src, src)}"
+        return FEED_LABELS.get(src) or f"cam {self.cam_names.get(src, src)}"
 
     def broker_label(self, bid: str) -> str:
         b = self.brokerage.book.get(bid) if self.brokerage else None
@@ -302,7 +448,7 @@ class Multiverse:
             lw = [(math.log(pr) if pr > 0 else -math.inf) + sum(p["ll"] for p in ps if p["cam"] == src)
                   for pr, ps in zip(prior, parts)]
             out[self.source_label(src)] = self.vix_of(live, normalise(lw)) - vix_before
-        lw = [(math.log(pr) if pr > 0 else -math.inf) + sum(p["ll"] for p in ps if p["cam"] != "bus")
+        lw = [(math.log(pr) if pr > 0 else -math.inf) + sum(p["ll"] for p in ps if p["cam"] not in FEED_LABELS)
               for pr, ps in zip(prior, parts)]
         out[ALL_CAMS] = self.vix_of(live, normalise(lw)) - vix_before
         return out
@@ -331,7 +477,8 @@ class Multiverse:
             self.roll(reseed(self.seed, *base))
         if frame.get("feeds") is not None:
             self.feeds = frame["feeds"]
-        return self.observe(ts, frame["readings"], frame.get("busDelayMin"))
+        self.adopt_counts(frame.get("lastCounts"))
+        return self.observe(ts, frame["readings"], frame.get("busDelayMin"), {k: frame.get(k) for k in EXTRA_KEYS})
 
     def live(self) -> list[dict]:
         return [w for w in self.worlds if w["status"] == "live"]
@@ -340,19 +487,27 @@ class Multiverse:
         return max(0, min(self.horizon, round((ts_ms - self.seed["at"]) / 60_000)))
 
     def world_loglik(self, w: dict, minute: int, readings: dict[str, float],
-                     bus_delay: float | None) -> tuple[float, list[dict]]:
+                     bus_delay: float | None, extras: dict | None = None,
+                     anchoring: tuple[dict, dict] | None = None) -> tuple[float, list[dict]]:
+        """`anchoring` (anchors, average world): score against what was in force at that frame (history),
+        not the current one."""
         parts = []
         for cam_id, observed in readings.items():
             series = w["run"]["cams"].get(cam_id)
+            if anchoring is not None and series:
+                anchors, ref = anchoring
+                series = anchored(w["run"]["rawCams"][cam_id], anchors.get(cam_id), ref.get(cam_id))
             if not series:
                 continue
             predicted = series[min(minute, len(series) - 1)]
             parts.append({"cam": cam_id, "predicted": predicted, "observed": observed,
-                          "ll": log_likelihood_counts(predicted, observed)})
+                          "ll": log_likelihood_counts(predicted, observed,
+                                                      MODEL_SD if is_real(self.seed) else FIXTURE_MODEL_SD)})
         if bus_delay is not None:
             assumed = float(w["assumptions"]["busDelayMin"])
             parts.append({"cam": "bus", "predicted": assumed, "observed": bus_delay,
                           "ll": log_likelihood_bus(assumed, bus_delay)})
+        parts += feed_parts(w["assumptions"], minute, extras)
         return sum(p["ll"] for p in parts), parts
 
     def recombine(self, a: dict, rng: random.Random) -> dict:
@@ -364,24 +519,28 @@ class Multiverse:
 
     def history_loglik(self, w: dict) -> float:
         """Log-likelihood of everything seen this epoch under w's forecast (as if it had been live all along)."""
-        return sum(self.world_loglik(w, m, r, b)[0] for m, r, b in self.epoch_obs)
+        return sum(self.world_loglik(w, m, r, b, x, a)[0] for m, r, b, x, a in self.epoch_obs)
 
-    def observe(self, ts_ms: int, readings: dict[str, float], bus_delay: float | None = None) -> dict:
+    def observe(self, ts_ms: int, readings: dict[str, float], bus_delay: float | None = None,
+                extras: dict | None = None) -> dict:
         minute = self.minute_of(ts_ms)
         live = self.live()
         compared = [c for c in readings if c in self.cam_names]
         obs_index = len(self.observations) + 1
-        if not compared and bus_delay is None:
-            obs = {"index": obs_index, "ts": ts_ms, "minute": minute, "compared": 0, "delisted": [], "spawned": []}
+        extras = {k: (extras or {}).get(k) for k in EXTRA_KEYS}
+        if not compared and bus_delay is None and not feed_parts(NEUTRAL, minute, extras):
+            obs = {"index": obs_index, "ts": ts_ms, "minute": minute, "compared": 0, "busDelayMin": None,
+                   **extras, "delisted": [], "spawned": []}
             self.observations.append(obs)
             return obs
-        self.epoch_obs.append((minute, {c: readings[c] for c in compared}, bus_delay))
+        self.epoch_obs.append((minute, {c: readings[c] for c in compared}, bus_delay, extras,
+                               (dict(self.anchors), self.ref)))
         self.before = [{"price": w["price"], "assumptions": w["assumptions"]} for w in live]
         prior = [w["price"] for w in live]
         vix_before = self.vix_of(live, prior)
         all_parts = []
         for w in live:
-            ll, parts = self.world_loglik(w, minute, readings, bus_delay)
+            ll, parts = self.world_loglik(w, minute, readings, bus_delay, extras)
             all_parts.append(parts)
             w["logWeight"] += ll
             worst = min(parts, key=lambda p: p["ll"]) if parts else None
@@ -403,6 +562,7 @@ class Multiverse:
                 delisted.append(w["id"])
         survivors = self.live()
         self.reprice(survivors)
+        self.update_anchors(ts_ms, {c: readings[c] for c in compared}, bus_delay)
         if self.brokerage:
             spawned, cut = self.rebalance(obs_index, minute, readings, bus_delay,
                                           int(MAX_DELIST_SHARE * len(live)) - len(delisted))
@@ -416,10 +576,38 @@ class Multiverse:
         driver = pick_driver(effects)
         self.mark_vix(obs_index, ts_ms, minute, driver, effects.get(driver, 0.0))
         obs = {"index": obs_index, "ts": ts_ms, "minute": minute, "compared": len(compared),
-               "busDelayMin": bus_delay, "delisted": delisted, "spawned": spawned,
+               "busDelayMin": bus_delay, **extras, "delisted": delisted, "spawned": spawned,
                "readings": {c: readings[c] for c in compared}}
         self.observations.append(obs)
         return obs
+
+    def update_anchors(self, ts_ms: int, readings: dict[str, float], bus_delay: float | None) -> None:
+        """After scoring a frame: its counts become the cameras' anchors and every live forecast re-anchors."""
+        if bus_delay is not None:
+            self.last_bus = bus_delay
+        if not readings or not is_real(self.seed):
+            return
+        self.anchors |= {c: (self.minute_of(ts_ms), v) for c, v in readings.items()}
+        self.anchor_ms |= dict.fromkeys(readings, ts_ms)
+        self.reanchor()
+
+    def adopt_counts(self, last_counts: dict[str, dict] | None) -> None:
+        """Before scoring: a camera's newer count that is too old to score (> 10 min) still beats an older
+        anchor, so the forecast starts from the last thing that camera really saw."""
+        newer = {cid: r for cid, r in (last_counts or {}).items()
+                 if cid in self.cam_names and r.get("at") and r["at"] > self.anchor_ms.get(cid, -1)}
+        if not newer or not is_real(self.seed):
+            return
+        self.anchors |= {cid: (self.minute_of(r["at"]), float(r["people"])) for cid, r in newer.items()}
+        self.anchor_ms |= {cid: int(r["at"]) for cid, r in newer.items()}
+        self.reanchor()
+
+    def reanchor(self) -> None:
+        """Recompute the market's average world and re-anchor every live forecast on it."""
+        live = self.live()
+        self.ref = mean_sqrt(live, [w["price"] for w in live]) if live else {}
+        for w in live:
+            w["run"]["cams"] = anchor_cams(w["run"]["rawCams"], self.anchors, self.ref)
 
     def reprice(self, ws: list[dict]) -> None:
         for w, p in zip(ws, normalise([w["logWeight"] for w in ws])):
@@ -432,6 +620,15 @@ class Multiverse:
             return f"priced out at +{minute} min"
         if worst["cam"] == "bus":
             return f"assumed buses {worst['predicted']:.1f} min late; TfL said {worst['observed']:.1f} min"
+        if worst["cam"] == "rain":
+            said = "rain by now" if worst["predicted"] else "dry"
+            return f"said {said} at +{minute} min; radar read {worst['observed']:.1f} mm/h"
+        if worst["cam"] == "crowding":
+            return (f"assumed tourists x{worst['predicted']:.2f}; Oxford Circus station ran "
+                    f"x{worst['observed']:.2f} its usual busyness")
+        if worst["cam"] == "bikes":
+            return (f"assumed {worst['predicted'] * 100:.0f}% set off; bikes leaving the docks pointed to "
+                    f"{worst['observed'] * 100:.0f}%")
         name = self.cam_names.get(worst["cam"], worst["cam"])
         return f"predicted {worst['predicted']:.0f} people at {name} (+{minute} min), cameras saw {worst['observed']:.0f}"
 
@@ -622,10 +819,12 @@ class Multiverse:
         elapsed = (new_seed["at"] - self.seed["at"]) / 60_000
         self.seed = new_seed
         self.epoch_obs = []
+        self.anchors, self.anchor_ms = seed_anchors(new_seed)
         for w in self.live():
             w["assumptions"] = worlds.shift_assumptions(w["assumptions"], elapsed)
             w["labels"] = worlds.describe(w["assumptions"], self.zone_names)
-            w["run"] = worlds.run_world(new_seed, w["assumptions"], self.horizon, self.crn_seed)
+            w["run"] = self.run(w["assumptions"])
+        self.reanchor()
         self.placed_events = [dict(e, atMin=max(0.0, e["atMin"] - elapsed)) for e in self.placed_events]
         self.epochs += 1
         self.mark_vix(len(self.observations), new_seed["at"], 0, "new window", 0.0)
