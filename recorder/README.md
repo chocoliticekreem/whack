@@ -23,6 +23,16 @@ Long-term, detached, survives the terminal closing:
 nohup caffeinate -i python3 recorder/record.py >> data/recorder.out 2>&1 &
 ```
 
+Supervised (what the live demo runs): `scripts/run-data.sh` keeps the recorder, the YOLO server and
+the health server (`GET :8052/health`, `services/health/`) up. It restarts a process that dies, restarts the
+recorder when jamcams/tube/line_status have had no data for 3 min, and restarts YOLO when health has
+called it dead for 3 min. It adopts processes that are already running and logs to `data/logs/`.
+
+```sh
+nohup scripts/run-data.sh >/dev/null 2>&1 &
+python3 services/health/health.py        # per-feed age, status, YOLO freshness, TfL key ([--json])
+```
+
 A status line goes to stdout every minute (`source=<writes>w/<rows>r[/<errors>err]`). Errors are one
 line each in `data/recorder.log`. A failed poll is logged and retried on the next tick. The loop never exits on its own.
 
@@ -30,7 +40,7 @@ line each in `data/recorder.log`. A failed poll is logged and retried on the nex
 | Name | Purpose |
 |---|---|
 | `TFL_APP_KEY` | TfL key (free at api-portal.tfl.gov.uk). Raises the cap from 40 to 300 calls/min. Read from the environment, or else from `--env-file`, the repo-root `.env`, or (in a git worktree) the main checkout's `.env`. Never logged. |
-| `JAMCAM_YOLO_URL` | YOLO server for `--yolo` (default `http://127.0.0.1:8047`, Mirrorverse `services/yolo/server.py`). If it is unreachable, the recorder prints one warning and continues without counts. |
+| `JAMCAM_YOLO_URL` | YOLO server for `--yolo` (default `http://127.0.0.1:8047`, Mirrorverse `services/yolo/server.py`). If it is unreachable, the recorder logs it, writes JamCam rows without counts and retries with backoff (30 s doubling to 120 s), so a restarted server is picked up again. |
 
 `.env` and `data/` are gitignored.
 
