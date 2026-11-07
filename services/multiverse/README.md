@@ -123,6 +123,103 @@ curl -XPOST localhost:8549/spawn -d '{"n":50,"mode":"live"}'                    
   recorded counts (people MAE, 80 % coverage, bus MAE).
 - Recorder root: `MULTIVERSE_RAW`, else `data/raw`, else (in a worktree) the main checkout's `data/raw`. Read-only.
 
+## Central London (any bounding box)
+
+One simulation from King's Cross down to Waterloo and from Marble Arch east to Bank, built by one general seed
+builder; no place has its own code path. Oxford Circus is just a smaller bbox.
+
+```bash
+python3 services/multiverse/central_seed.py                 # seeds/central-london.json (CENTRAL_BBOX), caches streets
+python3 services/multiverse/central_seed.py --offline       # rebuild from seeds/central-osm.json.gz (no twin cache needed)
+python3 services/multiverse/central_seed.py --bbox 51.509,-0.152,51.521,-0.131 --out seeds/oxford-bbox.json
+MULTIVERSE_PORT=8449 MULTIVERSE_SEED=seeds/central-london.json python3 services/multiverse/server.py
+curl -XPOST localhost:8449/spawn -d '{"n":50,"mode":"replay"}'     # or "live"; brokers stay off
+python3 services/multiverse/eval_real.py --central --windows 7 --minutes 60 --events-ab
+```
+
+| Piece | Rule | Where |
+|---|---|---|
+| Streets | OSM major + minor roads from the twin's cached OpenFreeMap tiles (`apps/stream/.cache`, or `--tiles DIR`), cut to the bbox; vertices within 2 m share a node; largest connected piece; cul-de-sacs pruned; chains through degree-2 nodes merged (up to 300 m); junction clusters joined by edges under 15 m collapsed (dual carriageways). Central London: 6 062 OSM pieces -> 10 563 vertex pairs -> **1 017 edges on 668 junctions**, 121 km | `central_seed.street_graph` |
+| Stations | every station in the recorder's TfL Crowding list placed by name on the OSM stations (else by NaPTAN from `services/city/hotspots.json`) and inside the bbox: live busyness + the typical-day profile | `central_seed.place_stations` |
+| Zones and hubs | one zone per station (each street to its nearest station); the hubs of `hotspots.json` inside the bbox group zones into catchments (the partition flows are tallied across; edges touching two catchments are `boundary`) | `assign_zones`, `assign_hubs` |
+| Cameras | the recorder's `jamcams` rows inside the bbox, pinned to the nearest street within 60 m, with their newest YOLO count of the last 2 h | `pin_cams` |
+| Destinations | stations + POIs pooled on a 150 m grid (attractions x3), top 120 cells | `poi_anchors` |
+| Buses | the newest `bus` snapshot at stops with a known position (a cached twin stop list, else a hub's listed stop at the hub) | `bus_stops`, `bus_arrivals` |
+| Demand | busyness = typical day (weekday, quarter-hour) x the live/typical ratio at the seed x (1 + `demandTrend` x t/60) x interventions; exits per minute = 120 x `flowScale` x busyness (as many entries); 6 gravity destinations (weight x exp(-d / 600 m)) per station and 5-min slot; bus arrivals put `alightPerBus` on the street; lingering groups walk on (up to 2 hops). The swarm skeleton comes from `crnSeed` alone (common random numbers) | `central.Run` |
+| Walk | Dijkstra trees toward each destination, cached per closed-edge set; a group is a stream as long as its departure slot, slowed by pavement load; 20 min warm-up, then 65 min (market horizon + 60) | `central.Run.go` |
+| Worlds in parallel | `run_many` ships the graph to a spawn-context process pool once and each world's small dynamic part per run; the engine batches spawn, refills, rolls and re-runs through it | `central.run_many`, `engine.Multiverse.run_batch` |
+| Station likelihood | each new TfL reading (repeats skipped) vs the world's forecast anchored on the last reading, log scale, sd `STATION_SD` 0.05, floored at `OUTLIER_LL` per station; cameras, bus delay, rain unchanged | `engine.log_likelihood_station`, `anchored_station` |
+
+Knobs per world (`central.RANGES`): flowScale 0.4-2.5, demandTrend -0.4..0.4 /h, touristFactor, capacityScale,
+alightPerBus, busDelayMin, walkPace, lingerScale, plus rain onset and a random incident. Particle filter, delist cap,
+systematic resampling, per-term caps and common random numbers are the engine's, unchanged.
+
+**Performance** (this Mac, load average 6-8 while other jobs ran): 50 worlds spawn in 1.2-1.8 s (one world takes
+about 35-45 ms on 1 017 edges and about 2 800 groups); a one-minute step takes 0.05-0.3 s, and 1.3 s when the
+5-minute market rolls and re-runs every world. Over HTTP, with the /state forecasts, a step takes 0.7-1.4 s. A replay
+spawn takes 10-13 s, almost all of it reading the recorder and replaying the event layer.
+
+**Accuracy** (`eval_real.py --central --windows 7 --minutes 60 --events-ab`, 2026-11-07 12:36-19:36 UTC, +5 min):
+
+| | station busyness MAE (pp of usual) | in 80 % | camera MAE (people) | in 80 % |
+|---|---|---|---|---|
+| market, events on | 4.14 | 84 % | 1.83 | 88 % |
+| market, events off | 3.94 | 84 % | | |
+| persistence | 3.61 | 86 % | 1.77 | 80 % |
+| typical day / camera's mean so far today | 25.09 | 33 % | 1.72 | 83 % |
+
+919 station readings, 297 camera counts. The market beats the typical day by a wide margin on stations. It does not
+beat persistence at +5 min on either target, and applying the derived events makes stations slightly worse (4.14 vs 3.94).
+
+### Intervention API
+
+`POST /intervene` (central seeds):
+
+```json
+{"kind": "closure|capacity|demand_surge|demand_drop|weather",
+ "where": {"segments": ["s12", "s13"]} | {"lat": 51.503, "lon": -0.119, "radiusM": 250} | {"naptan": "940GZZLUWLO"},
+ "start": 0, "end": 60, "magnitude": 0.5, "shape": "ramp_up|linear_decay", "note": "...",
+ "mode": "all|fork", "weight": 0.3}
+```
+
+- `start` / `end`: minutes from now or epoch ms; `end` omitted = open-ended. `radius_m` is accepted for `radiusM`.
+- `magnitude`: closure / capacity = remaining capacity (closure 0; at a NaPTAN it scales the station's busyness, on
+  streets the pavement capacity); demand_surge / demand_drop = relative change (+/-); weather = rain mm/h (2 mm/h
+  sends every tourist to shelter). A user's station closure moves its demand to the nearest open station.
+- `where` lat/lon: streets within the radius; stations feel a surge or drop at full strength inside the radius and
+  exp(-(d - r) / 400 m) outside it (up to 1.2 km); a surge aimed at a place (not a station) walks to that place.
+- `mode: "all"` (default): every world, now and future, carries it; worlds re-run, prices kept. `mode: "fork"`: each
+  live world forks a what-if child carrying it, priced at `weight` (default 0.5) of its parent.
+- Reply: `{intervention: {id, kind, where, startMs, endMs, magnitude, note, segments, stations}, mode, applied|forked, ...state}`.
+- The old `{kind: closure|incident|event|weather, zoneId, atMin, prior}` still works (mapped to closure / capacity 0.4 /
+  demand_surge 0.5 / weather around the zone's station, forked).
+- In code: `central.normalise_intervention(raw, seed, now_ms)` then `Multiverse.apply(iv, "all"|"fork", weight)` or
+  `Multiverse.set_applied(ivs)`.
+
+### Derived events (events.py)
+
+Every tick (replay frame, live poll) the server asks the event layer for the interventions the feeds imply
+(`central.EventFeed`: `events.replay` over the replay window, `events.derive` on the newest records live) and resolves
+them against the seed (`central.resolve_events`): `{naptan}` to that station, `{lat, lon, radius_m}` to the streets
+inside it. A NaPTAN outside the seed's stations resolves to nothing (`inSim: false`). Each resolved event enters half
+of the worlds (`EVENT_PRIOR`, a fixed coin per world and event; children inherit) so the readings price it in or out:
+a wrong "station closed" call costs every world that carries it as soon as TfL publishes the station busy.
+`{"events": "off"}` on `/spawn` turns them off.
+
+### Endpoints (central seed)
+
+| Endpoint | Shape |
+|---|---|
+| `GET /state` | everything the Oxford server returns, plus `forecast: {unit, stations: [{naptan, name, hub, "+5" / "+15" / "+60": {mean, p10, p90}}], hubs: [{hub, name, naptan, "+5"...: {mean, p10, p90, people: {mean, p10, p90}}}]}` (% of usual), `events: [{id, kind, reason, planned, start, end, inSim}]`, `interventions` (the user's), `graph: {edges, nodes, bbox}` |
+| `GET /forecast?naptan=&horizon=` | `{naptan, name, horizonMin, at, busyness (TfL percentageOfBaseline), typical, mean, p10, p90}` (% of usual; the interval includes the station noise model, i.e. it is a range for the reading TfL will publish) |
+| `GET /forecast?hub=&horizon=` | `{hub, name, horizonMin, at, stations, mean, p10, p90, people: {mean, p10, p90}}`; hub busyness = catchment stations' summed busyness over their summed typical |
+| `GET /forecast?horizon=` | the `/state` `forecast` block at that one horizon |
+| `GET /segments?horizon=` | `{horizonMin, at, people: [...]}`: price-weighted people per street edge, in `/geometry` order (horizons 0-10, 15-20, 60-65 from the epoch start are kept) |
+| `POST /scenario` | body `{interventions: [<the /intervene shape, without mode>], horizons?: [15, 60]}` (default 5, 15, 60). Runs them on copies of the live worlds (each copy priced as its original), never touching live state. Reply `{before: {stations, hubs}, after: {stations, hubs}, ms}`, blocks shaped like `/state` `forecast`: `stations: [{naptan, name, hub, "+15": {mean, p10, p90}, ...}]`, `hubs: [{hub, name, naptan, "+15": {mean, p10, p90, people}}]`. Typically 1-2 s for 50 worlds |
+| `GET /cams?horizon=` | `{horizonMin, cams: [{camId, name, mean, p10, p90}]}` |
+| `GET /vix` | unchanged: the London VIX over every station zone, history and driver (a camera, a station's crowding, the bus feed, rain, "events", an applied intervention) |
+| `GET /geometry` | segments, zones, cams, plus `stations`, `hubs`, `origin` |
+
 ## Modes
 
 - **replay**: frames from recorder NDJSON `data/raw/<source>/YYYY-MM-DD/HH.ndjson(.gz)`, lines
