@@ -17,10 +17,37 @@ and the mechanism comes after.
 |---|---|---|
 | **1. The worlds** (engine) | 50 parallel versions of Oxford Circus, **5 min ahead**, forked from live TfL data, repriced every minute | *The new world*: futures that don't exist yet |
 | **2. The market** (betting) | Every world is a stock; price = probability it happens. Each real camera frame reprices it, and wrong worlds are **delisted** | *The interaction*: judges bet, reality settles it |
-| **3. The brokers** (TOPS) | AI personas (commuter, tourist, bus driver, contrarian) bet on the futures they believe in. Reality scores their track record, and the right ones get more say | *The MW hook*: their founding idea, pointed at a city |
+| **3. The brokers** (TOPS) | AI agents, **each reading one alternative-data stream** (flights, rain, grid, news, bikes, theatre…), bet on the futures they believe in. Reality scores their track record, so the market learns **which data has alpha on a city** | *The MW hook*: their founding idea, pointed at a city |
+| **Output: the London VIX** | The spread across worlds as one live uncertainty index | *The new data* |
 
 **Rule:** lead with the stock-market image. Say TOPS once, after it lands. Betting is how
 judges touch it, not the point. Points only, never real money.
+
+**The upgrade that makes the market real (adopted):**
+1. **Brokers are data sources, not personalities.** This is alpha capture done properly: TOPS
+   works because each broker has *different information*. Each AI broker reads ONE
+   unconventional feed:
+   - 🛩️ aviation: Heathrow holding stacks (adsb.lol)
+   - 🌧️ weather: 15-min rain
+   - ⚡ grid: national demand (Elexon)
+   - 📰 news: geocoded GDELT events
+   - 🚲 bikes: Santander docks emptying
+   - 🚇 Tube: crowding vs the typical day
+   - 🎭 theatre: West End show-out times (scraped)
+   - 📚 attention: Wikipedia edits and views on West End articles
+
+   They talk in character, but **the market discovers which data actually has alpha on a city.**
+   The leaderboard is a live ranking of alternative data.
+2. **The headline output is the VIX for London:** the spread of prices across worlds rolled into
+   one live index of how uncertain the city's next five minutes are. Calm on a Sunday morning,
+   spiking when it rains or a line goes down. *"Here's London's fear index right now, and here's
+   what moved it."*
+
+**Pitch (current):**
+> "We built the VIX for London. Fifty parallel futures, simulated live and drawn in 3D, priced
+> by a market. The brokers are AI agents, each reading a different stream of alternative data:
+> flights, rain, the power grid, the news. Reality settles every trade, so the market discovers
+> which data actually has alpha on a city. Starting with London. The world is the exchange."
 
 **100 words (the startup framing: London is market #1, the world is the vision):**
 > Prediction markets like Polymarket and Kalshi price the questions someone thought to ask. **We
