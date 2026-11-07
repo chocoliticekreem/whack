@@ -81,6 +81,42 @@
   background: var(--hub);
 }
 
+/* The live "vs usual" %, set in mono after the name; empty until /signals answers. */
+.cm-hub-vs {
+  color: var(--muted);
+  font-family: var(--mono);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.cm-hub-vs:empty {
+  display: none;
+}
+
+.cm-hub[data-active] .cm-hub-vs,
+.cm-hub[data-win] .cm-hub-vs {
+  color: inherit;
+  opacity: 0.75;
+}
+
+/* The hub furthest below its usual day: a still, thin ring, no motion. */
+.cm-hub-halo {
+  position: absolute;
+  left: -11px;
+  top: -11px;
+  width: 22px;
+  height: 22px;
+  border: 1.5px solid var(--hub);
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.3s ease;
+}
+
+.cm-hub[data-laggard] .cm-hub-halo {
+  opacity: 0.55;
+}
+
 /* A bigger invisible hit area so a thumb can land on the dot. */
 .cm-hub::before {
   content: "";
