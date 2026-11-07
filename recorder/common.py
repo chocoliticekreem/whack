@@ -50,10 +50,11 @@ def iso(dt: datetime) -> str:
 
 
 class HttpError(Exception):
-    def __init__(self, status: int, retry_after: float | None, msg: str):
+    def __init__(self, status: int, retry_after: float | None, msg: str, body: bytes = b""):
         super().__init__(msg)
         self.status = status
         self.retry_after = retry_after
+        self.body = body
 
 
 def http(url: str, timeout: float, method: str = "GET") -> tuple[int, dict, bytes]:
@@ -67,7 +68,11 @@ def http(url: str, timeout: float, method: str = "GET") -> tuple[int, dict, byte
             retry_after = float(ra) if ra else None
         except ValueError:
             retry_after = None
-        raise HttpError(e.code, retry_after, f"HTTP {e.code}") from None
+        try:
+            body = e.read(512)
+        except Exception:  # noqa: BLE001 - the status code is the error; the body is a hint
+            body = b""
+        raise HttpError(e.code, retry_after, f"HTTP {e.code}", body) from None
 
 
 def get_json(url: str, timeout: float = 30):

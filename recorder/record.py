@@ -55,6 +55,7 @@ GDELT_RETRY_FOR = 7200  # the CDN can serve a cached 404 for a just-announced fi
 WIKI_STREAM = "https://stream.wikimedia.org/v2/stream/recentchange"
 WIKI_ONCE_SECONDS = 60
 PAGEVIEWS = "https://wikimedia.org/api/rest_v1/metrics/pageviews/per-article/en.wikipedia/all-access/user"
+YOLO_BACKOFF_MIN, YOLO_BACKOFF_MAX = 30, 120  # seconds
 
 log = logging.getLogger("recorder")
 
@@ -92,12 +93,17 @@ class Tfl:
 
     def get(self, path: str, timeout: float = 30, tries: int = 4):
         sep = "&" if "?" in path else "?"
-        url = f"{TFL}{path}{sep}app_key={self.key}" if self.key else f"{TFL}{path}"
         for attempt in range(tries):
+            url = f"{TFL}{path}{sep}app_key={self.key}" if self.key else f"{TFL}{path}"
             self.limiter.acquire()
             try:
                 return get_json(url, timeout)
             except HttpError as e:
+                # TfL answers a bad key with a 429, so without this every call would back off as if rate limited.
+                if e.status == 429 and self.key and b"Invalid app_key" in e.body:
+                    log.error("TfL rejected TFL_APP_KEY (invalid app_key); continuing without a key at 40 calls/min")
+                    self.key, self.limiter.per_minute = None, 40
+                    continue
                 if e.status != 429 or attempt == tries - 1:
                     raise HttpError(e.status, e.retry_after, f"TfL {path.split('?')[0]}: HTTP {e.status}") from None
                 base = e.retry_after if e.retry_after is not None else 5 * 2**attempt
@@ -143,7 +149,9 @@ class Recorder:
         self.cams: list[dict] = []
         self.cams_at = 0.0
         self.yolo_url = os.environ.get("JAMCAM_YOLO_URL", "http://127.0.0.1:8047").rstrip("/") if yolo else None
-        self.yolo_warned = False
+        self.yolo_down = False
+        self.yolo_retry_at = 0.0
+        self.yolo_backoff = YOLO_BACKOFF_MIN
         self.yolo_ids = seed_cam_ids()
         self.hosts: dict[str, RateLimiter] = {}
         self.hosts_lock = threading.Lock()
@@ -340,7 +348,8 @@ class Recorder:
         return row
 
     def _yolo_counts(self, ids: list[str]) -> dict[str, dict]:
-        if not self.yolo_url:
+        """A down YOLO server is retried with backoff, so a restarted server is picked up again."""
+        if not self.yolo_url or time.time() < self.yolo_retry_at:
             return {}
         counts = {}
         try:
@@ -348,11 +357,17 @@ class Recorder:
                 res = get_json(f"{self.yolo_url}/counts?ids={','.join(ids[i:i + 10])}", timeout=10)
                 counts.update({r["camId"]: r for r in res.get("readings", [])})
         except Exception as e:  # noqa: BLE001
-            if not self.yolo_warned:
-                print(f"warning: YOLO server at {self.yolo_url} unreachable ({e}); continuing without counts", flush=True)
-                log.error(f"yolo unreachable: {e}")
-                self.yolo_warned = True
-            self.yolo_url = None
+            if not self.yolo_down:
+                print(f"warning: YOLO server at {self.yolo_url} unreachable ({e}); retrying with backoff", flush=True)
+            log.error(f"yolo unreachable: {e}; retrying in {self.yolo_backoff:.0f}s")
+            self.yolo_down = True
+            self.yolo_retry_at = time.time() + self.yolo_backoff
+            self.yolo_backoff = min(self.yolo_backoff * 2, YOLO_BACKOFF_MAX)
+            return counts
+        if self.yolo_down:
+            log.info(f"yolo reachable again at {self.yolo_url}")
+            print(f"YOLO server at {self.yolo_url} reachable again", flush=True)
+        self.yolo_down, self.yolo_backoff = False, YOLO_BACKOFF_MIN
         return counts
 
     def poll_jamcams(self):
