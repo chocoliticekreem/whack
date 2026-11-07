@@ -57,12 +57,45 @@ python3 services/multiverse/fixture.py           # regenerate the synthetic fixt
 UI: `apps/stream` → `/multiverse` (proxied through `/api/multiverse/*`).
 
 Env (names only): `MULTIVERSE_PORT` (8049), `MULTIVERSE_CORS_ORIGIN`, `TWIN_URL` (live mode, default
-`http://localhost:3047`), `MULTIVERSE_SEED` (a seed JSON for replaying recorded data), `MULTIVERSE_RAW`
-(recorder root, default `data/raw` when `MULTIVERSE_SEED` is set), `MULTIVERSE_CAM_SOURCES`,
+`http://localhost:3047`), `MULTIVERSE_SEED` (a seed JSON, absolute or relative to this folder; a `real…` seed switches replay and live to
+the recorder's `jamcams` + `bus`), `MULTIVERSE_RAW` (recorder root, default `data/raw` or the main checkout's
+when `MULTIVERSE_SEED` is set), `MULTIVERSE_CAM_SOURCES`,
 `MULTIVERSE_BUS_SOURCES` (comma lists of recorder source names), `MULTIVERSE_ALT_RAW` (recorder root for the
 brokers' live feeds), `ANTHROPIC_API_KEY` (broker ideas
 from Claude Haiku 4.5, two concurrent calls of 5 brokers per observation; read from the env or the repo / main-checkout
 `.env`; without it the rules brokers answer and nothing touches the network).
+
+## Real London (Oxford Circus)
+
+```bash
+python3 services/multiverse/real_seed.py              # rebuild seeds/oxford-circus.json (needs a twin, TWIN_URL, default :3060)
+python3 services/multiverse/real_seed.py --offline    # rebuild from the cached seeds/oxford-circus-field.json
+# real replay (the demo's safe mode): recorded frames, default = the 45 min with the most YOLO counts
+MULTIVERSE_PORT=8549 MULTIVERSE_SEED=seeds/oxford-circus.json python3 services/multiverse/server.py
+curl -XPOST localhost:8549/spawn -d '{"n":50,"mode":"replay"}'                    # or add "from"/"to" (ms)
+curl -XPOST localhost:8549/observe -d '{"next":true}'                             # one recorded minute
+# live: same server; reseeds at the newest recorder snapshot, then reads the newest one every 60 s by itself
+curl -XPOST localhost:8549/spawn -d '{"n":50,"mode":"live"}'                      # then GET /state; POST /observe {} = poll now
+```
+
+- **Seed** (`real_seed.py`): roads (major + minor, footpaths dropped) from the twin's `/api/twin/field` within
+  1150 m of Oxford Circus, largest connected piece, cul-de-sacs pruned, 22 m pieces merged into street edges and
+  straightened (Predict's cost grows fast with nodes: 94 s a world on the raw 11k pieces, ~0.1-2 s on the 407 edges).
+  Local x/z use the twin's snapped origin (250 m grid), so the seed lines up with the twin's map. Cameras are the
+  recorder's `jamcams` rows inside the street box, ids exactly as recorded; a camera with a recorded YOLO count pins
+  its street to it. 16 zones on curated real places (Oxford Circus, Regent St, Carnaby, John Lewis, Bond St,
+  Selfridges, Marble Arch, Oxford St east toward Tottenham Ct Rd, Soho, Piccadilly Circus, Mayfair, St James's,
+  Green Park, Park Lane, Fitzrovia, Marylebone). The six Oxford Circus bus stops keep their NaPTAN ids.
+- **Cameras** (`feeds.jamcam_readings` / `fresh_people`): people from each row's nested `yolo`, rows without a
+  count skipped, only the seed's cameras, and only counts at most 10 min old (`READING_MAX_AGE_MIN`; a YOLO count
+  describes one TfL clip, refreshed every 3-5 min).
+- **Bus delay** (`feeds.bus_delay_min`): the arrivals feed has no timetable, so lateness is a proxy: each
+  (vehicle, stop) prediction at the seed's stops is followed across the last 15 min of snapshots, its slip is
+  latest ETA - first ETA, and the reading is the median slip (floored at 0). Mostly 0-1 min on a normal afternoon.
+- **Frames**: one per recorded `jamcams` snapshot (60 s cadence); the brokers' feeds come from the same recorder root.
+- **Likelihood**: a camera costs a world at most `OUTLIER_LL` (-4.5): small, noisy YOLO counts and walking groups
+  crossing short segments otherwise delist good worlds on one reading.
+- Recorder root: `MULTIVERSE_RAW`, else `data/raw`, else (in a worktree) the main checkout's `data/raw`. Read-only.
 
 ## Modes
 

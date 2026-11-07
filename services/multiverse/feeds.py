@@ -154,9 +154,9 @@ def hour_files(raw_root: Path, source: str, at_ms: int, back_min: int) -> list[P
     return out
 
 
-def latest_records(raw_root: Path, source: str, at_ms: int, k: int = 2) -> list[dict]:
+def latest_records(raw_root: Path, source: str, at_ms: int, k: int = 2, back_min: int | None = None) -> list[dict]:
     """The newest k records of `source` at or before at_ms (oldest first), within its staleness window."""
-    back = STALE_MIN.get(source, 20)
+    back = back_min or STALE_MIN.get(source, 20)
     recs = []
     for path in hour_files(raw_root, source, at_ms, back):
         for rec in read_lines(path):
@@ -325,3 +325,128 @@ def feeds_at(raw_root: Path | None, at_ms: int) -> dict[str, dict | None]:
         "tube": summarize_tube(rec["crowding"], rec["crowding_profile"], at_ms),
         "attention": summarize_attention(rec["wiki_views"], rec["wiki_edits"], at_ms),
     }
+
+
+# ---------------------------------------------------------------- real recorder: jamcams + bus
+
+# A YOLO count describes one TfL clip (refreshed every ~3-5 min); past this age it no longer counts as now.
+READING_MAX_AGE_MIN = 10
+BUS_WINDOW_MIN = 15
+DEFAULT_WINDOW_MIN = 45
+
+
+def jamcam_readings(payload: Any) -> dict[str, dict]:
+    """Recorder `jamcams` rows -> {camId: {people, vehicles, at}} for rows whose nested `yolo` has a count."""
+    out = {}
+    for row in payload if isinstance(payload, list) else []:
+        if not isinstance(row, dict):
+            continue
+        y = row.get("yolo") if isinstance(row.get("yolo"), dict) else {}
+        people = num(y.get("people"))
+        if not row.get("id") or people is None:
+            continue
+        at = num(y.get("at"))
+        out[str(row["id"])] = {"people": people, "vehicles": num(y.get("vehicles")) or 0.0,
+                               "at": int(at) if at is not None else None}
+    return out
+
+
+def fresh_people(payload: Any, ts_ms: int, cam_ids: set[str] | None) -> dict[str, float]:
+    """People per camera in one jamcams record, keeping counts at most READING_MAX_AGE_MIN old."""
+    out = {}
+    for cid, r in jamcam_readings(payload).items():
+        if cam_ids is not None and cid not in cam_ids:
+            continue
+        if r["at"] is not None and ts_ms - r["at"] > READING_MAX_AGE_MIN * 60_000:
+            continue
+        out[cid] = r["people"]
+    return out
+
+
+def bus_delay_min(snapshots: list[tuple[int, list[dict]]], at_ms: int) -> tuple[float | None, int]:
+    """Lateness proxy for the seed's stops. The arrivals feed carries no timetable, so each (vehicle, stop)
+    prediction is followed across the snapshots of the last BUS_WINDOW_MIN and its slip is how far the
+    expected arrival moved later (latest ETA - first ETA). Median over buses, floored at 0.
+    Returns (minutes or None, buses with a slip)."""
+    first: dict[tuple, tuple[int, int]] = {}
+    last: dict[tuple, tuple[int, int]] = {}
+    for ts, rows in sorted(snapshots, key=lambda s: s[0]):
+        if not at_ms - BUS_WINDOW_MIN * 60_000 <= ts <= at_ms:
+            continue
+        for r in rows:
+            try:
+                key, eta = (r["vehicleId"], r["naptanId"]), parse_ts(r["expectedArrival"])
+            except (KeyError, ValueError, TypeError, AttributeError):
+                continue
+            first.setdefault(key, (ts, eta))
+            last[key] = (ts, eta)
+    slips = sorted((last[k][1] - first[k][1]) / 60_000 for k in last if last[k][0] > first[k][0])
+    if not slips:
+        return None, 0
+    mid = len(slips) // 2
+    median = slips[mid] if len(slips) % 2 else (slips[mid - 1] + slips[mid]) / 2
+    return round(max(0.0, median), 2), len(slips)
+
+
+def records_between(raw_root: Path, source: str, start_ms: int, end_ms: int) -> Iterator[tuple[int, Any]]:
+    back = max(1, (end_ms - start_ms) // 60_000 + 1)
+    for path in hour_files(raw_root, source, end_ms, back):
+        for rec in read_lines(path):
+            try:
+                ts = parse_ts(rec["ts"])
+            except (KeyError, ValueError, TypeError):
+                continue
+            if start_ms <= ts <= end_ms:
+                yield ts, rec.get("payload")
+
+
+def bus_snapshots(raw_root: Path, naptans: set[str], start_ms: int, end_ms: int) -> list[tuple[int, list[dict]]]:
+    """Bus arrivals (all London, ~17k rows a record) cut down to the seed's stops, read once per window."""
+    if not naptans:
+        return []
+    return [(ts, [r for r in payload if isinstance(r, dict) and r.get("naptanId") in naptans])
+            for ts, payload in records_between(raw_root, "bus", start_ms - BUS_WINDOW_MIN * 60_000, end_ms)
+            if isinstance(payload, list)]
+
+
+def real_frame(payload: Any, ts: int, cam_ids: set[str] | None, buses: list) -> dict:
+    delay, n = bus_delay_min(buses, ts) if buses else (None, 0)
+    return {"ts": ts, "readings": fresh_people(payload, ts, cam_ids), "busDelayMin": delay, "busCount": n}
+
+
+def load_real_frames(raw_root: Path, cam_ids: set[str] | None, start_ms: int, end_ms: int,
+                     naptans: set[str] | None = None, with_feeds: bool = False) -> list[dict]:
+    """One frame per recorded `jamcams` snapshot (60 s cadence) in [start, end]: fresh YOLO people for the
+    seed's cameras, the bus lateness proxy as of that minute, optionally the brokers' feeds."""
+    buses = bus_snapshots(raw_root, naptans or set(), start_ms, end_ms)
+    frames = {ts // 60_000: real_frame(payload, ts, cam_ids, buses)
+              for ts, payload in records_between(raw_root, "jamcams", start_ms, end_ms)}
+    out = [frames[k] for k in sorted(frames)]
+    if with_feeds:
+        for frame in out:
+            frame["feeds"] = feeds_at(raw_root, frame["ts"])
+    return out
+
+
+def default_window(raw_root: Path, cam_ids: set[str], now_ms: int, span_min: int = DEFAULT_WINDOW_MIN,
+                   lookback_h: int = 12) -> tuple[int, int] | None:
+    """The span_min window of the last lookback_h hours with the most fresh camera readings (latest on ties)."""
+    per_min = {ts // 60_000: len(fresh_people(payload, ts, cam_ids))
+               for ts, payload in records_between(raw_root, "jamcams", now_ms - lookback_h * 3_600_000, now_ms)}
+    if not per_min:
+        return None
+    first, last = min(per_min), max(per_min)
+    starts = range(first, max(first, last - span_min + 1) + 1)
+    best = max(starts, key=lambda m: (sum(per_min.get(m + i, 0) for i in range(span_min)), m))
+    return best * 60_000, (best + span_min) * 60_000 - 1
+
+
+def latest_real_frame(raw_root: Path, cam_ids: set[str], naptans: set[str], now_ms: int) -> dict | None:
+    """Live: the newest recorded jamcams snapshot as one frame (no extra TfL calls), plus the brokers' feeds."""
+    recs = latest_records(raw_root, "jamcams", now_ms, k=1, back_min=5)
+    if not recs:
+        return None
+    ts = recs[-1]["tsMs"]
+    frame = real_frame(recs[-1].get("payload"), ts, cam_ids, bus_snapshots(raw_root, naptans, ts, ts))
+    frame["feeds"] = feeds_at(raw_root, ts)
+    return frame

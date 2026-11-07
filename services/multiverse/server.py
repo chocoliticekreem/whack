@@ -1,6 +1,9 @@
 """Multiverse HTTP API (stdlib) on :8049.
 
-POST /spawn      {n=50, horizonMin=5, mode="replay"|"live", crnSeed=47, rngSeed=7, brokers="on"|"off"}
+POST /spawn      {n=50, horizonMin=5, mode="replay"|"live", crnSeed=47, rngSeed=7, brokers="on"|"off",
+                  from?, to? (ms, real replay window; default the 45 min with most YOLO counts)}
+                 With MULTIVERSE_SEED set to a real seed (seeds/oxford-circus.json): replay reads the recorder's
+                 `jamcams` + `bus`; live reseeds at the newest recorder snapshot and polls it every 60 s.
 POST /observe    {next: true} (replay: consume the next recorded frame)
                  | {ts, readings: {camId: people}, busDelayMin?} (push a frame)
                  | {} in live mode (poll the twin's /api/around/counts now)
@@ -17,6 +20,7 @@ import json
 import os
 import sys
 import threading
+import time
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -33,6 +37,8 @@ ALLOWED_ORIGIN = os.environ.get("MULTIVERSE_CORS_ORIGIN", "http://localhost:3047
 TWIN_URL = os.environ.get("TWIN_URL", "http://localhost:3047")
 LIVE_ORIGIN = (51.5152, -0.1419)
 MAX_N = 200
+HERE = Path(__file__).resolve().parent
+LIVE_POLL_S = 60
 
 
 class App:
@@ -43,15 +49,54 @@ class App:
         self.frames: list[dict] = []
         self.cursor = 0
         self.raw_root: Path | None = None
+        self.last_live_ts = 0
+
+        self.live_gen = 0
 
     def replay_seed(self) -> tuple[dict, Path]:
         seed_path = os.environ.get("MULTIVERSE_SEED")
         if seed_path:
-            raw = Path(os.environ.get("MULTIVERSE_RAW") or feeds.REPO / "data" / "raw")
-            return json.loads(Path(seed_path).read_text()), raw
+            path = Path(seed_path)
+            if not path.is_file() and (HERE / seed_path).is_file():
+                path = HERE / seed_path
+            raw = Path(os.environ.get("MULTIVERSE_RAW") or feeds.alt_root())
+            return json.loads(path.read_text()), raw
         if not fixture.SEED_PATH.is_file():
             fixture.main()
         return json.loads(fixture.SEED_PATH.read_text()), Path(os.environ.get("MULTIVERSE_RAW") or fixture.RAW_DIR)
+
+    @staticmethod
+    def is_real(seed: dict) -> bool:
+        return str(seed.get("source", "")).startswith("real")
+
+    @staticmethod
+    def seed_ids(seed: dict) -> tuple[set[str], set[str]]:
+        return {c["id"] for c in seed.get("cams", [])}, {b["naptanId"] for b in seed.get("buses", []) if b.get("naptanId")}
+
+    def real_frames(self, seed: dict, body: dict) -> list[dict]:
+        """Recorded frames for the real seed: body {from, to} (ms), else the 45-min window with most YOLO counts."""
+        cams, naptans = self.seed_ids(seed)
+        if body.get("from"):
+            start = int(body["from"])
+            end = int(body.get("to") or start + feeds.DEFAULT_WINDOW_MIN * 60_000)
+        else:
+            window = feeds.default_window(self.raw_root, cams, int(time.time() * 1000))
+            if window is None:
+                raise LookupError(f"no recorded jamcams under {self.raw_root}")
+            start, end = window
+        return feeds.load_real_frames(self.raw_root, cams, start, end, naptans, with_feeds=True)
+
+    def poll_live(self, gen: int) -> None:
+        """Live + real seed: read the newest recorder snapshot every LIVE_POLL_S until the next spawn."""
+        while True:
+            time.sleep(LIVE_POLL_S)
+            with self.lock:
+                if gen != self.live_gen:
+                    return
+                try:
+                    self.observe({})
+                except Exception as exc:  # noqa: BLE001 - a bad tick must not kill the poller
+                    print(f"live poll failed: {exc}", file=sys.stderr)
 
     def spawn(self, body: dict) -> dict:
         n = max(2, min(int(body.get("n") or engine.DEFAULT_N), MAX_N))
@@ -59,12 +104,22 @@ class App:
         mode = body.get("mode") or "replay"
         if mode not in ("replay", "live"):
             raise ValueError("mode must be replay or live")
+        self.live_gen += 1
+        self.last_live_ts = 0
         if mode == "replay":
             seed, self.raw_root = self.replay_seed()
-            self.frames = feeds.load_frames(self.raw_root)
+            self.frames = self.real_frames(seed, body) if self.is_real(seed) else feeds.load_frames(self.raw_root)
             if self.frames and not (seed["at"] <= self.frames[0]["ts"] <= seed["at"] + horizon * 60_000):
                 seed = engine.reseed(seed, self.frames[0]["ts"], self.frames[0]["readings"])
                 self.frames = self.frames[1:]
+        elif os.environ.get("MULTIVERSE_SEED"):
+            seed, self.raw_root = self.replay_seed()
+            cams, naptans = self.seed_ids(seed)
+            frame = feeds.latest_real_frame(self.raw_root, cams, naptans, int(time.time() * 1000))
+            if frame is None:
+                raise LookupError(f"no jamcams snapshot in the last 5 min under {self.raw_root}: is the recorder running?")
+            seed = engine.reseed(seed, frame["ts"], frame["readings"])
+            self.frames, self.last_live_ts = [], frame["ts"]
         else:
             seedmod.TWIN_URL = TWIN_URL
             seed = seedmod.build_seed([], LIVE_ORIGIN, "Oxford Circus")
@@ -76,9 +131,11 @@ class App:
         self.mode, self.cursor = mode, 0
         mv = engine.Multiverse(seed, n=n, horizon=horizon, crn_seed=int(body.get("crnSeed") or 47),
                                rng_seed=int(body.get("rngSeed") or 7), brokerage=brokerage)
-        mv.feeds = feeds.feeds_at(self.raw_root if mode == "replay" else feeds.alt_root(), seed["at"])
+        mv.feeds = feeds.feeds_at(self.raw_root if self.raw_root else feeds.alt_root(), seed["at"])
         mv.spawn()
         self.mv = mv
+        if mode == "live" and self.is_real(seed):
+            threading.Thread(target=self.poll_live, args=(self.live_gen,), daemon=True).start()
         return self.state()
 
     def need(self) -> engine.Multiverse:
@@ -102,6 +159,12 @@ class App:
             frame = {"ts": int(body.get("ts") or mv.seed["at"] + 60_000 * (mv.now_minute() + 1)),
                      "readings": {str(k): float(v) for k, v in readings.items()},
                      "busDelayMin": body.get("busDelayMin")}
+        elif self.mode == "live" and self.is_real(mv.seed):
+            cams, naptans = self.seed_ids(mv.seed)
+            frame = feeds.latest_real_frame(self.raw_root, cams, naptans, int(time.time() * 1000))
+            if frame is None or frame["ts"] <= self.last_live_ts:
+                return {"stale": True, "observation": None, "latestTs": frame["ts"] if frame else None, **self.state()}
+            self.last_live_ts = frame["ts"]
         elif self.mode == "live":
             frame = feeds.live_frame(TWIN_URL, list(mv.cam_names))
             frame["ts"] = frame["ts"] or mv.seed["at"]
@@ -120,15 +183,22 @@ class App:
 
     def state(self) -> dict:
         mv = self.need()
-        return {"mode": self.mode, "replay": {"frames": len(self.frames), "cursor": self.cursor,
-                                              "nextTs": self.frames[self.cursor]["ts"] if self.cursor < len(self.frames) else None},
+        return {"mode": self.mode, "real": self.is_real(mv.seed), "liveTs": self.last_live_ts or None,
+                "replay": {"frames": len(self.frames), "cursor": self.cursor,
+                           "nextTs": self.frames[self.cursor]["ts"] if self.cursor < len(self.frames) else None},
                 **mv.state()}
 
     def replay(self, q: dict) -> dict:
-        root = self.raw_root or self.replay_seed()[1]
+        seed, default_root = self.replay_seed()
+        root = self.raw_root or default_root
         start = int(q["from"][0]) if "from" in q else None
         end = int(q["to"][0]) if "to" in q else None
-        frames = feeds.load_frames(root, start, end)
+        if self.is_real(seed):
+            cams, naptans = self.seed_ids(seed)
+            now = int(time.time() * 1000)
+            frames = feeds.load_real_frames(root, cams, start or now - 3_600_000, end or now, naptans)
+        else:
+            frames = feeds.load_frames(root, start, end)
         return {"root": str(root), "frames": [{"ts": f["ts"], "cams": len(f["readings"]), "busDelayMin": f["busDelayMin"]}
                                               for f in frames]}
 
