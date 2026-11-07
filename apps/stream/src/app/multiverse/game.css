@@ -42,6 +42,11 @@
   font-weight: 600;
 }
 
+.mvg-phone-only,
+.mvg-help {
+  display: none;
+}
+
 .mvg-card {
   background: var(--card);
   border: 1px solid var(--border);
@@ -357,23 +362,63 @@
   }
 }
 
-/* Phone: compact title, pill row, bottom sheet with a 3-row stack of thumb-sized futures. */
+/* Phone: one slim bar (score, uncertainty, "?" intro), a bottom sheet of thumb-sized rows, the city in between. */
 @media (max-width: 720px) {
   .mvg {
     --gutter: 10px;
     font-size: 13px;
   }
 
+  .mvg-desk-only {
+    display: none;
+  }
+
+  .mvg-phone-only {
+    display: revert;
+  }
+
   .mvg-top {
-    grid-template-columns: 1fr auto;
+    left: max(var(--gutter), env(safe-area-inset-left));
+    right: max(var(--gutter), env(safe-area-inset-right));
+    grid-template-columns: auto 1fr auto;
     grid-template-areas:
-      "title title"
-      "score meter";
+      "score meter help"
+      "title title title";
+    align-items: center;
     gap: 6px;
   }
 
   .mvg-title {
+    display: none;
     padding: 10px 12px;
+  }
+
+  .mvg-title[data-open] {
+    display: block;
+  }
+
+  .mvg-help {
+    grid-area: help;
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    font: inherit;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text);
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    box-shadow: var(--shadow);
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+
+  .mvg-help[aria-expanded="true"] {
+    color: #fff;
+    background: var(--text);
   }
 
   .mvg-title h1 {
@@ -389,8 +434,9 @@
   .mvg-score {
     justify-self: start;
     gap: 6px;
-    padding: 5px 10px;
-    font-size: 12px;
+    min-height: 36px;
+    padding: 0 12px;
+    font-size: 13px;
   }
 
   .mvg-round {
@@ -398,12 +444,15 @@
   }
 
   .mvg-meter {
+    justify-self: end;
     display: flex;
     align-items: center;
     gap: 6px;
-    padding: 5px 10px;
+    min-height: 36px;
+    padding: 0 12px;
     border-radius: 999px;
     font-size: 12px;
+    white-space: nowrap;
   }
 
   .mvg-meter-row {
@@ -420,10 +469,15 @@
   }
 
   .mvg-panel {
-    left: var(--gutter);
-    width: calc(100% - 2 * var(--gutter));
+    left: max(var(--gutter), env(safe-area-inset-left));
+    right: max(var(--gutter), env(safe-area-inset-right));
+    bottom: calc(var(--gutter) + env(safe-area-inset-bottom));
+    width: auto;
+    max-height: 52dvh;
+    overflow-y: auto;
     transform: none;
     padding: 12px;
+    border-radius: 14px;
   }
 
   .mvg-head h2,
@@ -436,6 +490,16 @@
     font-size: 12px;
   }
 
+  .mvg-evidence {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    margin-top: 4px;
+    line-height: 1.35;
+  }
+
   .mvg-cards {
     grid-template-columns: 1fr;
     gap: 6px;
@@ -445,7 +509,7 @@
   .mvg-future {
     grid-template-columns: auto 1fr auto;
     min-height: 48px;
-    padding: 8px 12px;
+    padding: 6px 12px;
   }
 
   .mvg-future .mvg-icon {
@@ -459,7 +523,9 @@
   .mvg-future .mvg-muted {
     grid-column: 3;
     grid-row: 1;
-    font-size: 12px;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
     text-align: right;
   }
 
@@ -471,6 +537,14 @@
   .mvg-foot {
     margin-top: 8px;
     font-size: 12px;
+  }
+
+  .mvg-foot .mvg-btn {
+    flex: 1;
+  }
+
+  .mvg-btn {
+    min-height: 44px;
   }
 
   .mvg-details {
