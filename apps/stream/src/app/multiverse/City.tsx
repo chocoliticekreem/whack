@@ -269,7 +269,7 @@ export function City() {
         setToast({
           key,
           good: won,
-          text: isVoid ? `Refunded ${fmtPts(bet.stake)}` : won ? `+${fmtPts(bet.payout)}` : `−${fmtPts(bet.stake)}`,
+          text: isVoid ? `Refunded ${fmtPts(bet.stake)}` : won ? `+${fmtPts(bet.payout - bet.stake)}` : `−${fmtPts(bet.stake)}`,
           sub: plainTitle(m),
         });
         if (won) {
@@ -277,7 +277,7 @@ export function City() {
           window.setTimeout(() => setWin((x) => (x?.key === key ? null : x)), 1400);
         }
         window.setTimeout(() => setToast((t) => (t?.key === key ? null : t)), 4500);
-        if (winHub) setPop({ key, hotspot: winHub, text: won ? `+${fmtPts(bet.payout)}` : `−${fmtPts(bet.stake)}`, good: won });
+        if (winHub) setPop({ key, hotspot: winHub, text: won ? `+${fmtPts(bet.payout - bet.stake)}` : `−${fmtPts(bet.stake)}`, good: won });
         return next;
       });
       if (!mock) void refreshWallet();
