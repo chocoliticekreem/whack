@@ -182,3 +182,13 @@ export function pausedText(reason: string | undefined, now: number): string {
   const left = secondsUntil(sus[2], now);
   return `Paused for a moment: ${pauseCause(sus[1])}. ${left == null ? "Betting reopens any second." : `Betting reopens in ${left} s.`}`;
 }
+
+// TfL publishes station crowding 10-15 min late and we settle on the first reading it stamped after betting closed,
+// so these questions resolve well after their deadline. Everything else settles within a minute or two.
+const SLOW_SERIES = new Set(["hub_surge", "city_pulse", "hub_hour", "local_station"]);
+const SLOW_RESULT_MS = 15 * 60_000;
+
+export function resultEta(m: Market): { at: number; slow: boolean } {
+  const slow = SLOW_SERIES.has(seriesOf(m));
+  return { at: m.settlesAt + (slow ? SLOW_RESULT_MS : 60_000), slow };
+}
