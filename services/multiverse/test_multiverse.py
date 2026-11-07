@@ -160,6 +160,10 @@ class BrokerTest(unittest.TestCase):
         self.assertIn(f"{c}: missing", errors)
         self.assertTrue(any("B-GHOST" in e for e in errors))
         self.assertEqual(brokers.validate_batch("not json at all", roster, 30, ["z0"])[0], {})
+        views, _ = brokers.validate_batch(json.dumps({"ideas": [idea_json(a, touristFactor=None, rainAtMin=-1)]}),
+                                          roster, 30, ["z0"])
+        self.assertIsNone(views[a]["touristFactor"])
+        self.assertEqual(views[a]["rainAtMin"], brokers.DRY)
 
     def test_bad_reply_falls_back_per_broker(self) -> None:
         seed = fixture.build_seed()
@@ -181,6 +185,21 @@ class BrokerTest(unittest.TestCase):
             self.assertEqual(len(ideas), 3)
             self.assertTrue(bk.calls[-1]["errors"])
 
+    def test_roster_is_split_into_concurrent_batches(self) -> None:
+        seed = fixture.build_seed()
+        seen: list[list[str]] = []
+
+        def caller(system: str, user: str, schema: dict) -> tuple[str, dict]:
+            ids = schema["properties"]["ideas"]["items"]["properties"]["id"]["enum"]
+            seen.append(ids)
+            return json.dumps({"ideas": [idea_json(i) for i in ids]}), {"inputTokens": 1, "outputTokens": 1}
+        bk = brokers.Brokerage(seed, 30, caller=caller)
+        bk.refresh(brokers.build_context(seed, 30, 0, None, None, []), 0)
+        self.assertEqual(sorted(len(ids) for ids in seen), [brokers.BATCH, brokers.BATCH])
+        self.assertEqual(sorted(i for ids in seen for i in ids), sorted(b["id"] for b in brokers.ROSTER))
+        self.assertEqual(len(bk.calls), 2)
+        self.assertEqual({e["source"] for e in bk.book.values()}, {"haiku"})
+
     def test_slot_allocation_sums_to_n_with_floor(self) -> None:
         rng = random.Random(4)
         for n in (10, 11, 50, 200):
@@ -189,8 +208,17 @@ class BrokerTest(unittest.TestCase):
             slots = brokers.allocate_slots(weights, n)
             self.assertEqual(sum(slots.values()), n)
             self.assertTrue(all(k >= 1 for k in slots.values()))
+            floored = brokers.allocate_slots(weights, n, brokers.SLOT_FLOOR)
+            self.assertEqual(sum(floored.values()), n)
+            self.assertTrue(all(k >= min(brokers.SLOT_FLOOR, n // 10) for k in floored.values()))
         with self.assertRaises(ValueError):
             brokers.allocate_slots({"a": 1.0, "b": 1.0}, 1)
+        bk = brokers.Brokerage(fixture.build_seed(), 30)
+        for n in (11, 30, 50, 200):
+            slots = bk.slots(n)
+            self.assertEqual(sum(slots.values()) + bk.mm_slots, n)
+            self.assertGreaterEqual(bk.mm_slots, 1)
+            self.assertTrue(all(k >= min(brokers.SLOT_FLOOR, (n - bk.mm_slots) // len(slots)) for k in slots.values()))
         app = App()
         app.spawn({"n": 30})
         for _ in range(3):
@@ -200,8 +228,41 @@ class BrokerTest(unittest.TestCase):
                 if w["status"] == "live":
                     per[w["broker"]] = per.get(w["broker"], 0) + 1
             self.assertEqual(sum(per.values()), 30)
-            self.assertEqual(set(per), {b["id"] for b in brokers.ROSTER})
+            self.assertEqual(set(per) - {None}, {b["id"] for b in brokers.ROSTER})
+            self.assertGreater(per.get(None, 0), 0, "market maker slice missing")
             self.assertAlmostEqual(sum(w["price"] for w in out["board"] if w["status"] == "live"), 1.0, places=9)
+            self.assertTrue(all(b["slots"] >= brokers.SLOT_FLOOR for b in out["brokers"]))
+            self.assertLessEqual(len(out["observation"]["delisted"]), engine.MAX_DELIST_SHARE * 30)
+
+    def test_weights_normalise_and_recover(self) -> None:
+        seed = fixture.build_seed()
+        bk = brokers.Brokerage(seed, 30, brokers.ROSTER[:4])
+        ids = [b["id"] for b in brokers.ROSTER[:4]]
+        live = [{"broker": bid, "price": 0.25} for bid in ids]
+        bk.mark_prior(live)
+        decisive = [{"broker": ids[0], "price": 0.97}] + [{"broker": bid, "price": 0.01} for bid in ids[1:]]
+        bk.score(decisive)
+        weights = {bid: bk.book[bid]["weight"] for bid in ids}
+        self.assertAlmostEqual(sum(weights.values()), 1.0, places=9)
+        self.assertLess(max(weights.values()), 0.9)
+        self.assertGreaterEqual(min(weights.values()), brokers.UNIFORM_MIX / len(ids))
+        for _ in range(2):
+            bk.mark_prior([{"broker": bid, "price": 0.25} for bid in ids])
+            bk.score([{"broker": ids[1], "price": 0.97}] + [{"broker": b, "price": 0.01} for b in ids if b != ids[1]])
+        board = [row["id"] for row in bk.leaderboard()]
+        self.assertEqual(board[0], ids[1], "a broker that turns right should lead within two frames")
+
+    def test_idea_moves_only_viewed_dimensions(self) -> None:
+        donor = dict(fixture.TRUE_ASSUMPTIONS, alightPerBus=10, rainAtMin=12.0)
+        idea = {"movingShare": None, "touristFactor": None, "capacityScale": None, "busDelayMin": 7.5,
+                "rainAtMin": None, "event": None, "conviction": 1.0, "rationale": "x"}
+        a = brokers.assumptions_from_idea(idea, random.Random(1), 30, ["z0"], donor)
+        for k in ("movingShare", "touristFactor", "capacityScale", "alightPerBus", "walkPace", "rainAtMin"):
+            self.assertEqual(a[k], donor[k])
+        self.assertGreater(a["busDelayMin"], 6.5)
+        dry = brokers.assumptions_from_idea(dict(idea, busDelayMin=None, rainAtMin=brokers.DRY), random.Random(2),
+                                            30, ["z0"], donor)
+        self.assertIsNone(dry["rainAtMin"])
 
     def test_track_record_rises_for_the_true_idea(self) -> None:
         seed = fixture.build_seed()
@@ -214,6 +275,20 @@ class BrokerTest(unittest.TestCase):
         self.assertEqual(board[0]["id"], "B-TRUTH")
         self.assertGreater(board[0]["trackRecord"], 0.0)
         self.assertEqual(max(board, key=lambda b: b["slots"])["id"], "B-TRUTH")
+
+    def test_placed_event_survives_next_observation(self) -> None:
+        app = App()
+        app.spawn({"n": 30})
+        app.observe({"next": True})
+        zone = app.mv.zone_ids[0]
+        forked = set(app.intervene({"kind": "closure", "zoneId": zone, "atMin": 8})["forked"])
+        out = app.observe({"next": True})
+        live = {w["id"]: w for w in out["board"] if w["status"] == "live"}
+        kept = forked & set(live)
+        self.assertEqual(kept, forked, "every placed-event world survives its first observation")
+        self.assertTrue(all(live[i]["broker"] is None for i in kept))
+        self.assertTrue(all(any("closure" in label for label in live[i]["labels"]) for i in kept))
+        self.assertAlmostEqual(sum(w["price"] for w in live.values()), 1.0, places=9)
 
     def test_no_key_makes_zero_network_calls(self) -> None:
         with mock.patch("urllib.request.urlopen", side_effect=AssertionError("network")) as urlopen:

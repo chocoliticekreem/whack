@@ -25,6 +25,24 @@ MODEL_SD = 1.0
 BUS_SD_MIN = 2.0
 FORK_PRIOR = 0.5
 MAX_LIVE_FACTOR = 2
+# A sharp frame can price out most of the market at once; keep at least 40 % so lineages stay diverse.
+MAX_DELIST_SHARE = 0.6
+# Brokered refills jitter each knob by this fraction of the market's own price-weighted spread on it
+# (a shrunk kernel, as in Liu-West), so children stay inside the posterior and still explore it.
+KERNEL_H = 0.3
+KERNEL_MIN = 0.01
+# This share of market-maker children swap one random knob for a partner's, drawn from the previous
+# frame's market. A sharp frame (rain onset) can leave one lineage standing; recombining it with what the
+# market knew a frame earlier recovers the knobs that lineage happened to get wrong.
+CROSSOVER = 0.5
+ROUND = 5
+# With brokers on, likelihood delisting may use all but SPLIT_RESERVE of the per-frame delist budget; the
+# reserve recycles the cheapest worlds into neighbours of any world worth more than HEAVY, so one lucky
+# world cannot hold the market alone.
+SPLIT_RESERVE = 0.2
+HEAVY = 0.1
+# One in this many of a broker's refills tests its fresh idea (at least one per frame); the rest refine.
+FRESH_SHARE = 2
 
 
 def log_likelihood_counts(predicted: float, observed: float) -> float:
@@ -47,13 +65,21 @@ def normalise(log_weights: list[float]) -> list[float]:
     return [e / total for e in exp]
 
 
-def delist_mask(prices: list[float], fraction: float = DELIST_FRACTION) -> list[bool]:
-    """True = delist. The best world always survives, so the market never empties."""
+def delist_mask(prices: list[float], fraction: float = DELIST_FRACTION, max_share: float = 1.0,
+                protected: list[bool] | None = None) -> list[bool]:
+    """True = delist. The best world always survives, so the market never empties.
+
+    At most `max_share` of the worlds go in one frame (cheapest first); protected worlds never go.
+    """
     if not prices:
         return []
     threshold = fraction / len(prices)
     best = max(range(len(prices)), key=lambda i: prices[i])
-    return [p < threshold and i != best for i, p in enumerate(prices)]
+    keep = protected or [False] * len(prices)
+    cand = sorted((i for i, p in enumerate(prices) if p < threshold and i != best and not keep[i]),
+                  key=lambda i: prices[i])
+    kill = set(cand[: int(max_share * len(prices))])
+    return [i in kill for i in range(len(prices))]
 
 
 def systematic_resample(prices: list[float], k: int, rng: random.Random) -> list[int]:
@@ -70,6 +96,40 @@ def systematic_resample(prices: list[float], k: int, rng: random.Random) -> list
             i += 1
             cum += prices[i]
         out.append(i)
+    return out
+
+
+def allocate_refill(deficits: dict, k: int) -> dict:
+    """Split k new worlds among owners by how far each is under quota (largest remainder)."""
+    total = sum(deficits.values())
+    if k <= 0 or total <= 0:
+        return {o: 0 for o in deficits}
+    if total <= k:
+        return dict(deficits)
+    shares = {o: k * d / total for o, d in deficits.items()}
+    out = {o: int(v) for o, v in shares.items()}
+    for o in sorted(deficits, key=lambda o: -(shares[o] - out[o]))[: k - sum(out.values())]:
+        out[o] += 1
+    return out
+
+
+def _group(items: list[tuple[str | None, dict | None]]) -> dict[str | None, int]:
+    out: dict[str | None, int] = {}
+    for owner, _ in items:
+        out[owner] = out.get(owner, 0) + 1
+    return out
+
+
+def kernel_sds(ws: list[dict], horizon: int) -> dict[str, float]:
+    """KERNEL_H x the price-weighted sd of each knob across ws (floored at KERNEL_MIN of its range)."""
+    total = sum(w["price"] for w in ws) or 1.0
+    out = {}
+    for k, (lo, hi) in [*worlds.RANGES.items(), ("rainAtMin", (0.0, float(horizon)))]:
+        vals = [(w["price"], float(w["assumptions"][k])) for w in ws if w["assumptions"].get(k) is not None]
+        mass = sum(p for p, _ in vals) or total
+        mean = sum(p * v for p, v in vals) / mass if vals else 0.0
+        sd = math.sqrt(sum(p * (v - mean) ** 2 for p, v in vals) / mass) if vals else 0.0
+        out[k] = max(KERNEL_H * sd, KERNEL_MIN * (hi - lo))
     return out
 
 
@@ -104,6 +164,8 @@ class Multiverse:
         self.epochs = 0
         self.brokerage = brokerage
         self.placed_events: list[dict] = []
+        self.epoch_obs: list[tuple[int, dict[str, float], float | None]] = []
+        self.before: list[dict] = []
 
     def new_world(self, assumptions: dict, parent: dict | None, price: float, born: int) -> dict:
         t0 = time.perf_counter()
@@ -113,14 +175,14 @@ class Multiverse:
              "logWeight": math.log(price) if price > 0 else -math.inf, "history": [round(price, 5)],
              "assumptions": assumptions, "labels": worlds.describe(assumptions, self.zone_names),
              "run": run, "trail": [], "bornAtObs": born, "delistReason": None,
-             "broker": parent.get("broker") if parent else None,
+             "broker": parent.get("broker") if parent else None, "protectedUntilObs": 0,
              "simMs": round((time.perf_counter() - t0) * 1000, 1)}
         self.next_ticker += 1
         return w
 
     def spawn(self) -> None:
         t0 = time.perf_counter()
-        self.worlds, self.observations = [], []
+        self.worlds, self.observations, self.epoch_obs = [], [], []
         if self.brokerage:
             self.spawn_brokered()
             self.spawn_ms = round((time.perf_counter() - t0) * 1000)
@@ -132,20 +194,40 @@ class Multiverse:
         self.spawn_ms = round((time.perf_counter() - t0) * 1000)
 
     def spawn_brokered(self) -> None:
-        """Every broker gets slots (at least one each, so N is raised to the roster size if needed)."""
+        """The market maker's slice is drawn from the prior; every broker gets its floor of slots or more."""
         bk = self.brokerage
-        self.n = max(self.n, len(bk.roster))
+        self.n = max(self.n, len(bk.roster) + 1)
         ideas = bk.refresh(self.broker_context(0, None, None), 0)
-        for bid, k in bk.slots(self.n).items():
+        slots = bk.slots(self.n)
+        for _ in range(bk.mm_slots):
+            a = worlds.sample_assumptions(random.Random(self.rng.random()), self.horizon, self.zone_ids)
+            self.worlds.append(self.new_world(a, None, 1.0 / self.n, 0))
+        for bid, k in slots.items():
             for _ in range(k):
-                a = brokers.assumptions_from_idea(ideas[bid], random.Random(self.rng.random()), self.horizon, self.zone_ids)
+                rng = random.Random(self.rng.random())
+                donor = worlds.sample_assumptions(rng, self.horizon, self.zone_ids)
+                a = brokers.assumptions_from_idea(ideas[bid], rng, self.horizon, self.zone_ids, donor)
                 w = self.new_world(a, None, 1.0 / self.n, 0)
                 w["broker"] = bid
                 self.worlds.append(w)
         bk.mark_prior(self.live())
 
     def broker_context(self, minute: int, readings: dict[str, float] | None, bus_delay: float | None) -> dict:
-        return brokers.build_context(self.seed, self.horizon, minute, readings, bus_delay, self.placed_events)
+        bus_seen = [o["busDelayMin"] for o in self.observations if o.get("busDelayMin") is not None]
+        if bus_delay is not None:
+            bus_seen.append(bus_delay)
+        return brokers.build_context(self.seed, self.horizon, minute, readings, bus_delay, self.placed_events,
+                                     bus_seen, self.market_view(minute) if self.worlds else None)
+
+    def market_view(self, minute: int) -> dict:
+        """Price-weighted means of the assumptions: what the market currently believes."""
+        live = self.live()
+        total = sum(w["price"] for w in live) or 1.0
+        view = {k: round(sum(w["price"] * float(w["assumptions"][k]) for w in live) / total, 2)
+                for k in brokers.IDEA_KEYS}
+        rain = sum(w["price"] for w in live if w["assumptions"].get("rainAtMin") is not None)
+        view["rainChance"] = round(rain / total, 2)
+        return view
 
     def live(self) -> list[dict]:
         return [w for w in self.worlds if w["status"] == "live"]
@@ -169,6 +251,17 @@ class Multiverse:
                           "ll": log_likelihood_bus(assumed, bus_delay)})
         return sum(p["ll"] for p in parts), parts
 
+    def recombine(self, a: dict, rng: random.Random) -> dict:
+        if rng.random() >= CROSSOVER:
+            return a
+        partner = self.before[systematic_resample([w["price"] for w in self.before], 1, rng)[0]]["assumptions"]
+        knob = rng.choice(list(worlds.RANGES))
+        return a | {knob: partner[knob]}
+
+    def history_loglik(self, w: dict) -> float:
+        """Log-likelihood of everything seen this epoch under w's forecast (as if it had been live all along)."""
+        return sum(self.world_loglik(w, m, r, b)[0] for m, r, b in self.epoch_obs)
+
     def observe(self, ts_ms: int, readings: dict[str, float], bus_delay: float | None = None) -> dict:
         minute = self.minute_of(ts_ms)
         live = self.live()
@@ -178,6 +271,8 @@ class Multiverse:
             obs = {"index": obs_index, "ts": ts_ms, "minute": minute, "compared": 0, "delisted": [], "spawned": []}
             self.observations.append(obs)
             return obs
+        self.epoch_obs.append((minute, {c: readings[c] for c in compared}, bus_delay))
+        self.before = [{"price": w["price"], "assumptions": w["assumptions"]} for w in live]
         for w in live:
             ll, parts = self.world_loglik(w, minute, readings, bus_delay)
             w["logWeight"] += ll
@@ -186,7 +281,9 @@ class Multiverse:
         self.reprice(live)
         if self.brokerage:
             self.brokerage.score(live)
-        mask = delist_mask([w["price"] for w in live])
+        share = MAX_DELIST_SHARE - SPLIT_RESERVE if self.brokerage else MAX_DELIST_SHARE
+        mask = delist_mask([w["price"] for w in live], max_share=share,
+                           protected=[w["protectedUntilObs"] >= obs_index for w in live])
         delisted = []
         for w, kill in zip(live, mask):
             if kill:
@@ -198,7 +295,8 @@ class Multiverse:
         survivors = self.live()
         self.reprice(survivors)
         if self.brokerage:
-            spawned, cut = self.rebalance(obs_index, minute, readings, bus_delay)
+            spawned, cut = self.rebalance(obs_index, minute, readings, bus_delay,
+                                          int(MAX_DELIST_SHARE * len(live)) - len(delisted))
             delisted += cut
         else:
             spawned = self.resample(survivors, obs_index)
@@ -247,57 +345,138 @@ class Multiverse:
         return spawned
 
     def rebalance(self, obs_index: int, minute: int, readings: dict[str, float],
-                  bus_delay: float | None) -> tuple[list[str], list[str]]:
-        """TOPS step: fresh ideas, slots by track record; trim the cheapest worlds or spawn new ones.
+                  bus_delay: float | None, cut_budget: int) -> tuple[list[str], list[str]]:
+        """TOPS step. Prices stay pure likelihood; brokers only decide where the refill worlds go.
 
-        Spawned worlds share their broker's surviving mass with its kept worlds (as children split a
-        parent's price). A broker with no surviving mass seeds its new worlds at twice the delist line,
-        so one good idea can recover.
+        Slots: a market-maker slice plus a track-record split among brokers (with a floor). An owner over
+        its quota loses its cheapest below-average worlds (never protected ones, at most `cut_budget`).
+        The refill goes to owners under quota. Market-maker refills resample the whole market by price
+        (a plain particle filter); a broker's refills mostly refine its own best worlds (or the market's,
+        if none of its own is worth at least an even share) and at least one starts from a world drawn
+        from the posterior. Every broker child carries the broker's current idea, which moves only the
+        knobs the broker has a view on.
+        A newborn world is priced on everything seen this epoch, as if it had been live all along (the
+        prior is flat, so price = likelihood); a child that fixes a knob the latest frames barely test
+        (bus delay) or that a sharp frame got wrong is valued on all of the evidence at once.
         """
         bk = self.brokerage
         ideas = bk.refresh(self.broker_context(minute, readings, bus_delay), obs_index)
-        slots = bk.slots(self.n)
-        by_broker: dict[str, list[dict]] = {bid: [] for bid in slots}
-        for w in self.live():
-            by_broker.setdefault(w.get("broker"), []).append(w)
-        spawned, cut = [], []
-        for bid, mine in by_broker.items():
-            mine.sort(key=lambda w: -w["price"])
-            k = slots.get(bid, 0)
-            for w in mine[k:]:
+        quota: dict[str | None, int] = {None: 0, **bk.slots(self.n)}
+        quota[None] = bk.mm_slots
+        survivors = self.live()
+        owned: dict[str | None, list[dict]] = {o: [] for o in quota}
+        for w in survivors:
+            owned.setdefault(w.get("broker") if w.get("broker") in quota else None, []).append(w)
+        average = 1.0 / max(len(survivors), 1)
+        cut: list[str] = []
+        for owner, mine in owned.items():
+            spare = sorted((w for w in mine if w["protectedUntilObs"] < obs_index and w["price"] < average),
+                           key=lambda w: w["price"])
+            for w in spare[: max(0, len(mine) - quota[owner])]:
+                if len(cut) >= cut_budget - int(SPLIT_RESERVE * self.n):
+                    break
                 w["status"], w["price"], w["delistedAtObs"] = "delisted", 0.0, obs_index
-                persona = bk.book[bid]["persona"] if bid in bk.book else "unbrokered"
-                w["delistReason"] = f"slot cut: {persona} track record {bk.book.get(bid, {}).get('trackRecord', 0):+.2f}"
+                name = bk.book[owner]["persona"] if owner in bk.book else "market maker"
+                track = bk.book[owner]["trackRecord"] if owner in bk.book else 0.0
+                w["delistReason"] = f"slot cut: {name} track record {track:+.2f}"
                 cut.append(w["id"])
-            kept = mine[:k]
-            need = k - len(kept)
-            if need <= 0:
+            owned[owner] = [w for w in mine if w["status"] == "live"]
+        survivors = self.live()
+        self.reprice(survivors)
+        deficits = {o: max(0, quota[o] - len(owned[o])) for o in quota}
+        refill = allocate_refill(deficits, self.n - len(survivors))
+        own: list[tuple[str | None, dict | None]] = []
+        market: list[tuple[str | None, dict | None]] = []
+        for owner, k in refill.items():
+            if k <= 0:
                 continue
-            total = len(kept) + need
-            mass = sum(w["price"] for w in kept) or need * 2 * DELIST_FRACTION / self.n
-            for w in kept:
-                w["price"] *= len(kept) / total
-            # Half the new slots refine the broker's best surviving worlds, half test its fresh idea.
-            refine = systematic_resample([w["price"] for w in kept], need // 2, self.rng) if kept else []
-            for j in range(need):
-                rng = random.Random(self.rng.random())
-                parent = kept[refine[j]] if j < len(refine) else (kept[0] if kept else None)
-                a = (worlds.jitter_assumptions(parent["assumptions"], rng, self.horizon, self.zone_ids) if j < len(refine)
-                     else brokers.assumptions_from_idea(ideas[bid], rng, self.horizon, self.zone_ids))
-                child = self.new_world(a, parent, mass / total, obs_index)
-                child["broker"] = bid
-                self.worlds.append(child)
-                spawned.append(child["id"])
+            idea = ideas.get(owner) if owner is not None else None
+            fresh = 0 if owner is None else max(1, k // FRESH_SHARE)
+            mine = owned[owner]
+            if owner is None or not any(w["price"] >= 1.0 / self.n for w in mine):
+                market += [(owner, idea)] * (k - fresh)
+            else:
+                own += [(owner, idea)] * (k - fresh)
+            if fresh:
+                market += [(owner, idea)] * fresh
+        # Market draws go in small rounds, each resampling the market after the last round's children are
+        # priced, so a world that a newborn just discovered gets children in the same frame.
+        self.rng.shuffle(market)
+        spawned = self.spawn_round(own, owned, market[:ROUND], obs_index)
+        for i in range(ROUND, len(market), ROUND):
+            spawned += self.spawn_round([], owned, market[i:i + ROUND], obs_index)
+        scale = 1.0
+        while len(cut) < cut_budget:
+            live = self.live()
+            self.reprice(live)
+            heavy = max(live, key=lambda w: w["price"])
+            spare = [w for w in live if w["protectedUntilObs"] < obs_index and w["bornAtObs"] < obs_index]
+            if heavy["price"] <= HEAVY or not spare:
+                break
+            cheap = min(spare, key=lambda w: w["price"])
+            cheap["status"], cheap["price"], cheap["delistedAtObs"] = "delisted", 0.0, obs_index
+            cheap["delistReason"] = f"recycled: room for worlds near {heavy['id']} ({heavy['price']:.0%} of the market)"
+            cut.append(cheap["id"])
+            child = self.spawn_near(heavy, obs_index, scale)
+            spawned.append(child["id"])
+            gap = child["logWeight"] - heavy["logWeight"]
+            scale = scale / 2 if gap < -2 else min(1.0, scale * 1.5) if gap > -0.5 else scale
         live = self.live()
-        for w in live:
-            w["logWeight"] = math.log(w["price"]) if w["price"] > 0 else -math.inf
         self.reprice(live)
         bk.mark_prior(live)
         return spawned, cut
 
+    def spawn_near(self, parent: dict, obs_index: int, scale: float) -> dict:
+        """One market-maker child of `parent` from the kernel (times `scale`), priced on the whole epoch."""
+        live = self.live()
+        rng = random.Random(self.rng.random())
+        sds = {k: v * scale for k, v in kernel_sds(live, self.horizon).items()}
+        a = worlds.jitter_assumptions(parent["assumptions"], rng, self.horizon, self.zone_ids, sds)
+        child = self.new_world(a, parent, 0.0, obs_index)
+        child["broker"] = None
+        child["logWeight"] = self.history_loglik(child) + parent["logWeight"] - self.history_loglik(parent)
+        self.worlds.append(child)
+        return child
+
+    def spawn_round(self, own: list[tuple[str | None, dict | None]], owned: dict,
+                    market: list[tuple[str | None, dict | None]], obs_index: int) -> list[str]:
+        """Children for `own` (parent from the owner's lineage) and `market` (parent from the whole market).
+
+        Each child is priced on the whole epoch's evidence, plus its parent's offset (event priors)."""
+        live = self.live()
+        self.reprice(live)
+        sds = kernel_sds(live, self.horizon)
+        plans: list[tuple[dict, str | None, dict | None]] = []
+        for owner, group in _group(own).items():
+            mine = [w for w in owned[owner] if w["status"] == "live"]
+            idea = next(i for o, i in own if o == owner)
+            plans += [(mine[i], owner, idea) for i in systematic_resample([w["price"] for w in mine], group, self.rng)]
+        picks = systematic_resample([w["price"] for w in live], len(market), self.rng)
+        order = list(range(len(market)))
+        self.rng.shuffle(order)
+        plans += [(live[picks[j]], market[i][0], market[i][1]) for j, i in enumerate(order)]
+        spawned = []
+        for parent, owner, idea in plans:
+            rng = random.Random(self.rng.random())
+            a = worlds.jitter_assumptions(parent["assumptions"], rng, self.horizon, self.zone_ids, sds)
+            if owner is None and self.before:
+                a = self.recombine(a, rng)
+            if idea is not None:
+                a = brokers.assumptions_from_idea(idea, rng, self.horizon, self.zone_ids, a)
+            child = self.new_world(a, parent, 0.0, obs_index)
+            child["broker"] = owner
+            child["logWeight"] = self.history_loglik(child) + parent["logWeight"] - self.history_loglik(parent)
+            self.worlds.append(child)
+            spawned.append(child["id"])
+        return spawned
+
     def intervene(self, kind: str, zone_id: str, at_min: float, note: str | None = None,
                   prior: float = FORK_PRIOR) -> list[str]:
-        """Fork every live world: a child with the event takes `prior` of the parent's price."""
+        """Fork every live world: a child with the event takes `prior` of the parent's price.
+
+        Forked worlds belong to the market maker and survive the next observation whatever it shows;
+        after that only likelihood prices them out.
+        """
         if zone_id not in self.zone_names:
             raise ValueError(f"unknown zone {zone_id}")
         if kind not in ("closure", "incident", "event", "weather"):
@@ -309,6 +488,8 @@ class Multiverse:
         for parent in live:
             a = dict(parent["assumptions"], events=list(parent["assumptions"].get("events", [])) + [event])
             child = self.new_world(a, parent, parent["price"] * prior, len(self.observations))
+            child["broker"] = None
+            child["protectedUntilObs"] = len(self.observations) + 1
             parent["price"] *= 1 - prior
             parent["logWeight"] = math.log(parent["price"]) if parent["price"] > 0 else -math.inf
             self.worlds.append(child)
@@ -318,6 +499,7 @@ class Multiverse:
     def roll(self, new_seed: dict) -> None:
         """Past the horizon: re-run every live world from the new epoch, keeping prices and lineage."""
         self.seed = new_seed
+        self.epoch_obs = []
         for w in self.live():
             w["run"] = worlds.run_world(new_seed, w["assumptions"], self.horizon, self.crn_seed)
         self.epochs += 1

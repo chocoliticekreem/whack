@@ -12,7 +12,8 @@ and the survivors spawn jittered children so N stay live.
 | Price = normalised posterior; delist below `0.1 / N`; systematic resampling refills to N; a parent splits its price with its children | `engine.Multiverse.observe` |
 | Explanation trail: per-observation log-likelihood and the worst camera; delist reason in words | `world.trail`, `world.delistReason` |
 | Place an event: every live world forks a child with the Predict intervention (`closure`/`incident`/`event`/`weather`), prior 50 % | `engine.Multiverse.intervene` |
-| Persona brokers (TOPS clone, on by default): 10 personas each submit an idea (set-off share, tourists, pavement capacity, bus delay, rain onset, optional event) + conviction + rationale; worlds are centred on it and spread by (1 - conviction); P&L = log(posterior mass / prior mass); track record = decayed sum (0.7); slots = softmax of track records, at least 1 world per broker | `brokers.py`, `engine.Multiverse.rebalance` |
+| Persona brokers (TOPS clone, on by default): 10 personas each submit an idea (views on set-off share, tourists, pavement capacity, bus delay, rain onset or dry, optional event; null = no view) + conviction + rationale. A broker world is a world drawn from the market nudged toward the idea on the viewed knobs only. P&L = capped log((posterior mass + 0.01) / (prior mass + 0.01)); track record = decayed sum (0.5); weight = 0.8 x softmax(track / 1.5) + 0.2 uniform; slots: 25 % market maker, the rest by weight with a floor of 2 per broker | `brokers.py`, `engine.Multiverse.rebalance` |
+| With brokers on, prices stay pure likelihood: a newborn world is priced on everything seen this epoch (flat prior), so brokers only decide where worlds spawn. The market maker is a plain particle filter (kernel = 0.3 x the market's spread per knob, one-knob recombination with the previous frame). Refills spawn in rounds of 5 so a fresh discovery gets neighbours in the same frame; at most 60 % of worlds go per frame, 20 % of that reserved to recycle the cheapest worlds into neighbours of any world above 10 % of the market. Placed events belong to the market maker and survive their first observation | `engine.Multiverse.rebalance`, `spawn_round`, `history_loglik` |
 | Past the horizon: re-seed from the latest counts and re-run live worlds (prices and lineage kept) | `engine.reseed`, `Multiverse.roll` |
 
 ## Run
@@ -21,6 +22,7 @@ and the survivors spawn jittered children so N stay live.
 python3 services/multiverse/server.py            # :8049, replay on the fixture by default
 python3 services/multiverse/demo.py 3 50         # CLI: spawn 50 -> 3 observations -> board
 python3 services/multiverse/demo.py 3 50 --brokers  # same, with the broker leaderboard each frame
+python3 services/multiverse/eval.py 5 50            # quality bar: brokers off vs on over 5 seeds (offline)
 python3 -m unittest discover -s services/multiverse
 python3 services/multiverse/fixture.py           # regenerate the synthetic fixture
 ```
@@ -31,7 +33,7 @@ Env (names only): `MULTIVERSE_PORT` (8049), `MULTIVERSE_CORS_ORIGIN`, `TWIN_URL`
 `http://localhost:3047`), `MULTIVERSE_SEED` (a seed JSON for replaying recorded data), `MULTIVERSE_RAW`
 (recorder root, default `data/raw` when `MULTIVERSE_SEED` is set), `MULTIVERSE_CAM_SOURCES`,
 `MULTIVERSE_BUS_SOURCES` (comma lists of recorder source names), `ANTHROPIC_API_KEY` (broker ideas
-from Claude Haiku 4.5, one batched call per observation; read from the env or the repo / main-checkout
+from Claude Haiku 4.5, two concurrent calls of 5 brokers per observation; read from the env or the repo / main-checkout
 `.env`; without it the rules brokers answer and nothing touches the network).
 
 ## Modes

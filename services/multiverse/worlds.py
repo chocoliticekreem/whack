@@ -58,15 +58,17 @@ def sample_assumptions(rng: random.Random, horizon: int, zone_ids: list[str]) ->
 
 
 def jitter_assumptions(parent: dict[str, Any], rng: random.Random, horizon: int,
-                       zone_ids: list[str]) -> dict[str, Any]:
+                       zone_ids: list[str], sds: dict[str, float] | None = None) -> dict[str, Any]:
+    """A child near its parent. `sds` overrides the kernel per knob (and for rainAtMin), absolute units."""
     child = copy.deepcopy(parent)
+    sds = sds or {}
     for k, (lo, hi) in RANGES.items():
-        child[k] = round(min(hi, max(lo, parent[k] + rng.gauss(0, JITTER_SD * (hi - lo)))), 3)
+        child[k] = round(min(hi, max(lo, parent[k] + rng.gauss(0, sds.get(k, JITTER_SD * (hi - lo))))), 3)
     child["alightPerBus"] = round(child["alightPerBus"])
     if rng.random() < FLIP_PROB:
         child["rainAtMin"] = None if parent["rainAtMin"] is not None else round(rng.uniform(0, horizon * 0.8), 1)
     elif child["rainAtMin"] is not None:
-        child["rainAtMin"] = round(min(horizon, max(0.0, child["rainAtMin"] + rng.gauss(0, 2.0))), 1)
+        child["rainAtMin"] = round(min(horizon, max(0.0, child["rainAtMin"] + rng.gauss(0, sds.get("rainAtMin", 2.0)))), 1)
     if rng.random() < FLIP_PROB / 2 and zone_ids:
         child["incident"] = None if parent["incident"] else {"zoneId": rng.choice(zone_ids),
                                                              "atMin": round(rng.uniform(0, horizon * 0.6), 1)}

@@ -25,12 +25,12 @@ def show(state: dict, top: int = 6) -> None:
 
 def show_brokers(app: App) -> None:
     info = app.brokers()
-    call = info["calls"][-1] if info["calls"] else None
-    if call:
+    latest = [c for c in info["calls"] if c["obs"] == info["calls"][-1]["obs"]] if info["calls"] else []
+    for call in latest:
         print(f"  brokers via {call['model']}: {call.get('ms')} ms, {call.get('inputTokens')} in / "
-              f"{call.get('outputTokens')} out tokens, rules fallbacks {len(call['fallbacks'])}"
+              f"{call.get('outputTokens')} out tokens, rules fallbacks {len(call['fallbacks'])}/{len(call['brokers'])}"
               + (f", errors {call['errors'][:2]}" if call.get("errors") else ""))
-    else:
+    if not latest:
         print("  brokers via rules (no ANTHROPIC_API_KEY)")
     print(f"   {'broker':<11} {'persona':<36} {'track':>7} {'weight':>6} {'slots':>5} {'conv':>5}  pnl")
     for b in info["brokers"]:
