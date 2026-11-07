@@ -1,5 +1,6 @@
-"""City markets HTTP API (stdlib) on :8051 (CITY_PORT). Contract: GET /hotspots /traders /markets /leaderboard
-/stats, POST /settle /bet /score. Live by default; --replay-from <ISO> fakes "now" from recorded data at 12x.
+"""City markets HTTP API (stdlib) on :8051 (CITY_PORT). Contract: GET /hotspots /traders /markets /round
+/leaderboard /stats, POST /settle /bet /score. Live by default; --replay-from <ISO> fakes "now" from recorded
+data at 12x.
 
     python3 services/city/server.py
     python3 services/city/server.py --replay-from 2026-11-07T14:00:00Z
@@ -77,7 +78,7 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path.rstrip("/")
         routes = {"/health": lambda: {"ok": True, "live": EX.clock.live, "now": EX.clock.now()},
                   "/hotspots": EX.hotspots_json, "/traders": EX.traders_json, "/markets": EX.markets_json,
-                  "/leaderboard": EX.leaderboard, "/stats": EX.stats_json}
+                  "/leaderboard": EX.leaderboard, "/stats": EX.stats_json, "/round": EX.round_json}
         if path in routes:
             self.run(routes[path])
         else:

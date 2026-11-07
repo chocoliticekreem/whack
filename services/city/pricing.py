@@ -16,7 +16,6 @@ STEP_CAP = 2.5
 P_FLOOR, P_CEIL = 0.03, 0.97
 LMSR_B = 1200.0
 FEE = 0.05
-GOOD_SERVICE = 10
 MIN_MS = 60_000
 
 
@@ -60,45 +59,6 @@ def fit_log_walk(series: list[tuple[int, float]], default_sigma: float, floor: f
     return max(-sigma / 5, min(sigma / 5, drift)), sigma
 
 
-def fit_counts(series: list[tuple[int, float]]) -> tuple[float, float, int]:
-    """(change probability per minute, sigma of log(1+people) on a change, changes seen)."""
-    minutes, changes, sizes = 0.0, 0, []
-    for (t0, v0), (t1, v1) in zip(series, series[1:]):
-        gap = (t1 - t0) / MIN_MS
-        if gap <= 0 or gap > 10:
-            continue
-        minutes += gap
-        if v1 != v0:
-            changes += 1
-            sizes.append(math.log1p(v1) - math.log1p(v0))
-    if minutes < 20 or changes < 3:
-        return 0.08, 0.4, changes
-    sigma = min(1.0, max(0.15, statistics.pstdev(sizes) if len(sizes) > 1 else 0.4))
-    return min(0.9, changes / minutes), sigma, changes
-
-
-def fit_line_hazards(history: list[tuple[int, dict]], modes: tuple[str, ...] = ("tube",)) -> tuple[float, float]:
-    """(worsening hazard per line-minute, recovery-to-Good-Service hazard per delayed-line-minute)."""
-    exposure = delayed = 0.0
-    worse = recover = 0
-    for (t0, a), (t1, b) in zip(history, history[1:]):
-        gap = (t1 - t0) / MIN_MS
-        if gap <= 0 or gap > 10:
-            continue
-        for lid, s0 in a.items():
-            s1 = b.get(lid)
-            if s1 is None or s0["mode"] not in modes:
-                continue
-            exposure += gap
-            if s0["sev"] != GOOD_SERVICE:
-                delayed += gap
-                if s1["sev"] == GOOD_SERVICE:
-                    recover += 1
-            if s1["sev"] < s0["sev"]:
-                worse += 1
-    return (worse + 0.5) / (exposure + 120), (recover + 0.5) / (delayed + 60)
-
-
 # ---------------------------------------------------------------- simulators
 
 
@@ -130,180 +90,67 @@ class CrowdSim:
         return max(errs) if errs else None
 
 
-class CountSim:
-    """Over/under: sticky integer people counts; each minute the count changes with the fitted probability.
-    The line is set after the futures run (see choose_line)."""
-
-    tol = 0.5
-
-    def __init__(self, cam: str, v0: float, p_change: float, sigma: float, t0: int, minutes: int,
-                 rng: random.Random):
-        self.cam, self.line, self.t0, self.m = cam, 0.0, t0, minutes
-        self.paths = []
-        for _ in range(N_FUTURES):
-            v, path = v0, [v0]
-            for _ in range(minutes):
-                if rng.random() < p_change:
-                    v = max(0.0, float(round(math.expm1(math.log1p(v) + sigma * capped_gauss(rng)))))
-                path.append(v)
-            self.paths.append(path)
-
-    def finals(self) -> list[float]:
-        return [p[-1] for p in self.paths]
-
-    def outcome(self, i: int) -> str:
-        return "over" if self.paths[i][-1] > self.line else "under"
-
-    def error(self, i: int, ts: int, snap: dict) -> float | None:
-        if self.cam not in snap:
-            return None
-        k = max(0, min(self.m, round((ts - self.t0) / MIN_MS)))
-        return abs(snap[self.cam] - self.paths[i][k])
-
-
-class BusSim(CountSim):
-    """Over/under buses due at a hotspot's stops: each minute the count either holds (fitted persistence) or is
-    redrawn from today's real counts at those stops."""
-
-    def __init__(self, spot: str, c0: float, hold: float, pool: list[float], t0: int, minutes: int,
-                 rng: random.Random):
-        self.cam, self.line, self.t0, self.m = spot, 0.0, t0, minutes
-        self.paths = []
-        for _ in range(N_FUTURES):
-            v, path = c0, [c0]
-            for _ in range(minutes):
-                if rng.random() >= hold:
-                    v = rng.choice(pool)
-                path.append(v)
-            self.paths.append(path)
-
-
 class LevelSim(CrowdSim):
-    """Over/under one station's % of usual: the CrowdSim walk for a single station, settled against a line (%)."""
+    """Bracket ladder on one station's % of usual: the CrowdSim walk for a single station."""
 
     def __init__(self, station: tuple[str, str, float, float, float], t0: int, minutes: int, rng: random.Random):
         super().__init__([station], t0, minutes, rng)
-        self.line = 0.0
+        self.edges: list[float] = []
 
     def finals(self) -> list[float]:
         return [math.exp(p[0][-1]) * 100 for p in self.paths]
 
     def outcome(self, i: int) -> str:
-        return "over" if math.exp(self.paths[i][0][-1]) * 100 > self.line else "under"
+        return bracket_of(math.exp(self.paths[i][0][-1]) * 100, self.edges)
 
 
-def choose_line(finals: list[float], step: float = 1.0) -> float:
-    """Kalshi-style strike: start at the futures' median (rounded to the grid), then take the grid line whose
-    over/under split is closest to 50/50 ('over' = strictly above). Ties keep the line nearest the median."""
+MIN_BRACKET = 0.08
+FLOOR_BRACKET = 0.05
+TARGET_FAVOURITE = 0.40
+
+
+def bracket_of(value: float, edges: list[float]) -> str:
+    """'b0'..'bN': lower edges inclusive, upper exclusive (value == edge goes to the bracket above)."""
+    return f"b{sum(value >= e for e in edges)}"
+
+
+def bracket_probs(finals: list[float], edges: list[float]) -> list[float]:
+    counts = {f"b{k}": 0 for k in range(len(edges) + 1)}
+    for v in finals:
+        counts[bracket_of(v, edges)] += 1
+    return list(smooth(counts).values())
+
+
+def placement_score(finals: list[float], edges: list[float]) -> tuple[bool, bool, float, float]:
+    """Lower is better. No bracket under 5%; then a favourite in a middle bracket (a ladder centred on the best
+    guess, not 'Under/Over' tails); then every bracket at or above 8% (else the smallest shortfall); then a
+    favourite nearest 40%: a clear best guess without a lock (a flat 25/25/25/25 ladder is a lottery)."""
+    probs = bracket_probs(finals, edges)
+    outer = probs.index(max(probs)) in (0, len(probs) - 1)
+    return (min(probs) < FLOOR_BRACKET, outer, round(max(0.0, MIN_BRACKET - min(probs)), 6),
+            round(abs(max(probs) - TARGET_FAVOURITE), 6))
+
+
+def place_pct_brackets(finals: list[float], widths: tuple[float, ...]) -> list[float]:
+    """Three equal-width edges (four brackets) around the futures' median, on whole numbers (half points only for
+    the 0.5-wide ladder of a very quiet station). Ties go to the wider, rounder width."""
     med = statistics.median(finals)
-    base = round(med / step) * step
-    best, best_gap = base, 2.0
-    for k in range(-4, 5):
-        line = round(base + k * step, 6)
-        if line < 0:
-            continue
-        over = sum(v > line for v in finals) / len(finals)
-        gap = abs(over - 0.5)
-        if gap < best_gap - 1e-9 or (abs(gap - best_gap) < 1e-9 and abs(line - med) < abs(best - med)):
-            best, best_gap = line, gap
-    return best
+    best = None
+    for w in widths:
+        grid = min(w, 1)
+        base = round(med / grid) * grid
+        for k in range(-8, 9):
+            mid = base + k * grid
+            edges = [round(mid - w, 6), round(mid, 6), round(mid + w, 6)]
+            if edges[0] < grid:
+                continue
+            score = (*placement_score(finals, edges), -w)
+            if best is None or score < best[0]:
+                best = (score, edges)
+    return best[1]
 
 
-def fit_hold(series: list[tuple[int, float]]) -> tuple[float, list[float]]:
-    """(per-minute chance a count holds beyond what independent redraws would give, the pool of real counts)."""
-    pool = [v for _, v in series]
-    if len(pool) < 10:
-        return 0.5, pool or [0.0]
-    same = [v1 == v0 for (t0, v0), (t1, v1) in zip(series, series[1:]) if 0 < t1 - t0 <= 2 * MIN_MS]
-    q = sum(same) / len(same) if same else 0.5
-    counts: dict[float, int] = {}
-    for v in pool:
-        counts[v] = counts.get(v, 0) + 1
-    s = sum((c / len(pool)) ** 2 for c in counts.values())
-    hold = (q - s) / (1 - s) if s < 1 else 0.95
-    return max(0.0, min(0.95, hold)), pool
-
-
-class LineAnySim:
-    """Any Tube line worse at T than at open: count of lines worse than baseline, per minute."""
-
-    tol = 0.5
-
-    def __init__(self, baseline: dict[str, int], lam_w: float, lam_r: float, t0: int, minutes: int,
-                 rng: random.Random):
-        self.baseline, self.t0, self.m = baseline, t0, minutes
-        self.paths = []
-        for _ in range(N_FUTURES):
-            worse, path = 0, [0]
-            for _ in range(minutes):
-                worse += sum(rng.random() < lam_w for _ in range(len(baseline) - worse))
-                worse -= sum(rng.random() < lam_r for _ in range(worse))
-                path.append(worse)
-            self.paths.append(path)
-
-    def outcome(self, i: int) -> str:
-        return "yes" if self.paths[i][-1] > 0 else "no"
-
-    def error(self, i: int, ts: int, snap: dict) -> float | None:
-        obs = any(snap[lid]["sev"] < sev for lid, sev in self.baseline.items() if lid in snap)
-        k = max(0, min(self.m, round((ts - self.t0) / MIN_MS)))
-        return 0.0 if (self.paths[i][k] > 0) == obs else 1.0
-
-
-class LineOneSim:
-    """One delayed line back to Good Service at T."""
-
-    tol = 0.5
-
-    def __init__(self, line: str, lam_r: float, lam_w: float, t0: int, minutes: int, rng: random.Random):
-        self.line, self.t0, self.m = line, t0, minutes
-        self.paths = []
-        for _ in range(N_FUTURES):
-            good, path = False, [False]
-            for _ in range(minutes):
-                good = (rng.random() >= lam_w) if good else (rng.random() < lam_r)
-                path.append(good)
-            self.paths.append(path)
-
-    def outcome(self, i: int) -> str:
-        return "yes" if self.paths[i][-1] else "no"
-
-    def error(self, i: int, ts: int, snap: dict) -> float | None:
-        if self.line not in snap:
-            return None
-        k = max(0, min(self.m, round((ts - self.t0) / MIN_MS)))
-        return 0.0 if self.paths[i][k] == (snap[self.line]["sev"] == GOOD_SERVICE) else 1.0
-
-
-SLOT_MS = 15 * MIN_MS
 RAIN_MM = 0.1
-
-
-def slot_rain_prob(fc_mm: float | None, now_mm: float | None, current: bool) -> float:
-    if current and now_mm is not None and now_mm > RAIN_MM:
-        return 0.95
-    if fc_mm is None:
-        return 0.05
-    return 0.8 if fc_mm > RAIN_MM else 0.25 if fc_mm > 0 else 0.03
-
-
-class RainSim:
-    """Rain before T: each 15-min Open-Meteo slot in [open, T] is wet or dry, odds from its forecast."""
-
-    tol = 0.5
-
-    def __init__(self, slot_probs: dict[int, float], t0: int, minutes: int, rng: random.Random):
-        self.t0, self.m = t0, minutes
-        self.paths = [{slot: rng.random() < p for slot, p in slot_probs.items()} for _ in range(N_FUTURES)]
-
-    def outcome(self, i: int) -> str:
-        return "yes" if any(self.paths[i].values()) else "no"
-
-    def error(self, i: int, ts: int, snap: dict) -> float | None:
-        slot = ts - ts % SLOT_MS
-        if slot not in self.paths[i]:
-            return None
-        return 0.0 if self.paths[i][slot] == (snap["mm"] > RAIN_MM) else 1.0
 
 
 # ---------------------------------------------------------------- particle filter + LMSR

@@ -1,29 +1,25 @@
-"""The exchange: a rolling book of 3-5 open city markets, AI traders, player bets (LMSR), settlement, scores."""
+"""The exchange: 5-minute rounds of recurring city series, AI traders, player bets (LMSR), settlement, scores."""
 from __future__ import annotations
 
-import random
 import time
 
 import markets as mk
 import pricing
 import traders
-from data import SOURCES, STALE_S, Store, load_hotspots, local_time
+from data import SOURCES, Store, load_hotspots, local_time
 from pricing import MIN_MS
 
-MIN_OPEN, MAX_OPEN = 3, 5
-FILL_TO = 4  # one slot above the floor, so a lopsided-candidate gap never drops the book below 3
-QUICK_MS = 2 * MIN_MS
+ROUND_MS = 5 * MIN_MS
 KEEP_SETTLED_MS = 60_000
 DEFAULT_BANKROLL = 1000
 POSITION_CAP = 0.25
-PUBLISH_MS = 5 * MIN_MS
-ROTATION = ("level", "busiest", "bus", "cam", "level", "rain", "bus", "line", "lines_any", "cam")
-QUICK = ("bus", "cam", "lines_any", "line")
-SLUG = {"busiest": "busiest", "level": "level", "bus": "bus", "cam": "cam", "lines_any": "lines", "line": "line",
-        "rain": "rain"}
 MAX_FAVOURITE = 0.85
-HORIZON_MIN = (5, 15)
-PER_SPOT = {"level": lambda h: True, "bus": lambda h: bool(h["busStops"]), "cam": lambda h: bool(h["cams"])}
+
+
+def round_for(now: int) -> int:
+    """settlesAt of the round you can bet on at `now`: the next 5-min wall-clock mark whose 60 s close is still
+    ahead. Round R opens when round R-5 closes, so there is always exactly one."""
+    return (now + mk.CLOSE_MS) // ROUND_MS * ROUND_MS + ROUND_MS
 
 
 class Clock:
@@ -51,16 +47,15 @@ class Exchange:
         self.by_id = {h["id"]: h for h in self.spots}
         self.markets: dict[str, mk.Market] = {}
         self.order: list[str] = []
-        self.rot = 0
-        self.quick_rot = 0
-        self.spot_rot = {sub: 0 for sub in PER_SPOT}
-        self.recent: dict[str, list] = {"busiest": [], "line": []}
-        self.open_favourites: list[float] = []
+        self.rounds: dict[int, dict] = {}
         self.rejected = 0
         self.record = {t["id"]: {"won": 0, "lost": 0, "points": DEFAULT_BANKROLL} for t in traders.TRADERS}
         self.scores: dict[str, dict] = {}
-        self.stats = {k: {"real": 0, "void": 0} for k in SLUG}
+        self.stats = {s: {"real": 0, "void": 0} for s in mk.SERIES}
+        self.open_favourites: dict[str, list[float]] = {s: [] for s in mk.SERIES}
         self.calibration: dict[str, list[tuple[float, bool]]] = {"price": [], "model": []}
+        self.series_calibration: dict[str, list[tuple[float, bool]]] = {s: [] for s in mk.SERIES}
+        self.sat_out: dict[str, tuple[int, str]] = {}
 
     # ------------------------------------------------------------ the loop
 
@@ -72,7 +67,7 @@ class Exchange:
             if m.close_prices is None and now >= m.closes_at:
                 m.close_prices, m.close_model = m.prices(), m.futures.probs()
             self.settle(m, now)
-        self.spawn(now)
+        self.open_round(now)
         for m in self.active():
             if self.status(m, now) == "open":
                 self.ai_bets(m, now)
@@ -83,103 +78,31 @@ class Exchange:
     def biddable(self, now: int) -> list[mk.Market]:
         return [m for m in self.active() if now < m.closes_at]
 
-    def spawn(self, now: int) -> None:
-        for _ in range(MAX_OPEN):
-            open_now = self.biddable(now)
-            quick = any(m.closes_at - now <= QUICK_MS for m in open_now)
-            if len(open_now) >= MAX_OPEN or (len(open_now) >= FILL_TO and quick):
-                return
-            m = self.new_market(now, quick_needed=not quick)
+    def open_round(self, now: int) -> None:
+        """Build every registered series once for the current round, all settling at the same 5-min mark. A bracket
+        series whose favourite would still exceed 85% after its edges were placed is left out of the round."""
+        at = round_for(now)
+        if at in self.rounds:
+            return
+        rnd = {"markets": [], "skipped": {}}
+        self.rounds[at] = rnd
+        for sid, series in mk.SERIES.items():
+            m = series.build(f"{sid}-{local_time(at, '%H%M')}", self.store, self.spots, now, at)
             if m is None:
-                return
+                rnd["skipped"][sid] = "no fresh reading"
+                continue
+            fav = max(m.open_model.values())
+            reason = series.skip(m) if series.skip else None
+            if reason is None and fav > MAX_FAVOURITE and m.kind == "bracket":
+                self.rejected += 1
+                reason = f"favourite {fav:.0%} even after re-placing the brackets"
+            if reason:
+                rnd["skipped"][sid] = reason
+                continue
+            self.open_favourites[sid].append(fav)
             self.markets[m.id] = m
             self.order.append(m.id)
-
-    def new_market(self, now: int, quick_needed: bool) -> mk.Market | None:
-        """The next market in rotation whose model favourite is at most 85% at open; lopsided candidates are
-        dropped and the next one is tried."""
-        if quick_needed:
-            self.quick_rot = (self.quick_rot + 1) % len(QUICK)
-            subs = QUICK[self.quick_rot:] + QUICK[:self.quick_rot]
-        else:
-            subs = ROTATION[self.rot:] + ROTATION[:self.rot]
-        counts: dict[str, int] = {}
-        for m in self.biddable(now):
-            counts[m.sub] = counts.get(m.sub, 0) + 1
-        for i, sub in enumerate(subs):
-            if counts.get(sub, 0) >= 2:
-                continue
-            for m in self.candidates(sub, now, quick_needed):
-                fav = max(m.futures.probs().values())
-                if fav > MAX_FAVOURITE:
-                    self.rejected += 1
-                    continue
-                self.accept(m, fav)
-                if not quick_needed:
-                    self.rot = (self.rot + i + 1) % len(ROTATION)
-                return m
-        return None
-
-    def accept(self, m: mk.Market, fav: float) -> None:
-        self.open_favourites.append(fav)
-        if m.sub == "busiest":
-            self.recent["busiest"].append(m.hotspots)
-        elif m.sub == "line":
-            self.recent["line"].append(m.spec["line"])
-        elif m.sub in PER_SPOT:
-            self.spot_rot[m.sub] += 1
-
-    def settles_for(self, sub: str, now: int, quick: bool) -> int | None:
-        if sub in ("busiest", "level", "rain"):
-            return None if quick else self.after_publish("rain_now" if sub == "rain" else "crowding", now)
-        rng = random.Random(now // MIN_MS * 31 + len(self.order))
-        minutes = 2 if quick else rng.randint(*HORIZON_MIN)
-        return mk.ceil_minute(now) + minutes * MIN_MS
-
-    def candidates(self, sub: str, now: int, quick: bool):
-        settles = self.settles_for(sub, now, quick)
-        if settles is None:
-            return
-        mid = self.new_id(sub, settles)
-        if sub in PER_SPOT:
-            spots = [h for h in self.spots if PER_SPOT[sub](h)]
-            start = self.spot_rot[sub]
-            build = {"level": mk.build_level, "bus": mk.build_bus, "cam": mk.build_cam}[sub]
-            for k in range(len(spots)):
-                m = build(mid, self.store, spots[(start + k) % len(spots)], now, settles)
-                if m:
-                    yield m
-            return
-        if sub == "busiest":
-            recent = {frozenset(x) for x in self.recent["busiest"][-2:]}
-            m = mk.build_busiest(mid, self.store, self.spots, now, settles, recent)
-        elif sub == "lines_any":
-            m = mk.build_lines_any(mid, self.store, self.spots, now, settles)
-        elif sub == "line":
-            m = mk.build_line(mid, self.store, self.spots, now, settles, set(self.recent["line"][-2:]))
-        else:
-            m = mk.build_rain(mid, self.store, self.spots, now, settles)
-        if m:
-            yield m
-
-    def after_publish(self, source: str, now: int) -> int | None:
-        """settlesAt just after one of the feed's next 5-min publishes, 5-15 min away, so a fresh reading lands
-        at or before it."""
-        last = self.store.latest(source, now)
-        if not last or now - last[0] > STALE_S[source] * 1000:
-            return None
-        options = [mk.ceil_minute(last[0] + k * PUBLISH_MS + 15_000) for k in range(1, 5)]
-        options = [t for t in options if HORIZON_MIN[0] * MIN_MS <= t - now <= HORIZON_MIN[1] * MIN_MS]
-        if not options:
-            return None
-        return random.Random(now // MIN_MS + len(self.order)).choice(options)
-
-    def new_id(self, sub: str, settles: int) -> str:
-        base = f"{SLUG[sub]}-{local_time(settles, '%H%M')}"
-        mid, n = base, 2
-        while mid in self.markets:
-            mid, n = f"{base}-{n}", n + 1
-        return mid
+            rnd["markets"].append(m.id)
 
     # ------------------------------------------------------------ status, betting
 
@@ -193,10 +116,6 @@ class Exchange:
     def halt_reason(self, m: mk.Market, now: int) -> str | None:
         if not self.store.fresh(m.feed, now):
             return "stale feed"
-        if m.sub == "cam":
-            last = self.store.latest("jamcams", now)
-            if not last or m.spec["cam"] not in last[1]:
-                return "stale feed"
         return m.halt_reason
 
     def stakes(self, m: mk.Market) -> dict[str, float]:
@@ -249,8 +168,10 @@ class Exchange:
             if t["feed"] in SOURCES and not self.store.fresh(t["feed"], now):
                 continue
             ctx["stakes"] = self.stakes(m)
-            pick = traders.DECIDE[tid](m, self.store, now, ctx)
+            pick = traders.decide(tid, m, self.store, now, ctx)
             if pick is None:
+                round_markets = [self.markets[i] for i in self.rounds.get(m.settles_at, {}).get("markets", [])]
+                self.sat_out[tid] = (m.settles_at, traders.sit_out(tid, self.store, now, round_markets))
                 continue
             option, why = pick
             _, _, odds = self.place(m, option, traders.STAKE)
@@ -283,6 +204,9 @@ class Exchange:
             for key, probs in (("price", m.close_prices), ("model", m.close_model)):
                 fav = max(probs, key=lambda o: probs[o])
                 self.calibration[key].append((probs[fav], fav == winner))
+        if winner is not None:
+            fav = max(m.open_model, key=lambda o: m.open_model[o])
+            self.series_calibration[m.sub].append((m.open_model[fav], fav == winner))
         return m.result
 
     def settle_request(self, mid: str, now: int | None = None) -> dict:
@@ -303,7 +227,8 @@ class Exchange:
                "closesAt": m.closes_at, "settlesAt": m.settles_at, "futures": pricing.N_FUTURES,
                "options": self.options_json(m),
                "aiBets": [{k: b[k] for k in ("trader", "option", "why", "stake", "odds")} for b in m.ai_bets],
-               "source": m.source, "rule": m.rule, "status": self.status(m, now)}
+               "source": m.source, "rule": m.rule, "status": self.status(m, now),
+               "series": m.sub, "round": local_time(m.settles_at), "roundSettlesAt": m.settles_at}
         if out["status"] == "halted":
             out["haltReason"] = self.halt_reason(m, now)
         if m.result:
@@ -329,13 +254,37 @@ class Exchange:
         keys = ("id", "name", "lat", "lon", "naptan", "cams")
         return {"hotspots": [{k: h[k] for k in keys} for h in self.spots]}
 
-    def traders_json(self) -> dict:
+    def traders_json(self, now: int | None = None) -> dict:
+        now = self.clock.now() if now is None else now
+        current = [self.markets[i] for i in self.rounds.get(round_for(now), {}).get("markets", [])]
         rows = []
         for t in traders.TRADERS:
             rec = self.record[t["id"]]
+            bets = [b for m in current for b in m.ai_bets if b["trader"] == t["id"]]
+            at, said = self.sat_out.get(t["id"], (None, None))
+            why = (bets[-1]["why"] if bets else said if at == round_for(now)
+                   else traders.sit_out(t["id"], self.store, now, current))
             rows.append({k: t[k] for k in ("id", "name", "emoji", "watches", "style")} |
-                        {"record": {"won": rec["won"], "lost": rec["lost"]}, "points": rec["points"]})
+                        {"record": {"won": rec["won"], "lost": rec["lost"]}, "points": rec["points"], "why": why})
         return {"traders": rows}
+
+    def round_json(self, now: int | None = None) -> dict:
+        now = self.clock.now() if now is None else now
+        at = round_for(now)
+        cur = self.rounds.get(at, {"markets": [], "skipped": {}})
+        past = [r for r in self.rounds if r <= now]
+        out = {"current": {"round": local_time(at), "closesAt": at - mk.CLOSE_MS, "settlesAt": at,
+                           "markets": cur["markets"], "skipped": cur["skipped"]}, "previous": None}
+        if past:
+            prev = max(past)
+            results = []
+            for mid in self.rounds[prev]["markets"]:
+                m = self.markets[mid]
+                res = m.result or {}
+                results.append({"market": mid, "series": m.sub, "status": self.status(m, now),
+                                "winner": res.get("winner"), "reading": res.get("reading")})
+            out["previous"] = {"round": local_time(prev), "settlesAt": prev, "results": results}
+        return out
 
     def score(self, body: dict) -> dict:
         player, points = str(body.get("player") or ""), body.get("points")
@@ -350,16 +299,31 @@ class Exchange:
         return {"rows": sorted(rows, key=lambda r: -r["points"])}
 
     def stats_json(self) -> dict:
-        favs = self.open_favourites
+        favs = [f for s in mk.SERIES for f in self.open_favourites[s]]
+        mid = sum(0.40 <= p <= 0.75 for p in favs)
+        series = {}
+        for s in mk.SERIES:
+            fs = self.open_favourites[s]
+            rounds = sum(any(self.markets[i].sub == s for i in r["markets"]) for r in self.rounds.values())
+            series[s] = {"rounds": rounds,
+                         "settled": self.stats[s], "openFavourite": self.histogram(fs),
+                         "share30to70": round(sum(0.30 <= p <= 0.70 for p in fs) / len(fs), 3) if fs else None,
+                         "calibrationAtOpen": self.buckets(self.series_calibration[s])}
+        return {"settled": self.stats, "calibration": {k: self.buckets(v) for k, v in self.calibration.items()},
+                "openFavourite": {"n": len(favs), "share40to75": round(mid / len(favs), 3) if favs else None,
+                                  "share30to70": round(sum(0.30 <= p <= 0.70 for p in favs) / len(favs), 3)
+                                  if favs else None,
+                                  "rejectedOver85": self.rejected, "histogram": self.histogram(favs)},
+                "rounds": len(self.rounds), "series": series}
+
+    @staticmethod
+    def histogram(favs: list[float]) -> dict[str, int]:
         hist: dict[str, int] = {}
         for p in favs:
             lo = min(0.9, int(p * 20) / 20)
             key = f"{lo:.2f}-{lo + 0.05:.2f}"
             hist[key] = hist.get(key, 0) + 1
-        mid = sum(0.40 <= p <= 0.75 for p in favs)
-        return {"settled": self.stats, "calibration": {k: self.buckets(v) for k, v in self.calibration.items()},
-                "openFavourite": {"n": len(favs), "share40to75": round(mid / len(favs), 3) if favs else None,
-                                  "rejectedOver85": self.rejected, "histogram": dict(sorted(hist.items()))}}
+        return dict(sorted(hist.items()))
 
     @staticmethod
     def buckets(rows: list[tuple[float, bool]]) -> dict:
