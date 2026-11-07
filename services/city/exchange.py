@@ -7,6 +7,7 @@ import uuid
 
 import fan
 import integrity
+import local
 import markets as mk
 import pricing
 import signals
@@ -63,6 +64,7 @@ class Exchange:
         self.series_calibration: dict[str, list[tuple[float, bool]]] = {s: [] for s in mk.SERIES}
         self.sat_out: dict[str, tuple[int, str]] = {}
         self.integrity = integrity.Integrity()
+        self.local = local.LocalMarkets(self)
 
     # ------------------------------------------------------------ the loop
 
@@ -155,6 +157,16 @@ class Exchange:
             self.markets[m.id] = m
             self.order.append(m.id)
             rnd["markets"].append(m.id)
+
+    def add_market(self, m: mk.Market, now: int) -> None:
+        """Lists an on-demand market (local.py) in the current round, as if open_round had built it."""
+        self.open_round(now)
+        self.stats.setdefault(m.sub, {"real": 0, "void": 0})
+        self.series_calibration.setdefault(m.sub, [])
+        self.open_favourites.setdefault(m.sub, []).append(max(m.open_model.values()))
+        self.markets[m.id] = m
+        self.order.append(m.id)
+        self.rounds[m.settles_at]["markets"].append(m.id)
 
     # ------------------------------------------------------------ status, betting
 

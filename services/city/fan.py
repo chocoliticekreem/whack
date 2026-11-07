@@ -62,6 +62,8 @@ def race_value(sim: pricing.RaceSim, i: int, k: int) -> float:
 
 
 def sim_paths(sim) -> list[list[tuple[int, float]]]:
+    if hasattr(sim, "fan_paths"):
+        return sim.fan_paths()
     end = sim.t0 + sim.m * MIN_MS
     if isinstance(sim, pricing.DeltaSim):
         return [[(sim.t0, sim.x0), (end, f)] for f in sim.finals]
@@ -107,6 +109,9 @@ def clean_reader(m):
 def series_view(m, store) -> tuple[str, str, list[float], object]:
     """(label, unit, lines, read(ts, snap) -> value | None) for the market's series."""
     sub, spec = m.sub, m.spec
+    if sub.startswith("local_"):
+        import local
+        return local.series_view(m, store)
     if sub == "city_pulse":
         return "City Pulse", "", [spec["line"]], lambda ts, s: mk.pulse_of(s)
     if sub == "london_vix":

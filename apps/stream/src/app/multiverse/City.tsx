@@ -17,6 +17,7 @@ import {
 import type { BetResponse, CitySignals, Hotspot, LeaderRow, Market, MarketsResponse, SettleResponse, Trader } from "./city-types";
 import { CityStrip } from "./Clues";
 import { HowItWorks } from "./HowItWorks";
+import { LocalMarket } from "./LocalMarket";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
 import { cancelNote, usePendingFills, type Fill } from "./pending-bets";
 import { Scenario, type WhatIfOdds } from "./Scenario";
@@ -302,7 +303,8 @@ export function City() {
       .filter((m) => {
         const r = results[m.id];
         if (r) return now - r.at < SHOW_SETTLED_MS;
-        return live.has(m.id) || (wallet.bets[m.id] && !wallet.bets[m.id].done);
+        // Why: local markets open on the map card; the list shows one only once you hold a bet on it.
+        return (live.has(m.id) && !m.id.startsWith("local_")) || (wallet.bets[m.id] && !wallet.bets[m.id].done);
       })
       .sort((a, b) => rank(a) - rank(b) || a.closesAt - b.closesAt);
 
@@ -315,6 +317,8 @@ export function City() {
   }, [book, feed, results, now, wallet.bets]);
 
   const selectedMarket = shown.find((m) => m.id === selected) ?? null;
+  const marketOf = useCallback((id: string) => book.markets[id], [book]);
+  const addLocal = useCallback((m: Market) => setBook((b) => absorb(b, [m])), []);
   const selectedHubs = selected ? (book.markets[selected]?.hotspots.join(",") ?? "") : "";
   useEffect(() => {
     const hubs = selectedHubs
@@ -491,6 +495,7 @@ export function City() {
               <span className="tl-desk"> London</span>
             </span>
           </span>
+          {!mock && <span className="lm-hint tl-desk">Click anywhere to trade that spot</span>}
         </div>
         <div className="tl-wallet tl-num" aria-label="Your points">
           <span className="tl-pts">
@@ -625,6 +630,40 @@ export function City() {
           />
         ))}
       </section>
+
+      <LocalMarket
+        mock={mock}
+        player={wallet.player}
+        token={wallet.token}
+        disabled={scenarioOpen}
+        error={betError}
+        marketOf={marketOf}
+        onMarket={addLocal}
+        card={(m) => (
+          <MarketCard
+            market={m}
+            now={now}
+            traders={traderMap}
+            bet={wallet.bets[m.id]}
+            result={results[m.id]}
+            selected
+            draft={draft?.market === m.id ? draft.option : null}
+            stake={stake}
+            points={wallet.points}
+            history={book.hist[m.id] ?? NO_HISTORY}
+            onSelect={() => undefined}
+            onPick={(option) => {
+              if (phaseOf(m, Date.now(), results[m.id]) !== "open") return;
+              setDraft({ market: m.id, option });
+              setBetError(null);
+            }}
+            onStake={setStake}
+            onConfirm={confirm}
+            onCancel={() => setDraft(null)}
+            onTip={setTip}
+          />
+        )}
+      />
 
       {tip && tipTrader && tipRect && (
         <div
