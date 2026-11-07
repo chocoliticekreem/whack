@@ -2,7 +2,7 @@
 
 Live prediction markets across five central-London hotspots (Oxford Circus, King's Cross St Pancras,
 Piccadilly Circus, Waterloo, Bank). Simulated futures set the prices; real recorded TfL and Open-Meteo data settles them.
-Six rule-based AI traders each read one feed and bet against the players. The web app proxies `/api/city/*` here.
+Seven rule-based AI traders each read one feed and bet against the players. The web app proxies `/api/city/*` here.
 
 ```bash
 python3 services/city/server.py                                   # live: reads the recorder's newest data
@@ -12,7 +12,9 @@ python3 -m unittest discover -s services/city
 
 Env: `CITY_PORT` (8051), `CITY_RAW` (recorder root; default `data/raw` of the main checkout), `CITY_LOG=1` logs requests,
 `MULTIVERSE_URL` (default `http://127.0.0.1:8349`; live mode polls its `GET /vix` every 15 s for the London VIX; the
-multiverse server itself defaults to :8049, so start it with `MULTIVERSE_PORT=8349` or set this).
+multiverse server itself defaults to :8049, so start it with `MULTIVERSE_PORT=8349` or set this),
+`SIM_URL` (default `http://127.0.0.1:8449`, the central-London agent simulation; live mode polls its `GET /state` every
+30 s), `SIM_WEIGHT` (0.5: the share of each market's 50 futures sampled from the simulation), `CITY_LEDGER_DB`.
 CORS allows localhost:3047, :3349 and :3849.
 
 ## Endpoints
@@ -92,11 +94,31 @@ prob = share of surviving futures, clamped to [3%, 97%]. Bets move prices throug
 probabilities as the base (prob_i ∝ model_i · e^(q_i/b)), so a 100-point bet on a 50% option moves it about 4 points.
 A 5% fee keeps the locked payout near the displayed `odds = 0.95/prob`.
 
+## The central-London simulation
+
+Live mode reads the agent simulation (`services/multiverse`, central seed, `SIM_URL`) every 30 s with a 3 s timeout and
+keeps the last good forecast; it counts only while at most 3 min old (`data.SimFeed`), otherwise the sim is off and
+everything prices exactly as above. The forecast is each station's % of usual (TfL typical day) at +5, +15 and +60 min
+as mean, p10, p90, read as a normal (sd = (p90 − p10) / 2.563) and interpolated to the expected settle reading.
+Stations share one city-wide shock (correlation 0.5) because the sim publishes marginals only.
+
+- Pricing: for hub_surge, hub_hour and city_pulse, the last `round(SIM_WEIGHT × 50)` futures (25 by default) are replaced
+  by draws from the sim, each a bridge from the live reading to the drawn value so the particle filter scores it like any
+  other. hub_surge / hub_hour read the hub station's vs usual directly; City Pulse takes the drawn vs usual × the typical
+  day for the 13 simulated stations and holds the other stations' vs usual. `futures.fromSim` on each market counts them.
+- Simulation trader (`sim`): the option whose probability under 4 000 sim draws beats its price by the most, only if by
+  5+ points, through the same quote, odds floor and position cap as the other traders (25% of its points per market).
+  london_vix only when `MULTIVERSE_URL` is the simulation itself; the Oxford Circus multiverse VIX is a different number.
+
+`python3 services/city/eval_sim.py record SIM_LOG` logs forecasts forward from now (there was no sim history);
+`eval_sim.py score SIM_LOG --traders http://127.0.0.1:8121` rebuilds each recorded round statistical-only and blended
+from the recorder's data, settles it, and prints Brier, log loss, favourite calibration and the Simulation trader's P&L.
+
 ## Files
 
 `data.py` reads the recorder files into compact snapshots and never returns data after `now`. `pricing.py` holds the
 fits, simulators, particle filter and LMSR. `markets.py` holds the series registry and builds and settles each series. `traders.py` holds the
-six traders (Tube Crowd → S1/S2/S5, Camera Eye → S3, Plane Spotter → S4, Line Watcher → S6, Rain Radar → S2 only in
-rain, Contrarian → all). `signals.py` builds the per-market clues and `/signals`. `exchange.py` runs the rounds, betting, settlement and scores. `server.py` is the HTTP layer.
+seven traders (Tube Crowd → S1/S2/S5, Camera Eye → S3, Plane Spotter → S4, Line Watcher → S6, Rain Radar → S2 only in
+rain, Contrarian → all, Simulation → S1/S2/S5). `eval_sim.py` scores the simulation (below). `signals.py` builds the per-market clues and `/signals`. `exchange.py` runs the rounds, betting, settlement and scores. `server.py` is the HTTP layer.
 `hotspots.json` lists the hotspots with their JamCams, bus stops and lines; the recorder adds these cams to its
 YOLO list.

@@ -7,6 +7,7 @@ minute-to-minute changes, with single steps capped at STEP_CAP sigma (an engine 
 from __future__ import annotations
 
 import math
+import os
 import random
 import statistics
 from decimal import ROUND_FLOOR, Decimal
@@ -289,6 +290,80 @@ def place_pct_brackets(finals: list[float], widths: tuple[float, ...]) -> list[f
 RAIN_MM = 0.1
 
 
+# ---------------------------------------------------------------- the central-London agent simulation
+
+SIM_WEIGHT = max(0.0, min(1.0, float(os.environ.get("SIM_WEIGHT", "0.5"))))
+SIM_RHO = 0.5
+Z90 = 1.2816
+
+
+def sim_dist(fc: dict, naptan: str, target_ms: int) -> tuple[float, float] | None:
+    """(mean, sd) of a station's vs usual (fraction, 1.0 = usual) at target_ms from the sim's +5/+15/+60 forecasts,
+    linear between horizons and held flat outside them; p10/p90 read as a normal's (sd = (p90 - p10) / 2.563)."""
+    st = fc["stations"].get(naptan)
+    if not st:
+        return None
+    pts = sorted((int(h), f) for h, f in st["h"].items())
+    h = (target_ms - fc["base"]) / MIN_MS
+    lo = max((p for p in pts if p[0] <= h), default=pts[0], key=lambda p: p[0])
+    hi = min((p for p in pts if p[0] >= h), default=pts[-1], key=lambda p: p[0])
+    a = 0.0 if hi[0] == lo[0] else (h - lo[0]) / (hi[0] - lo[0])
+    mix = {k: (lo[1][k] + a * (hi[1][k] - lo[1][k])) / 100 for k in ("mean", "p10", "p90")}
+    return mix["mean"], max(1e-3, (mix["p90"] - mix["p10"]) / (2 * Z90))
+
+
+def sim_draws(fc: dict, naptans: list[str], target_ms: int, rng: random.Random, n: int) -> list[dict] | None:
+    """n joint draws {naptan: vs usual} of the given stations, or None unless the sim covers every one.
+    debt: the sim publishes marginals only; stations share one city-wide shock with correlation SIM_RHO.
+    ceiling: real cross-station correlation unknown. upgrade: when the sim publishes per-world station values."""
+    dists = {nap: d for nap in naptans if (d := sim_dist(fc, nap, target_ms))}
+    if len(dists) < len(naptans):
+        return None
+    out = []
+    for _ in range(n):
+        common = rng.gauss(0.0, 1.0)
+        out.append({nap: max(0.01, mu + sd * (math.sqrt(SIM_RHO) * common + math.sqrt(1 - SIM_RHO) * rng.gauss(0, 1)))
+                    for nap, (mu, sd) in dists.items()})
+    return out
+
+
+def sim_count() -> int:
+    """Futures sampled from the simulation: SIM_WEIGHT of the 50 (env SIM_WEIGHT, default 0.5)."""
+    return round(SIM_WEIGHT * N_FUTURES)
+
+
+def bridge(x0: float, x1: float, minutes: int, sd: float, rng: random.Random) -> list[float]:
+    """A capped-step random walk from x0 pinned to x1 after `minutes` (a Brownian bridge), so a sim-sampled future
+    has a path the particle filter can score against mid-round readings like any other."""
+    w = [0.0]
+    for _ in range(minutes):
+        w.append(w[-1] + sd * capped_gauss(rng))
+    m = max(1, minutes)
+    return [x0 + (x1 - x0) * k / m + (w[k] - w[-1] * k / m) for k in range(minutes + 1)]
+
+
+def tag_sim(sim, n: int) -> range:
+    """Mark the last n of the sim's futures as sim-sampled; returns their indices."""
+    sim.origins = ["stat"] * (N_FUTURES - n) + ["sim"] * n
+    return range(N_FUTURES - n, N_FUTURES)
+
+
+def blend_race(race: RaceSim, draws: list[dict], rng: random.Random) -> int:
+    """Replace the last len(draws) futures of a race with sim draws: each station's path ends at its drawn vs usual
+    times its typical value at settle."""
+    for i, d in zip(tag_sim(race, len(draws)), draws):
+        race.paths[i] = [bridge(x0, math.log(d[nap] * race.typ_t[j]), race.m, sd, rng)
+                         for j, (_, nap, x0, _, sd) in enumerate(race.stations)]
+    return len(draws)
+
+
+def blend_scalar(sim: ScalarSim, finals: list[float], rng: random.Random) -> int:
+    """Replace the last len(finals) futures of a scalar walk with paths ending at the sim-derived finals."""
+    for i, v in zip(tag_sim(sim, len(finals)), finals):
+        sim.paths[i] = bridge(sim.paths[i][0], math.log(v), sim.m, sim.sd, rng)
+    return len(finals)
+
+
 # ---------------------------------------------------------------- particle filter + LMSR
 
 
@@ -299,6 +374,11 @@ class Futures:
         self.sim, self.option_ids = sim, option_ids
         self.alive = [True] * N_FUTURES
         self.ruled_out = 0
+        self.origins: list[str] = getattr(sim, "origins", None) or ["stat"] * N_FUTURES
+
+    @property
+    def from_sim(self) -> int:
+        return self.origins.count("sim")
 
     def observe(self, ts: int, snap: dict) -> int:
         errs = [(self.sim.error(i, ts, snap), i) for i in range(N_FUTURES) if self.alive[i]]
