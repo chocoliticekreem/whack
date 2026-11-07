@@ -1,5 +1,5 @@
 """City markets HTTP API (stdlib) on :8051 (CITY_PORT). Contract: GET /hotspots /traders /markets /round
-/leaderboard /stats, POST /settle /bet /score. Live by default; --replay-from <ISO> fakes "now" from recorded
+/leaderboard /stats /signals, POST /settle /bet /score. Live by default; --replay-from <ISO> fakes "now" from recorded
 data at 12x.
 
     python3 services/city/server.py
@@ -17,13 +17,15 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
-from data import Store, feeds, load_hotspots, raw_root
+import signals
+from data import MULTIVERSE_URL, Store, feeds, fetch_vix, load_hotspots, raw_root
 from exchange import Clock, Exchange
 
 PORT = int(os.environ.get("CITY_PORT", "8051"))
 ORIGINS = {"http://localhost:3047", "http://localhost:3349", "http://localhost:3849",
            "http://127.0.0.1:3047", "http://127.0.0.1:3349", "http://127.0.0.1:3849"}
 TICK_S = 1.0
+VIX_POLL_S = 15.0
 
 LOCK = threading.Lock()
 EX: Exchange | None = None
@@ -37,6 +39,17 @@ def ticker() -> None:
             except Exception as exc:  # noqa: BLE001 - one bad tick must not stop the market
                 print(f"tick failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         time.sleep(TICK_S)
+
+
+def vix_poller() -> None:
+    """Live only: copy the multiverse's London VIX history into the store every VIX_POLL_S (fetched outside the
+    lock, so a slow engine never stalls the market)."""
+    while True:
+        got = fetch_vix(MULTIVERSE_URL)
+        if got:
+            with LOCK:
+                EX.store.ingest_vix(got)
+        time.sleep(VIX_POLL_S)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -78,7 +91,8 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path.rstrip("/")
         routes = {"/health": lambda: {"ok": True, "live": EX.clock.live, "now": EX.clock.now()},
                   "/hotspots": EX.hotspots_json, "/traders": EX.traders_json, "/markets": EX.markets_json,
-                  "/leaderboard": EX.leaderboard, "/stats": EX.stats_json, "/round": EX.round_json}
+                  "/leaderboard": EX.leaderboard, "/stats": EX.stats_json, "/round": EX.round_json,
+                  "/signals": lambda: signals.strip(EX.store, EX.spots, EX.clock.now())}
         if path in routes:
             self.run(routes[path])
         else:
@@ -113,7 +127,9 @@ def main() -> None:
     EX = Exchange(Store(root, hotspots), Clock(start), hotspots)
     EX.tick()
     threading.Thread(target=ticker, daemon=True).start()
-    mode = f"replay from {args.replay_from} at 12x" if start else "live"
+    if start is None:
+        threading.Thread(target=vix_poller, daemon=True).start()
+    mode = f"replay from {args.replay_from} at 12x" if start else f"live, VIX from {MULTIVERSE_URL}"
     print(f"city markets on :{PORT} ({mode}, data {root})", file=sys.stderr)
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
 

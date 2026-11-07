@@ -5,6 +5,7 @@ import time
 
 import markets as mk
 import pricing
+import signals
 import traders
 from data import SOURCES, Store, load_hotspots, local_time
 from pricing import MIN_MS
@@ -87,6 +88,8 @@ class Exchange:
         rnd = {"markets": [], "skipped": {}}
         self.rounds[at] = rnd
         for sid, series in mk.SERIES.items():
+            if series.due and not series.due(at):
+                continue
             m = series.build(f"{sid}-{local_time(at, '%H%M')}", self.store, self.spots, now, at)
             if m is None:
                 rnd["skipped"][sid] = "no fresh reading"
@@ -228,7 +231,8 @@ class Exchange:
                "options": self.options_json(m),
                "aiBets": [{k: b[k] for k in ("trader", "option", "why", "stake", "odds")} for b in m.ai_bets],
                "source": m.source, "rule": m.rule, "status": self.status(m, now),
-               "series": m.sub, "round": local_time(m.settles_at), "roundSettlesAt": m.settles_at}
+               "series": m.sub, "round": local_time(m.settles_at), "roundSettlesAt": m.settles_at,
+               "signals": signals.market(m, self.store, now)}
         if out["status"] == "halted":
             out["haltReason"] = self.halt_reason(m, now)
         if m.result:
@@ -274,12 +278,16 @@ class Exchange:
         cur = self.rounds.get(at, {"markets": [], "skipped": {}})
         past = [r for r in self.rounds if r <= now]
         out = {"current": {"round": local_time(at), "closesAt": at - mk.CLOSE_MS, "settlesAt": at,
-                           "markets": cur["markets"], "skipped": cur["skipped"]}, "previous": None}
+                           "markets": [i for i in cur["markets"] if self.markets[i].settles_at == at],
+                           "skipped": cur["skipped"],
+                           "headlines": [m.id for m in self.active() if m.settles_at > at]}, "previous": None}
         if past:
             prev = max(past)
             results = []
             for mid in self.rounds[prev]["markets"]:
                 m = self.markets[mid]
+                if m.settles_at != prev:
+                    continue
                 res = m.result or {}
                 results.append({"market": mid, "series": m.sub, "status": self.status(m, now),
                                 "winner": res.get("winner"), "reading": res.get("reading")})
