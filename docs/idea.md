@@ -34,17 +34,39 @@ Wace's TOPS idea, trust whoever has been right, pointed at a city. And you can b
 **Close:** "Marshall Wace built TOPS to find out which brokers to trust. We built it to find out
 which London is real."
 
-**3-minute demo:**
-1. **0:00 hook:** the 10-second line, board on screen.
-2. **0:15 bet:** a judge buys a world ("W-117: rain at 15:40, buses 4 min late").
-3. **0:45 reality speaks:** the next frame lands, worlds are delisted with reasons ("predicted
-   23 people, cameras saw 86"), prices jump.
-4. **1:30 brokers:** the leaderboard. "The bus driver has called it three frames running. The
-   tourist hasn't."
-5. **2:00 how:** live TfL feeds → 50 simulated worlds with shared randomness → likelihood
-   repricing → broker scoring. One line each.
-6. **2:30 why new:** "Every piece exists already. Nobody has pointed them at a city's futures."
-   Then the TOPS close.
+**Mapped to MW's three criteria (the idea ties them together):**
+| Criterion | What delivers it | What the judge sees |
+|---|---|---|
+| **Creativity** (the idea) | A stock exchange of possible futures, with AI brokers held to account TOPS-style | "I've never seen that" |
+| **Technical complexity** (the engine) | Live TfL feeds → 50 simulated worlds on the real street graph with common random numbers → likelihood repricing → broker track records | "That's hard, and it works" |
+| **Presentation** (the visualisation) | **The 3D twin of real London with the parallel worlds as ghost layers.** On each camera frame the wrong worlds shatter and fade, and the survivors glow | "That looks incredible" |
+
+**The visualisation:**
+- Real London in 3D around Oxford Circus (OSM buildings and streets, from the Mirrorverse twin).
+- **Ghost crowds:** each live world's people and buses as translucent particles, brightness set
+  by its price. Where worlds agree the city looks solid; where they disagree it shimmers.
+  **The shimmer is the uncertainty, made visible.**
+- **The kill moment:** a camera frame lands, a pulse goes out from that camera, the contradicted
+  worlds shatter, the survivors snap into focus, and the board reprices.
+- **Placing an event:** click a street, a red fork ripples out, and the cloud splits.
+
+**3-minute demo (open on the visual):**
+1. **0:00 presentation:** the 3D twin, shimmering. "These are the 50 Londons that could exist
+   in 30 minutes. The blur is how uncertain the city is right now."
+2. **0:20 creativity:** cut to the board. "Every one is a stock. Its price is the chance it
+   happens. Buy one." A judge bets.
+3. **0:45 the moment:** a frame lands. Worlds shatter in 3D, prices jump on the board, with the
+   reason given.
+4. **1:20 brokers:** "Our AI brokers bet too. The bus driver has called it three frames
+   running." The TOPS line goes here.
+5. **2:00 technical:** one line per layer, on the architecture: live feeds → simulation →
+   repricing → track records.
+6. **2:40 close:** "Marshall Wace built TOPS to find out which brokers to trust. We built it to
+   find out which London is real."
+
+**Build gap:** the prototype's `/multiverse` page has a 2D zone map. Wiring the worlds into the
+3D twin as ghost layers is the highest-value presentation task. Do it after the broker layer
+lands (same page).
 
 ## 1. Where we are
 - **Track: Marshall Wace.** We chose it on purpose over incident.io, which fits the old code more
