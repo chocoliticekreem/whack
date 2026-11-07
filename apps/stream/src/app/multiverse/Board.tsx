@@ -42,7 +42,10 @@ export function Board({ rows, selected, onSelect }: { rows: WorldRow[]; selected
                 onClick={() => onSelect(r.id)}
                 className={`cursor-pointer border-b border-line/60 ${dead ? "opacity-40" : ""} ${selected === r.id ? "bg-surface-3" : "hover:bg-surface-2"}`}
               >
-                <td className={`px-3 py-1.5 font-semibold ${dead ? "line-through" : ""}`}>{r.id}</td>
+                <td className="px-3 py-1.5">
+                  <span className={`font-semibold ${dead ? "line-through" : ""}`}>{r.id}</span>
+                  {r.broker && <span className="ml-1 rounded bg-surface-3 px-1 text-xs text-muted">{r.broker}</span>}
+                </td>
                 <td className="px-3 py-1.5 text-right tabular-nums">
                   {dead ? "delisted" : `${(r.price * 100).toFixed(1)}%`}
                   {!dead && <span className="ml-2 text-xs text-muted">{change(r.history)}</span>}

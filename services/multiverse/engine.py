@@ -14,6 +14,7 @@ import random
 import time
 from typing import Any
 
+import brokers
 import worlds
 
 DEFAULT_N = 50
@@ -90,7 +91,7 @@ def reseed(seed: dict, ts_ms: int, readings: dict[str, float]) -> dict:
 
 class Multiverse:
     def __init__(self, seed: dict, n: int = DEFAULT_N, horizon: int = 30, crn_seed: int = 47,
-                 rng_seed: int = 7) -> None:
+                 rng_seed: int = 7, brokerage: brokers.Brokerage | None = None) -> None:
         self.seed, self.n, self.horizon, self.crn_seed = seed, n, horizon, crn_seed
         self.rng = random.Random(rng_seed)
         self.zone_ids = [z["id"] for z in seed["zones"]]
@@ -101,6 +102,8 @@ class Multiverse:
         self.observations: list[dict[str, Any]] = []
         self.spawn_ms = 0
         self.epochs = 0
+        self.brokerage = brokerage
+        self.placed_events: list[dict] = []
 
     def new_world(self, assumptions: dict, parent: dict | None, price: float, born: int) -> dict:
         t0 = time.perf_counter()
@@ -110,6 +113,7 @@ class Multiverse:
              "logWeight": math.log(price) if price > 0 else -math.inf, "history": [round(price, 5)],
              "assumptions": assumptions, "labels": worlds.describe(assumptions, self.zone_names),
              "run": run, "trail": [], "bornAtObs": born, "delistReason": None,
+             "broker": parent.get("broker") if parent else None,
              "simMs": round((time.perf_counter() - t0) * 1000, 1)}
         self.next_ticker += 1
         return w
@@ -117,11 +121,31 @@ class Multiverse:
     def spawn(self) -> None:
         t0 = time.perf_counter()
         self.worlds, self.observations = [], []
+        if self.brokerage:
+            self.spawn_brokered()
+            self.spawn_ms = round((time.perf_counter() - t0) * 1000)
+            return
         for _ in range(self.n):
             rng = random.Random(self.rng.random())
             a = worlds.sample_assumptions(rng, self.horizon, self.zone_ids)
             self.worlds.append(self.new_world(a, None, 1.0 / self.n, 0))
         self.spawn_ms = round((time.perf_counter() - t0) * 1000)
+
+    def spawn_brokered(self) -> None:
+        """Every broker gets slots (at least one each, so N is raised to the roster size if needed)."""
+        bk = self.brokerage
+        self.n = max(self.n, len(bk.roster))
+        ideas = bk.refresh(self.broker_context(0, None, None), 0)
+        for bid, k in bk.slots(self.n).items():
+            for _ in range(k):
+                a = brokers.assumptions_from_idea(ideas[bid], random.Random(self.rng.random()), self.horizon, self.zone_ids)
+                w = self.new_world(a, None, 1.0 / self.n, 0)
+                w["broker"] = bid
+                self.worlds.append(w)
+        bk.mark_prior(self.live())
+
+    def broker_context(self, minute: int, readings: dict[str, float] | None, bus_delay: float | None) -> dict:
+        return brokers.build_context(self.seed, self.horizon, minute, readings, bus_delay, self.placed_events)
 
     def live(self) -> list[dict]:
         return [w for w in self.worlds if w["status"] == "live"]
@@ -160,6 +184,8 @@ class Multiverse:
             worst = min(parts, key=lambda p: p["ll"]) if parts else None
             w["trail"].append({"obs": obs_index, "minute": minute, "ll": round(ll, 3), "worst": worst})
         self.reprice(live)
+        if self.brokerage:
+            self.brokerage.score(live)
         mask = delist_mask([w["price"] for w in live])
         delisted = []
         for w, kill in zip(live, mask):
@@ -171,7 +197,11 @@ class Multiverse:
                 delisted.append(w["id"])
         survivors = self.live()
         self.reprice(survivors)
-        spawned = self.resample(survivors, obs_index)
+        if self.brokerage:
+            spawned, cut = self.rebalance(obs_index, minute, readings, bus_delay)
+            delisted += cut
+        else:
+            spawned = self.resample(survivors, obs_index)
         for w in self.worlds:
             if w["status"] == "live" or w.get("delistedAtObs") == obs_index:
                 w["history"].append(round(w["price"], 5))
@@ -216,6 +246,55 @@ class Multiverse:
                 spawned.append(child["id"])
         return spawned
 
+    def rebalance(self, obs_index: int, minute: int, readings: dict[str, float],
+                  bus_delay: float | None) -> tuple[list[str], list[str]]:
+        """TOPS step: fresh ideas, slots by track record; trim the cheapest worlds or spawn new ones.
+
+        Spawned worlds share their broker's surviving mass with its kept worlds (as children split a
+        parent's price). A broker with no surviving mass seeds its new worlds at twice the delist line,
+        so one good idea can recover.
+        """
+        bk = self.brokerage
+        ideas = bk.refresh(self.broker_context(minute, readings, bus_delay), obs_index)
+        slots = bk.slots(self.n)
+        by_broker: dict[str, list[dict]] = {bid: [] for bid in slots}
+        for w in self.live():
+            by_broker.setdefault(w.get("broker"), []).append(w)
+        spawned, cut = [], []
+        for bid, mine in by_broker.items():
+            mine.sort(key=lambda w: -w["price"])
+            k = slots.get(bid, 0)
+            for w in mine[k:]:
+                w["status"], w["price"], w["delistedAtObs"] = "delisted", 0.0, obs_index
+                persona = bk.book[bid]["persona"] if bid in bk.book else "unbrokered"
+                w["delistReason"] = f"slot cut: {persona} track record {bk.book.get(bid, {}).get('trackRecord', 0):+.2f}"
+                cut.append(w["id"])
+            kept = mine[:k]
+            need = k - len(kept)
+            if need <= 0:
+                continue
+            total = len(kept) + need
+            mass = sum(w["price"] for w in kept) or need * 2 * DELIST_FRACTION / self.n
+            for w in kept:
+                w["price"] *= len(kept) / total
+            # Half the new slots refine the broker's best surviving worlds, half test its fresh idea.
+            refine = systematic_resample([w["price"] for w in kept], need // 2, self.rng) if kept else []
+            for j in range(need):
+                rng = random.Random(self.rng.random())
+                parent = kept[refine[j]] if j < len(refine) else (kept[0] if kept else None)
+                a = (worlds.jitter_assumptions(parent["assumptions"], rng, self.horizon, self.zone_ids) if j < len(refine)
+                     else brokers.assumptions_from_idea(ideas[bid], rng, self.horizon, self.zone_ids))
+                child = self.new_world(a, parent, mass / total, obs_index)
+                child["broker"] = bid
+                self.worlds.append(child)
+                spawned.append(child["id"])
+        live = self.live()
+        for w in live:
+            w["logWeight"] = math.log(w["price"]) if w["price"] > 0 else -math.inf
+        self.reprice(live)
+        bk.mark_prior(live)
+        return spawned, cut
+
     def intervene(self, kind: str, zone_id: str, at_min: float, note: str | None = None,
                   prior: float = FORK_PRIOR) -> list[str]:
         """Fork every live world: a child with the event takes `prior` of the parent's price."""
@@ -226,6 +305,7 @@ class Multiverse:
         live = sorted(self.live(), key=lambda w: -w["price"])[: self.n * MAX_LIVE_FACTOR // 2]
         forked = []
         event = {"kind": kind, "zoneId": zone_id, "atMin": float(at_min), "note": note or f"{kind} (placed)"}
+        self.placed_events.append(event)
         for parent in live:
             a = dict(parent["assumptions"], events=list(parent["assumptions"].get("events", [])) + [event])
             child = self.new_world(a, parent, parent["price"] * prior, len(self.observations))
@@ -275,7 +355,7 @@ class Multiverse:
         rows = []
         for w in sorted(self.worlds, key=lambda w: (w["status"] != "live", -w["price"])):
             rows.append({k: w[k] for k in ("id", "parent", "generation", "status", "price", "history", "labels",
-                                           "delistReason", "bornAtObs", "simMs")}
+                                           "delistReason", "bornAtObs", "simMs", "broker")}
                         | {"assumptions": w["assumptions"], "trail": w["trail"][-3:], "events": w["run"]["events"][:4]})
         return rows
 
@@ -290,5 +370,6 @@ class Multiverse:
                 "observations": self.observations[-20:], "board": self.board(),
                 "consensusNow": self.consensus(minute), "consensusHorizon": self.consensus(self.horizon),
                 "camsNow": self.cam_consensus(minute),
+                "brokers": self.brokerage.leaderboard(live) if self.brokerage else None,
                 "zones": [{"id": z["id"], "name": z["name"], "x": z["x"], "z": z["z"], "kind": z["kind"]}
                           for z in self.seed["zones"]]}

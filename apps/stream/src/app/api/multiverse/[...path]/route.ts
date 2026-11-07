@@ -1,5 +1,5 @@
 const MULTIVERSE_URL = process.env.MULTIVERSE_URL ?? "http://127.0.0.1:8049";
-const ROUTES = new Set(["spawn", "observe", "state", "intervene", "replay", "geometry", "health"]);
+const ROUTES = new Set(["spawn", "observe", "state", "intervene", "replay", "geometry", "health", "brokers"]);
 
 async function forward(request: Request, path: string[]): Promise<Response> {
   const route = path.join("/");

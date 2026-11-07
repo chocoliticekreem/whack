@@ -1,6 +1,6 @@
 """Multiverse HTTP API (stdlib) on :8049.
 
-POST /spawn      {n=50, horizonMin=30, mode="replay"|"live", crnSeed=47, rngSeed=7}
+POST /spawn      {n=50, horizonMin=30, mode="replay"|"live", crnSeed=47, rngSeed=7, brokers="on"|"off"}
 POST /observe    {next: true} (replay: consume the next recorded frame)
                  | {ts, readings: {camId: people}, busDelayMin?} (push a frame)
                  | {} in live mode (poll the twin's /api/around/counts now)
@@ -8,6 +8,7 @@ GET  /state      exchange board, consensus, implied volatility, recent observati
 POST /intervene  {kind, zoneId, atMin, note?, prior=0.5}: fork every live world
 GET  /replay     ?from=<ms>&to=<ms>: the recorded frames available (timestamps + camera counts)
 GET  /geometry   street segments, zones and cameras of the current seed (for the map)
+GET  /brokers    persona-broker leaderboard (track record, idea, conviction, rationale, P&L) + Haiku calls
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
+import brokers
 import engine
 import feeds
 import fixture
@@ -66,9 +68,13 @@ class App:
             seedmod.TWIN_URL = TWIN_URL
             seed = seedmod.build_seed([], LIVE_ORIGIN, "Oxford Circus")
             self.frames, self.raw_root = [], None
+        flag = body.get("brokers", "on")
+        if flag not in ("on", "off", True, False):
+            raise ValueError("brokers must be on or off")
+        brokerage = brokers.Brokerage(seed, horizon) if flag in ("on", True) else None
         self.mode, self.cursor = mode, 0
         mv = engine.Multiverse(seed, n=n, horizon=horizon, crn_seed=int(body.get("crnSeed") or 47),
-                               rng_seed=int(body.get("rngSeed") or 7))
+                               rng_seed=int(body.get("rngSeed") or 7), brokerage=brokerage)
         mv.spawn()
         self.mv = mv
         return self.state()
@@ -125,6 +131,14 @@ class App:
         return {"root": str(root), "frames": [{"ts": f["ts"], "cams": len(f["readings"]), "busDelayMin": f["busDelayMin"]}
                                               for f in frames]}
 
+    def brokers(self) -> dict:
+        mv = self.need()
+        bk = mv.brokerage
+        if bk is None:
+            return {"enabled": False, "brokers": [], "calls": []}
+        return {"enabled": True, "llm": bk.llm_enabled, "model": brokers.MODEL if bk.llm_enabled else None,
+                "brokers": bk.leaderboard(mv.live()), "calls": bk.calls[-10:]}
+
     def geometry(self) -> dict:
         mv = self.need()
         segs = [{"id": s["id"], "kind": s["kind"], "line": s["line"]} for s in mv.seed["segments"] if s["kind"] != "rail"]
@@ -168,7 +182,8 @@ class Handler(BaseHTTPRequestHandler):
         url = urllib.parse.urlparse(self.path)
         path, q = url.path.rstrip("/"), urllib.parse.parse_qs(url.query)
         routes = {"/health": lambda: {"ok": True, "spawned": APP.mv is not None, "mode": APP.mode},
-                  "/state": APP.state, "/replay": lambda: APP.replay(q), "/geometry": APP.geometry}
+                  "/state": APP.state, "/replay": lambda: APP.replay(q), "/geometry": APP.geometry,
+                  "/brokers": APP.brokers}
         if path in routes:
             self.handle_any(routes[path])
         else:

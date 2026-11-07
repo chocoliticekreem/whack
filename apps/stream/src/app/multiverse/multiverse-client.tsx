@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Board } from "./Board";
+import { Brokers } from "./Brokers";
 import { CityMap } from "./CityMap";
 import type { Geometry, MultiverseState, WorldRow } from "./types";
 
@@ -71,6 +72,7 @@ export function MultiverseClient() {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(2);
   const [n, setN] = useState(50);
+  const [withBrokers, setWithBrokers] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
   const [eventZone, setEventZone] = useState("");
   const [eventKind, setEventKind] = useState<(typeof KINDS)[number]>("incident");
@@ -100,14 +102,14 @@ export function MultiverseClient() {
   const spawn = useCallback(
     async (mode: "replay" | "live") => {
       setPlaying(false);
-      const next = await run(() => api<MultiverseState>("spawn", { n, mode }));
+      const next = await run(() => api<MultiverseState>("spawn", { n, mode, brokers: withBrokers ? "on" : "off" }));
       if (next) {
         setGeometry(await api<Geometry>("geometry"));
         setEventZone(next.zones[0]?.id ?? "");
         setSelected(null);
       }
     },
-    [n, run],
+    [n, run, withBrokers],
   );
 
   const step = useCallback(async () => {
@@ -171,6 +173,10 @@ export function MultiverseClient() {
             <input type="number" min={2} max={200} value={n} onChange={(e) => setN(Number(e.target.value))}
               className="w-16 rounded bg-surface-2 px-2 py-1 text-text" />
           </label>
+          <label className="flex items-center gap-1 text-muted">
+            <input type="checkbox" checked={withBrokers} onChange={(e) => setWithBrokers(e.target.checked)} />
+            brokers
+          </label>
           <Btn onClick={() => spawn("replay")} disabled={busy}>Spawn (replay)</Btn>
           <Btn onClick={step} disabled={busy || !state}>Next observation</Btn>
           <Btn onClick={() => setPlaying((p) => !p)} disabled={!state}>{playing ? "Pause" : "Play"}</Btn>
@@ -233,6 +239,7 @@ export function MultiverseClient() {
             {selectedWorld && <WorldDetail world={selectedWorld} />}
           </div>
           <div className="space-y-2">
+            {state?.brokers && <Brokers rows={state.brokers} />}
             <div className="text-xs uppercase tracking-wide text-muted">Exchange of Worlds · price = chance it is the London we are in</div>
             <Board rows={[...live, ...dead]} selected={selectedWorld?.id ?? null} onSelect={setSelected} />
           </div>

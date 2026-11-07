@@ -1,6 +1,9 @@
 """End-to-end replay on the fixture: spawn -> observations -> print the exchange.
 
-    python3 services/multiverse/demo.py [observations=3] [n=50]
+    python3 services/multiverse/demo.py [observations=3] [n=50] [--brokers]
+
+--brokers spawns with persona brokers (Haiku when ANTHROPIC_API_KEY is set, rules otherwise) and
+prints the broker leaderboard after each frame.
 """
 from __future__ import annotations
 
@@ -20,14 +23,36 @@ def show(state: dict, top: int = 6) -> None:
         print(f"   x {row['id']:<6} delisted: {row['delistReason']}")
 
 
+def show_brokers(app: App) -> None:
+    info = app.brokers()
+    call = info["calls"][-1] if info["calls"] else None
+    if call:
+        print(f"  brokers via {call['model']}: {call.get('ms')} ms, {call.get('inputTokens')} in / "
+              f"{call.get('outputTokens')} out tokens, rules fallbacks {len(call['fallbacks'])}"
+              + (f", errors {call['errors'][:2]}" if call.get("errors") else ""))
+    else:
+        print("  brokers via rules (no ANTHROPIC_API_KEY)")
+    print(f"   {'broker':<11} {'persona':<36} {'track':>7} {'weight':>6} {'slots':>5} {'conv':>5}  pnl")
+    for b in info["brokers"]:
+        pnl = " ".join(f"{p:+.2f}" for p in b["pnl"][-4:])
+        print(f"   {b['id']:<11} {b['persona'][:36]:<36} {b['trackRecord']:>+7.2f} {b['weight']:>6.2f} "
+              f"{b['slots']:>5} {b['conviction'] or 0:>5.2f}  [{pnl}]")
+    for b in info["brokers"][:3]:
+        print(f"     \"{b['rationale']}\" ({b['id']}, {b['source']})")
+
+
 def main() -> None:
-    n_obs = int(sys.argv[1]) if len(sys.argv) > 1 else 3
-    n = int(sys.argv[2]) if len(sys.argv) > 2 else 50
+    args = [a for a in sys.argv[1:] if not a.startswith("--")]
+    with_brokers = "--brokers" in sys.argv[1:]
+    n_obs = int(args[0]) if len(args) > 0 else 3
+    n = int(args[1]) if len(args) > 1 else 50
     app = App()
     t0 = time.perf_counter()
-    state = app.spawn({"n": n, "mode": "replay"})
-    print(f"spawned {n} worlds in {time.perf_counter() - t0:.2f}s from seed '{state['seedSource']}' ({state['area']})")
+    state = app.spawn({"n": n, "mode": "replay", "brokers": "on" if with_brokers else "off"})
+    print(f"spawned {state['n']} worlds in {time.perf_counter() - t0:.2f}s from seed '{state['seedSource']}' ({state['area']})")
     show(state)
+    if with_brokers:
+        show_brokers(app)
     out = state
     for _ in range(n_obs):
         out = app.observe({"next": True})
@@ -38,6 +63,8 @@ def main() -> None:
         print(f"\nobservation {obs['index']} at +{obs['minute']} min: {obs['compared']} cams, "
               f"bus delay {obs['busDelayMin']} -> delisted {len(obs['delisted'])}, spawned {len(obs['spawned'])}")
         show(out)
+        if with_brokers:
+            show_brokers(app)
     print("\nconsensus at horizon (zone: mean +/- sd, implied vol):")
     for z in sorted(out["consensusHorizon"], key=lambda z: -z["iv"])[:5]:
         print(f"   {z['name']:<30} {z['mean']:>6} +/- {z['sd']:<5} iv {z['iv']}")
