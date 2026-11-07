@@ -17,7 +17,7 @@ and the mechanism comes after.
 |---|---|---|
 | **1. The worlds** (engine) | 50 parallel versions of Oxford Circus, **5 min ahead**, forked from live TfL data, repriced every minute | *The new world*: futures that don't exist yet |
 | **2. The market** (betting) | Every world is a stock; price = probability it happens. Each real camera frame reprices it, and wrong worlds are **delisted** | *The interaction*: judges bet, reality settles it |
-| **3. The brokers** (TOPS) | AI agents, **each reading one alternative-data stream** (flights, rain, grid, news, bikes, theatre…), bet on the futures they believe in. Reality scores their track record, so the market learns **which data has alpha on a city** | *The MW hook*: their founding idea, pointed at a city |
+| **3. The brokers** (TOPS) | AI agents, **each reading one alternative-data stream** (flights, rain, grid, news, bikes, Tube crowding, Wikipedia), bet on the futures they believe in. Reality scores their track record, so the market learns **which data has alpha on a city** | *The MW hook*: their founding idea, pointed at a city |
 | **Output: the London VIX** | The spread across worlds as one live uncertainty index | *The new data* |
 
 **Rule:** lead with the stock-market image. Say TOPS once, after it lands. Betting is how
