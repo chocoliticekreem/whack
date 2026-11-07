@@ -43,12 +43,15 @@ The "new world" in the brief is the one nobody can see: the London that hasn't h
   pavement capacity.
 - [VERIFY: 3D ghost view not built yet] **Draws them in 3D** as ghost cities over the real one. Where the worlds agree, the city looks
   solid. Where they disagree, it shimmers. That shimmer is the city's uncertainty, made visible.
+- **The London VIX:** the spread of prices across worlds as one live index of how uncertain the
+  city's next five minutes are. [VERIFY: being built]
 - **Lists every world as a stock**, priced by the probability that it's the one that happens.
 - **Reality is the market.** Each new TfL camera frame and bus update reprices every world.
   Contradicted worlds are delisted with a plain reason ("predicted 23 people, cameras saw 86"),
   and survivors spawn new worlds.
-- **AI brokers bet too.** Persona agents (a commuter, a tourist, a bus driver, a contrarian)
-  submit ideas about the future with a conviction level. Each idea spawns worlds, and reality
+- **AI brokers bet too, and each reads a different stream of alternative data:** Heathrow
+  holding stacks, rain, the power grid, geocoded news, bike docks, theatre show-out times,
+  Wikipedia attention. They submit ideas about the future with a conviction level. Each idea spawns worlds, and reality
   scores every broker's track record, TOPS-style: brokers who keep calling it right get more say.
 - [VERIFY: judge betting UI not built yet] **You can bet**, on points only: buy a world and watch the next frame settle it.
 - **Place an event:** drop a closure or crowd surge on a street and watch the multiverse fork.

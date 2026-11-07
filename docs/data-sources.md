@@ -83,6 +83,15 @@ yet (R).
   stale). Keep that rule on the exchange board.
 - Terrain/tiles are paused on 429. Back off on rate limits everywhere; the recorder already does.
 
+## 3c. Scraping (being added)
+For signals with no API, polite scrapers (plain HTTP, or Playwright where JS is needed). They
+check robots.txt and terms first, use a descriptive User-Agent, and make at most 1 request per
+page per 10 min:
+- **West End theatre show times** (show-out surges near Oxford Circus).
+- **What's-on and major events** near the West End.
+- **Football and big-event fixtures** in London (stations that will surge).
+- **Not scraped:** Google Maps / Popular Times, or anything behind a login (terms).
+
 ## 4. Other cities
 | City | Live | History | Verdict |
 |---|---|---|---|
