@@ -316,23 +316,23 @@ def pulse_series(store: Store, start: int, now: int) -> list[tuple[int, float]]:
 
 
 def build_city_pulse(mid: str, store: Store, spots: list[dict], now: int, settles_at: int) -> Market | None:
-    """Over/under on City Pulse; line = pulse at open + the median 5-min change over the last 3 h (2 dp)."""
+    """Over/under on City Pulse; line = pulse at open + the median 5-min change over the last 3 h, on a .5."""
     last = store.latest("crowding", now)
     p0 = pulse_of(last[1]) if last else None
     if not p0:
         return None
     hist = pulse_series(store, now - HISTORY_MS, now)
     d5 = pricing.deltas_at(hist, 5, CROWD_TOL_MS)
-    line = round(p0 + (statistics.median(d5) if len(d5) >= 3 else 0.0), 2)
+    line = math.floor(p0 + (statistics.median(d5) if len(d5) >= 3 else 0.0)) + 0.5
     mu, sd = pricing.fit_log_walk([(ts, math.log(p)) for ts, p in hist], 0.01, 0.002, 0.05)
     minutes = crowd_horizon(last[0], settles_at, now)
     sim = pricing.ScalarSim(p0, mu, sd, now, minutes, random.Random(seed_of(mid)), pulse_of, line)
     hhmm = local_time(settles_at)
     rule = (f"City Pulse = 100 × the mean live TfL busyness (% of baseline) over the {PULSE_STATIONS} TfL Crowding "
             f"stations, in {crowd_settle_rule(settles_at)}. Fewer than {PULSE_MIN_STATIONS} stations reporting → "
-            f"void. Over = above {line:.2f}; exactly {line:.2f} counts as Under.")
-    return Market(mid, "city_pulse", "overunder", f"City Pulse at {hhmm}: over or under {line:.2f}?", [], now,
-                  settles_at, over_under_options(f"{line:.2f}"), sim,
+            f"void. Over = above {line:.1f}; Under = below {line:.1f}.")
+    return Market(mid, "city_pulse", "overunder", f"City Pulse at {hhmm}: over or under {line:.1f}?", [], now,
+                  settles_at, over_under_options(f"{line:.1f}"), sim,
                   f"TfL Crowding API · {PULSE_STATIONS} stations · {settle_stamp(settles_at)}", rule,
                   {"line": line, "open": round(p0, 2), "openTs": last[0], "sigma": sd})
 

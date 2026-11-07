@@ -354,13 +354,14 @@ class CityPulseTest(CityCase):
         self.store = self.raw.store(T0)
         self.m = mk.build_city_pulse("city_pulse-1505", self.store, SPOTS, T0, T0 + 5 * MIN)
 
-    def test_line_is_the_pulse_at_open_plus_the_median_five_minute_change(self):
+    def test_line_is_the_pulse_at_open_plus_the_median_change_on_a_half_point(self):
         hist = mk.pulse_series(self.store, T0 - mk.HISTORY_MS, T0)
         med = sorted(pricing.deltas_at(hist, 5, mk.CROWD_TOL_MS))[len(hist) // 2 - 1:len(hist) // 2 + 1]
         self.assertAlmostEqual(self.m.spec["open"], hist[-1][1], places=2)
-        self.assertLessEqual(abs(self.m.spec["line"] - hist[-1][1]), max(abs(x) for x in med) + 0.01)
+        self.assertEqual(self.m.spec["line"] % 1, 0.5)
+        self.assertLessEqual(abs(self.m.spec["line"] - hist[-1][1]), max(abs(x) for x in med) + 0.51)
         self.assertEqual(self.m.option_ids(), ["over", "under"])
-        self.assertIn(f"over or under {self.m.spec['line']:.2f}", self.m.question)
+        self.assertIn(f"over or under {self.m.spec['line']:.1f}?", self.m.question)
         self.assertLessEqual(max(self.m.open_model.values()), 0.8)
 
     def test_exactly_on_the_line_is_under_and_too_few_stations_is_void(self):
