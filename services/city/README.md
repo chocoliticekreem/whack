@@ -24,6 +24,12 @@ round's results. Every market carries `signals` (1–2 visible clues, shapes in 
 strip: the 5-hub vs-usual strip with the laggard flagged, the Tube line board with reasons, the latest football
 result and the VIX line.
 
+Wallet: `GET /wallet /ledger /positions /history ?player=`, `POST /limits {player, dailyLoss}`, `POST /break {player, hours}`.
+`ledger.py` keeps player points in an append-only, double-entry SQLite ledger (`CITY_LEDGER_DB`, default
+`services/city/data/ledger.db`, gitignored). Balances are sums of entries. `/bet` takes an `idempotency_key` and moves the
+stake from cash to escrow; settlement pays it out exactly once. A daily loss limit, a stake confirmation above 25% of the
+balance and a 1 h / 24 h break are enforced on the server. `Ledger.audit()` re-checks every invariant from the raw entries.
+
 ## Rounds and series
 
 Markets come in rounds on a fixed 5-minute wall clock (:00, :05 … Europe/London), Kalshi-style. Every market in round

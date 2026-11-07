@@ -1,7 +1,8 @@
 import { mockHandle } from "../mock";
 
 const CITY_URL = process.env.CITY_URL ?? "http://127.0.0.1:8051";
-const ROUTES = new Set(["hotspots", "traders", "markets", "settle", "bet", "score", "leaderboard"]);
+const ROUTES = new Set(["hotspots", "traders", "markets", "settle", "bet", "score", "leaderboard",
+  "wallet", "ledger", "positions", "history", "limits", "break"]);
 
 async function forward(request: Request, path: string[]): Promise<Response> {
   const route = path.join("/");
