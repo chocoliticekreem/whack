@@ -53,20 +53,22 @@ const POLL_MS = 4000;
 const REMIND_MS = 30 * 60_000;
 const SESSION_START = typeof window === "undefined" ? 0 : Date.now();
 
-async function get<T>(path: string): Promise<T | null> {
+const auth = (token: string | null): Record<string, string> => (token ? { "x-player-token": token } : {});
+
+async function get<T>(path: string, token: string | null): Promise<{ status: number; data: T | null }> {
   try {
-    const res = await fetch(`/api/city/${path}`, { cache: "no-store" });
-    return res.ok ? ((await res.json()) as T) : null;
+    const res = await fetch(`/api/city/${path}`, { cache: "no-store", headers: auth(token) });
+    return { status: res.status, data: res.ok ? ((await res.json()) as T) : null };
   } catch {
-    return null;
+    return { status: 0, data: null };
   }
 }
 
-async function post(path: string, body: unknown): Promise<{ ok: boolean; error?: string }> {
+async function post(path: string, body: unknown, token: string | null): Promise<{ ok: boolean; error?: string }> {
   try {
     const res = await fetch(`/api/city/${path}`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", ...auth(token) },
       body: JSON.stringify(body),
       cache: "no-store",
     });
@@ -77,15 +79,37 @@ async function post(path: string, body: unknown): Promise<{ ok: boolean; error?:
   }
 }
 
-/** The player's balance as the server's ledger has it. `null` until the first reply, and always in demo mode. */
-export function useServerWallet(player: string, enabled: boolean, onCash: (cash: number) => void) {
+let creating: Promise<{ player: string; token: string } | { error: string }> | null = null;
+
+/** POST /player/new: the server issues the id, the token and the starting grant. One request at a time per tab. */
+export function createPlayer() {
+  creating ??= (async () => {
+    try {
+      const res = await fetch("/api/city/player/new", { method: "POST", headers: { "content-type": "application/json" }, body: "{}", cache: "no-store" });
+      const data = (await res.json()) as { player?: string; token?: string; error?: string };
+      return data.player && data.token ? { player: data.player, token: data.token } : { error: data.error ?? "Could not create a player" };
+    } catch {
+      return { error: "Could not reach the exchange" };
+    } finally {
+      creating = null;
+    }
+  })();
+  return creating;
+}
+
+export const setNickname = (player: string, token: string, name: string) => post("player/name", { player, name }, token);
+
+/** The player's balance as the server's ledger has it. `null` until the first reply, and always in demo mode.
+ *  A 401 means the token no longer matches (a wiped ledger): `onUnauthorized` lets the caller make a new player. */
+export function useServerWallet(player: string, token: string | null, enabled: boolean, onCash: (cash: number) => void, onUnauthorized: () => void) {
   const [data, setData] = useState<ServerWallet | null>(null);
   const refresh = useCallback(async () => {
-    const w = await get<ServerWallet>(`wallet?player=${encodeURIComponent(player)}&since=${SESSION_START}`);
-    if (!w) return;
-    setData(w);
-    onCash(w.cash);
-  }, [player, onCash]);
+    const r = await get<ServerWallet>(`wallet?player=${encodeURIComponent(player)}&since=${SESSION_START}`, token);
+    if (r.status === 401) onUnauthorized();
+    if (!r.data) return;
+    setData(r.data);
+    onCash(r.data.cash);
+  }, [player, token, onCash, onUnauthorized]);
   useEffect(() => {
     if (!enabled) return;
     const first = window.setTimeout(() => void refresh(), 0);
@@ -213,13 +237,13 @@ function SessionReminder({ wallet }: { wallet: ServerWallet | null }) {
   );
 }
 
-function Limits({ wallet, player, onChange }: { wallet: ServerWallet; player: string; onChange: () => void }) {
+function Limits({ wallet, player, token, onChange }: { wallet: ServerWallet; player: string; token: string | null; onChange: () => void }) {
   const [value, setValue] = useState(String(wallet.limits.dailyLoss));
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const run = async (path: string, body: object, ok: string) => {
     setBusy(true);
-    const r = await post(path, { player, ...body });
+    const r = await post(path, { player, ...body }, token);
     setBusy(false);
     setMsg(r.ok ? ok : (r.error ?? "Request failed"));
     onChange();
@@ -292,12 +316,14 @@ function Limits({ wallet, player, onChange }: { wallet: ServerWallet; player: st
 
 export function WalletPanel({
   player,
+  token,
   wallet,
   open,
   onClose,
   refresh,
 }: {
   player: string;
+  token: string | null;
   wallet: ServerWallet | null;
   open: boolean;
   onClose: () => void;
@@ -311,15 +337,15 @@ export function WalletPanel({
   const load = useCallback(async () => {
     const q = `player=${encodeURIComponent(player)}`;
     const [p, h] = await Promise.all([
-      get<{ positions: Position[] }>(`positions?${q}`),
-      get<{ history: HistoryRow[]; series: [number, number][] }>(`history?${q}&limit=50`),
+      get<{ positions: Position[] }>(`positions?${q}`, token),
+      get<{ history: HistoryRow[]; series: [number, number][] }>(`history?${q}&limit=50`, token),
     ]);
-    if (p) setPositions(p.positions);
-    if (h) {
-      setHistory(h.history);
-      setSeries(h.series);
+    if (p.data) setPositions(p.data.positions);
+    if (h.data) {
+      setHistory(h.data.history);
+      setSeries(h.data.series);
     }
-  }, [player]);
+  }, [player, token]);
 
   useEffect(() => {
     if (!open || !wallet || wallet.asOf === lastAsOf.current) return;
@@ -474,7 +500,7 @@ export function WalletPanel({
                   )}
                 </section>
 
-                <Limits key={wallet.limits.dailyLoss} wallet={wallet} player={player} onChange={refresh} />
+                <Limits key={wallet.limits.dailyLoss} wallet={wallet} player={player} token={token} onChange={refresh} />
 
                 <footer className="wl-foot tl-num">
                   Granted {fmtPts(wallet.totals.granted)} · staked {fmtPts(wallet.totals.staked)} · returned {fmtPts(wallet.totals.returned)} ·

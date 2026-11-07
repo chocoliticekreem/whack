@@ -85,7 +85,9 @@ export interface BetResponse {
   options?: Pick<MarketOption, "id" | "prob" | "odds">[];
   error?: string;
   /** Wallet (round 5): the ledger's reply. `balance` is the player's cash after the stake moved to escrow. */
-  code?: "insufficient_funds" | "confirm_required" | "loss_limit" | "on_break";
+  code?: "insufficient_funds" | "confirm_required" | "loss_limit" | "on_break" | "price_too_short" | "house_limit";
+  /** Sent with confirm_required: a 60 s server token for exactly this stake, sent back as `confirm_token`. */
+  confirmToken?: string;
   betId?: string;
   payout?: number;
   balance?: number;

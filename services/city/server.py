@@ -1,6 +1,6 @@
-"""City markets HTTP API (stdlib) on :8051 (CITY_PORT). Contract: GET /hotspots /traders /markets /round
-/leaderboard /stats /signals, POST /settle /bet /score. Live by default; --replay-from <ISO> fakes "now" from recorded
-data at 12x.
+"""City markets HTTP API (stdlib) on 127.0.0.1:8051 (CITY_HOST, CITY_PORT). Contract: GET /hotspots /traders
+/markets /round /leaderboard /stats /signals, POST /settle /bet, wallet routes behind X-Player-Token. Live by
+default; --replay-from <ISO> fakes "now" from recorded data at 12x, with a throwaway in-memory ledger.
 
     python3 services/city/server.py
     python3 services/city/server.py --replay-from 2026-11-07T14:00:00Z
@@ -14,22 +14,64 @@ import sys
 import threading
 import time
 import urllib.parse
+from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import signals
 from data import MULTIVERSE_URL, Store, feeds, fetch_vix, load_hotspots, raw_root
 from exchange import Clock, Exchange
-from ledger import Ledger, get_routes, post_routes
+from ledger import AuthError, Ledger, LedgerInUse, get_routes, post_routes
 
+HOST = os.environ.get("CITY_HOST") or "127.0.0.1"
 PORT = int(os.environ.get("CITY_PORT", "8051"))
 ORIGINS = {"http://localhost:3047", "http://localhost:3349", "http://localhost:3849",
            "http://127.0.0.1:3047", "http://127.0.0.1:3349", "http://127.0.0.1:3849"}
 TICK_S = 1.0
 VIX_POLL_S = 15.0
+MAX_BODY = 16 * 1024
+WALLET_GET = {"/wallet", "/ledger", "/positions", "/history"}
+WALLET_POST = {"/bet", "/limits", "/break", "/player/name"}
+LOOPBACK = {"127.0.0.1", "::1"}
 
 LOCK = threading.Lock()
 EX: Exchange | None = None
+
+
+class RateLimit:
+    """At most `n` hits per key in a sliding `window_s`."""
+
+    def __init__(self, n: int, window_s: float, clock=time.monotonic):
+        self.n, self.window, self.clock = n, window_s, clock
+        self.hits: dict[str, deque] = {}
+        self.lock = threading.Lock()
+
+    def allow(self, key: str) -> bool:
+        with self.lock:
+            now, q = self.clock(), self.hits.setdefault(key, deque())
+            while q and q[0] <= now - self.window:
+                q.popleft()
+            if len(q) >= self.n:
+                return False
+            q.append(now)
+            return True
+
+
+NEW_PLAYERS = RateLimit(5, 3600)
+
+
+class TooMany(Exception):
+    pass
+
+
+class Server(ThreadingHTTPServer):
+    request_queue_size = 128
+    daemon_threads = True
+
+
+def open_ledger(replay: bool) -> Ledger:
+    """Replays are throwaway: they never touch the real ledger file."""
+    return Ledger(":memory:") if replay else Ledger.from_env()
 
 
 def ticker() -> None:
@@ -67,7 +109,7 @@ class Handler(BaseHTTPRequestHandler):
         if origin in ORIGINS:
             self.send_header("Access-Control-Allow-Origin", origin)
             self.send_header("Vary", "Origin")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-Player-Token")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
         self.end_headers()
         self.wfile.write(body)
@@ -75,29 +117,55 @@ class Handler(BaseHTTPRequestHandler):
     def do_OPTIONS(self) -> None:
         self._send(204, {})
 
+    def client_ip(self) -> str:
+        """The Next proxy is the only loopback caller that forwards for someone else; trust its X-Forwarded-For."""
+        peer = self.client_address[0]
+        fwd = self.headers.get("X-Forwarded-For")
+        # debt: Next only fills X-Forwarded-For when the client sent none, so a client can set its own and dodge
+        # the /player/new limit. ceiling: fine for a points demo. upgrade: a public deploy behind a trusted edge.
+        if peer in LOOPBACK and fwd:
+            return fwd.split(",")[-1].strip() or peer
+        return peer
+
+    def player(self, claimed) -> str:
+        return EX.ledger.auth(claimed, self.headers.get("X-Player-Token"))
+
+    def new_player(self, body: dict) -> dict:
+        if not NEW_PLAYERS.allow(self.client_ip()):
+            raise TooMany("too many new players from this address; try again later")
+        return EX.ledger.create_player(body.get("name"))
+
     def run(self, fn) -> None:
         try:
             with LOCK:
-                self._send(200, fn())
+                status, data = 200, fn()
+        except AuthError as exc:
+            status, data = 401, {"ok": False, "error": str(exc)}
+        except TooMany as exc:
+            status, data = 429, {"ok": False, "error": str(exc)}
         except PermissionError as exc:
             code = getattr(exc, "code", None)  # wallet hook: ledger.WalletError carries a stable code
-            self._send(409, {"ok": False, "error": str(exc)} | ({"code": code} if code else {}))
+            status, data = 409, {"ok": False, "error": str(exc)} | ({"code": code} if code else {}) | \
+                getattr(exc, "data", {})
         except LookupError as exc:
-            self._send(404, {"ok": False, "error": str(exc)})
-        except (ValueError, TypeError) as exc:
-            self._send(400, {"ok": False, "error": str(exc)})
+            status, data = 404, {"ok": False, "error": str(exc)}
+        except (ValueError, TypeError, OverflowError) as exc:
+            status, data = 400, {"ok": False, "error": str(exc)}
         except Exception as exc:  # noqa: BLE001
-            self._send(500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+            status, data = 500, {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+        self._send(status, data)  # outside LOCK: a slow client never stalls the exchange
 
     def do_GET(self) -> None:
         url = urllib.parse.urlparse(self.path)
         path = url.path.rstrip("/")
+        q = dict(urllib.parse.parse_qsl(url.query))
         routes = {"/health": lambda: {"ok": True, "live": EX.clock.live, "now": EX.clock.now()},
                   "/hotspots": EX.hotspots_json, "/traders": EX.traders_json, "/markets": EX.markets_json,
                   "/leaderboard": EX.leaderboard, "/stats": EX.stats_json, "/round": EX.round_json,
                   "/signals": lambda: signals.strip(EX.store, EX.spots, EX.clock.now())}
-        routes |= get_routes(EX.ledger, dict(urllib.parse.parse_qsl(url.query)))  # wallet hook
-        if path in routes:
+        if path in WALLET_GET:  # wallet hook: reads prove the token and never create a player
+            self.run(lambda: get_routes(EX.ledger, q, self.player(q.get("player")))[path]())
+        elif path in routes:
             self.run(routes[path])
         else:
             self._send(404, {"error": "not found"})
@@ -106,17 +174,24 @@ class Handler(BaseHTTPRequestHandler):
         path = urllib.parse.urlparse(self.path).path.rstrip("/")
         try:
             length = int(self.headers.get("Content-Length") or 0)
+            if length > MAX_BODY:
+                self.close_connection = True
+                self._send(413, {"error": f"body over {MAX_BODY} bytes"})
+                return
             body = json.loads(self.rfile.read(length) or b"{}") if length else {}
             if not isinstance(body, dict):
                 raise ValueError("body must be a JSON object")
         except ValueError as exc:
             self._send(400, {"error": str(exc)})
             return
-        routes = {"/settle": lambda: EX.settle_request(str(body.get("id"))), "/bet": lambda: EX.bet(body),
-                  "/score": lambda: EX.score(body)}
-        routes |= post_routes(EX.ledger, body)  # wallet hook
-        if path in routes:
-            self.run(routes[path])
+        if path == "/bet":
+            self.run(lambda: EX.bet(body | {"player": self.player(body.get("player"))}))
+        elif path in WALLET_POST:
+            self.run(lambda: post_routes(EX.ledger, body, self.player(body.get("player")))[path]())
+        elif path == "/player/new":
+            self.run(lambda: self.new_player(body))
+        elif path == "/settle":
+            self.run(lambda: EX.settle_request(str(body.get("id"))))
         else:
             self._send(404, {"error": "not found"})
 
@@ -129,17 +204,20 @@ def main() -> None:
     start = feeds.parse_ts(args.replay_from) if args.replay_from else None
     root = raw_root()
     hotspots = load_hotspots()
-    ledger = Ledger.from_env()  # wallet hook: CITY_LEDGER_DB, default services/city/data/ledger.db
-    refunded = ledger.void_open("Exchange restarted before this market settled; stake refunded")
+    try:
+        ledger = open_ledger(start is not None)  # wallet hook: CITY_LEDGER_DB, default services/city/data/ledger.db
+    except LedgerInUse as exc:
+        sys.exit(str(exc))
     EX = Exchange(Store(root, hotspots), Clock(start), hotspots, ledger)
+    recovered = EX.recover()
     EX.tick()
     threading.Thread(target=ticker, daemon=True).start()
     if start is None:
         threading.Thread(target=vix_poller, daemon=True).start()
     mode = f"replay from {args.replay_from} at 12x" if start else f"live, VIX from {MULTIVERSE_URL}"
-    print(f"city markets on :{PORT} ({mode}, data {root}, ledger {ledger.path}, {refunded} open bets refunded)",
-          file=sys.stderr)
-    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    print(f"city markets on {HOST}:{PORT} ({mode}, data {root}, ledger {ledger.path}, "
+          f"{recovered['pending']} open bets to settle from data, {recovered['refunded']} refunded)", file=sys.stderr)
+    Server((HOST, PORT), Handler).serve_forever()
 
 
 if __name__ == "__main__":

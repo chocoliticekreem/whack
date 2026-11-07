@@ -596,6 +596,8 @@ class RoundTest(CityCase):
 
     def test_bet_moves_price_and_enforces_cap_and_status(self):
         ex = self.exchange()
+        for p in ("p", "q", "r"):
+            ex.ledger.open_account(p)
         ex.tick(T0)
         m = ex.biddable(T0)[0]
         a, b = m.option_ids()[1], m.option_ids()[2]
@@ -605,7 +607,7 @@ class RoundTest(CityCase):
         ex.bet({"player": "r", "market": m.id, "option": b, "stake": 100}, T0)
         ex.bet({"player": "p", "market": m.id, "option": a, "stake": 150}, T0)
         with self.assertRaisesRegex(PermissionError, "position cap"):
-            ex.bet({"player": "p", "market": m.id, "option": a, "stake": 1}, T0)
+            ex.bet({"player": "p", "market": m.id, "option": a, "stake": 10}, T0)
         with self.assertRaisesRegex(PermissionError, "market closed"):
             ex.bet({"player": "q", "market": m.id, "option": a, "stake": 10}, m.closes_at)
 
