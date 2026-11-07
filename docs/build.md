@@ -75,10 +75,21 @@ Polls, per `recorder/README.md`:
 | BikePoint (796 docks) | 2 min |
 | Crowding live, 20 central stations (+ typical profiles once a day) | 5 min |
 | JamCam metadata, ~83 central cams (`--yolo` adds people/vehicle counts) | 60 s (for 5-minute markets) |
+| `aircraft`: adsb.lol, 40 nm round Heathrow + holding-stack counts (BNN/LAM/BIG/OCK) | 60 s |
+| `grid`: Elexon FUELINST + demand; Carbon Intensity London | 5 min (carbon 30 min) |
+| `rain_now`: Open-Meteo current + 15-min now-cast at Oxford Circus | 5 min |
+| `news`: GDELT 15-min export, events within 5 km of Oxford Circus | each new file (checked every 5 min) |
+| `wiki_views`: daily pageviews, 40 West End/London articles | startup + 6 h |
+| `wiki_edits`: Wikimedia EventStreams, edits to those articles | live (SSE) |
+| `scrape_fixtures` (`recorder/scrape/run.py`): London home football fixtures today/tomorrow | 30 min |
+
+Every source can be switched on or off with `--only` / `--skip`. The alternative-data sources are the
+streams the AI brokers read, one each.
 
 - About 320 MB/day, mostly the bus snapshot.
 - It only runs while the laptop is awake and online (`caffeinate -i`).
-- Start it with: `caffeinate -i python3 recorder/record.py` from the main checkout.
+- Start it with: `caffeinate -i python3 recorder/record.py` from the main checkout, plus
+  `caffeinate -i python3 recorder/scrape/run.py` for fixtures.
 - Attribute adsb.lol (ODbL) if we use it. YouTube cams are embed-only.
 
 ## 6. Open

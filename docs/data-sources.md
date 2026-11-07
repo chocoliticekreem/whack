@@ -45,13 +45,21 @@ V = fetched today. R = reported in docs, not fetched.
 | **adsb.lol** | `api.adsb.lol/v2/lat/{lat}/lon/{lon}/dist/{nm}` | every aircraft: position, altitude, squawk | 1 s | **daily global archives**, github `adsblol/globe_history_2026` | none (ODbL licence, attribute) | Heathrow stacks/holding as a city stress signal | V |
 | **Elexon BMRS** | `data.elexon.co.uk/bmrs/api/v1/demand/outturn/summary`, `/datasets/FUELINST` | GB demand + generation by fuel | 5 min | **years**, by date range | none | a macro "pulse"; big events move demand within minutes | V |
 | Carbon Intensity | `api.carbonintensity.org.uk/regional/regionid/13` | London grid carbon + mix | 30 min | any range | none | slow regime variable | V |
-| **Wikipedia pageviews** | hourly dumps `dumps.wikimedia.org/other/pageviews/` (REST is daily only) | attention per place article | hourly, ~3 h behind | years | none | does attention lead footfall? | V |
+| **Wikipedia pageviews** | REST `wikimedia.org/api/rest_v1/metrics/pageviews/per-article/…/daily/…` (recorded); hourly only in dumps `dumps.wikimedia.org/other/pageviews/` | attention per place article | daily via REST; hourly dumps ~3 h behind | years | none (descriptive User-Agent) | does attention lead footfall? | V |
 | Wikipedia EventStreams | `stream.wikimedia.org/v2/stream/recentchange` (SSE) | live edits | seconds | ~7 days replay (R) | none | edit bursts flag incidents | V |
 | **GDELT 2.0** | `data.gdeltproject.org/gdeltv2/lastupdate.txt` → 15-min zips | geocoded news events + tone | 15 min | since 2015 | none (the DOC API returns 429, use the files) | news as an observation that reprices worlds | V |
 | Open-Meteo history | `?minutely_15=precipitation&past_days=7`, `archive-api.open-meteo.com` | rain at 15-min steps | 15 min | 7–92 days at 15 min; hourly since 1940 | none (~10k/day) | event studies on downpours | V |
 | EA flood monitoring | `…/readings?since=` | Thames river/tide levels, ~50 gauges | 15 min | ~28 days in the API | none | add `since=` to backfill | V |
 | Sensor.Community | `data.sensor.community/airrohr/v1/filter/area=51.51,-0.12,10` | citizen PM2.5, temperature | ~5 min | daily CSVs (R) | none | dense, noisy local field | V |
 | London Air (LAQN) | `api.erg.ic.ac.uk/AirQuality/Hourly/MonitoringIndex/GroupName=London/Json` | official air quality | hourly | yes | none | | V |
+
+| **TheSportsDB** | `thesportsdb.com/api/v1/json/123/eventsnext.php?id={team}` (+ `eventslast`) | football fixtures, kick-off, status, score | minutes | season | free public key `123` (~30 calls/min, 429 above) | London home games → station surges at kick-off and egress | V |
+
+**Recorded since Sat 7 Nov ~13:20 GMT** (`recorder/record.py`, see `recorder/README.md`): adsb.lol
+(`aircraft`, with a Heathrow holding-stack summary), Elexon FUELINST + demand and Carbon Intensity
+London (`grid`), Open-Meteo now-cast (`rain_now`), GDELT exports filtered to 5 km of Oxford Circus
+(`news`), Wikipedia pageviews (daily REST, `wiki_views`) and EventStreams edits (`wiki_edits`) for a
+40-article West End watchlist. TheSportsDB London fixtures via `recorder/scrape/run.py`.
 
 **Free key needed (not signed up):** AISstream (Thames ships, websocket), Realtime Trains, Ticketmaster
 (events), Windy webcams, Breathe London.
@@ -109,6 +117,19 @@ page per 10 min:
 - GDELT DOC API → 429; use the 15-min files. Wikipedia hourly data is only in the dumps
   (50–100 MB each).
 - Attribute adsb.lol (ODbL licence).
+- GDELT `http://` URLs 301 to `https://`. `lastupdate.txt` can name a file the CDN still serves as
+  a cached 404 for up to an hour. Keep it queued and retry it.
+- GDELT geocodes most London stories to one city-level point (51.5, -0.1167), about 2.4 km from
+  Oxford Circus. A 5 km filter therefore means "about London", not "about the West End". ~14 of
+  ~720 events per 15-min file pass it.
+- Elexon `/datasets/FUELINST` returns 400 unless both `publishDateTimeFrom` and `publishDateTimeTo`
+  are given. The sum of positive FUELINST generation matches `/demand/outturn/summary` to the MW.
+- TheSportsDB's free key returns an empty body or 429 when called faster than ~12 calls/min, and
+  list endpoints (`eventsday`, `search_all_teams`) are capped at 3–10 rows, so query per team.
+- Scraping: `oxfordstreet.co.uk` robots.txt disallows ClaudeBot / anthropic-ai / GPTBot, so we
+  don't touch it. `regentstreetonline.com/events` allows crawling but listed only past events on
+  7 Nov, so there was no live signal. Google Maps Popular Times and anything behind a login are
+  off-limits.
 
 ## Source URLs
 TfL https://api.tfl.gov.uk (keys: https://api-portal.tfl.gov.uk) · cycle CSVs https://cycling.data.tfl.gov.uk/ ·

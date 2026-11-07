@@ -1,0 +1,364 @@
+{
+ "data": [
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "BIOMASS",
+   "generation": 3272
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "CCGT",
+   "generation": 20324
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "COAL",
+   "generation": 0
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTELEC",
+   "generation": 295
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTEW",
+   "generation": -530
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTFR",
+   "generation": 240
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTGRNL",
+   "generation": -514
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTIFA2",
+   "generation": 181
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTIRL",
+   "generation": -250
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTNED",
+   "generation": 0
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTNEM",
+   "generation": 288
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTNSL",
+   "generation": 1400
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTVKL",
+   "generation": 263
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "NPSHYD",
+   "generation": 330
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "NUCLEAR",
+   "generation": 5121
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "OCGT",
+   "generation": 0
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "OIL",
+   "generation": 0
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "OTHER",
+   "generation": 554
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "PS",
+   "generation": -458
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:10:00Z",
+   "startTime": "2026-11-07T13:05:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "WIND",
+   "generation": 965
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "BIOMASS",
+   "generation": 3273
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "CCGT",
+   "generation": 20237
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "COAL",
+   "generation": 0
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTELEC",
+   "generation": 356
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTEW",
+   "generation": -530
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTFR",
+   "generation": 262
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTGRNL",
+   "generation": -514
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTIFA2",
+   "generation": 251
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTIRL",
+   "generation": -250
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTNED",
+   "generation": 0
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTNEM",
+   "generation": 290
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTNSL",
+   "generation": 1400
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "INTVKL",
+   "generation": 279
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "NPSHYD",
+   "generation": 327
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "NUCLEAR",
+   "generation": 5122
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "OCGT",
+   "generation": 0
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "OIL",
+   "generation": 0
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "OTHER",
+   "generation": 883
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "PS",
+   "generation": -827
+  },
+  {
+   "dataset": "FUELINST",
+   "publishTime": "2026-11-07T13:05:00Z",
+   "startTime": "2026-11-07T13:00:00Z",
+   "settlementDate": "2026-11-07",
+   "settlementPeriod": 27,
+   "fuelType": "WIND",
+   "generation": 972
+  }
+ ]
+}
