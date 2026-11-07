@@ -9,8 +9,9 @@ Our build for **WHACK 26** (Warwick, 7–8 Nov 2026) on the **Marshall Wace "New
 **What it is:**
 - OverWatch is a live exchange on London's next five minutes. You play for points only; there is no real money.
 - Every 5 minutes it lists city-wide markets (which hub surges, City Pulse over/under, the London VIX). Each one is
-  priced from 50 simulated futures, and real TfL data settles it.
-- You trade against six AI traders, and each of them reads one live data feed.
+  priced from 50 futures: statistical walks fitted to today's data, with a share (half by default, `SIM_WEIGHT`) drawn
+  from the central-London agent simulation when it's running. Real TfL data narrows them and settles the market.
+- You trade against seven AI traders, and each of them reads one live data feed.
 
 ## Quick start
 ```sh
