@@ -13,7 +13,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 DATA = ROOT / "data"
 RAW = DATA / "raw"
-USER_AGENT = "whack26-recorder/1.0"
+# Wikimedia and adsb.lol ask for a UA that names the project and a contact.
+USER_AGENT = "whack26-recorder/1.0 (WHACK 26 hackathon; +https://github.com/chocoliticekreem/whack)"
 
 
 def _main_checkout_env() -> Path | None:
