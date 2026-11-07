@@ -8,7 +8,7 @@ import type { Market, Trader } from "./city-types";
 import { MarketClues, usualGhost } from "./Clues";
 import { FuturesFan } from "./FuturesFan";
 import { WhatIfLine, type WhatIfOdds } from "./Scenario";
-import { pausedText, plainLabel, plainResult, plainTitle } from "./plain";
+import { pausedText, plainLabel, plainResult, plainTitle, resultEta } from "./plain";
 
 export type Phase = "open" | "halted" | "locked" | "awaiting" | "settled" | "void";
 
@@ -99,8 +99,11 @@ const REF_STAKE = 100;
 
 function clockText(phase: Phase, m: Market, now: number): string {
   if (phase === "halted") return `Paused · betting ends ${londonClock(m.closesAt)}`;
-  if (phase === "locked") return `Betting closed · result in ${countdown(m.settlesAt - now)}`;
-  if (phase === "awaiting") return "Waiting for the result";
+  const eta = resultEta(m);
+  if (phase === "locked" || phase === "awaiting") {
+    if (eta.slow) return `Betting closed · result about ${londonClock(eta.at)}, when TfL publishes`;
+    return phase === "locked" ? `Betting closed · result in ${countdown(m.settlesAt - now)}` : "Waiting for the result";
+  }
   return `Ended ${londonClock(m.settlesAt)}`;
 }
 
@@ -349,6 +352,7 @@ export function MarketCard({
           {phase === "open" ? (
             <>
               <span className="tl-data">{countdown(m.closesAt - now)}</span> left to bet
+              {resultEta(m).slow && <> · result about {londonClock(resultEta(m).at)}</>}
             </>
           ) : (
             clockText(phase, m, now)
