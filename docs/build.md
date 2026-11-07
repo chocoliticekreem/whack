@@ -20,6 +20,7 @@ prior_art: https://github.com/chocoliticekreem/mirrorverse (built 2026-10-17 at 
 | Keys | TfL app key and Anthropic key in the main checkout's gitignored `.env` | — |
 
 **Gaps, ranked:**
+0. **Switch the engine to 5-minute markets** (horizon 5 min, observation every ~60 s). Queued for after the broker tuning lands.
 1. The engine runs on a **synthetic fixture**. It needs a real Oxford Circus seed whose camera IDs
    match the recorder's.
 2. **No people counts yet:** start `services/yolo` and restart the recorder with `--yolo`.
@@ -69,7 +70,7 @@ Polls, per `recorder/README.md`:
 | Disruptions (only written when changed) | 5 min |
 | BikePoint (796 docks) | 2 min |
 | Crowding live, 20 central stations (+ typical profiles once a day) | 5 min |
-| JamCam metadata, ~83 central cams (`--yolo` adds people/vehicle counts) | 90 s |
+| JamCam metadata, ~83 central cams (`--yolo` adds people/vehicle counts) | 60 s (for 5-minute markets) |
 
 - About 320 MB/day, mostly the bus snapshot.
 - It only runs while the laptop is awake and online (`caffeinate -i`).
