@@ -77,10 +77,57 @@ class LineRule(unittest.TestCase):
         line = {"id": "l1", "name": "L1", "statuses": [
             {"statusSeverity": 6, "statusSeverityDescription": "Severe Delays", "reason": reason},
             {"statusSeverity": 3, "statusSeverityDescription": "Part Suspended", "reason": reason}]}
-        got = by_where(events.derive(self.snap(line), NOW))
+        ivs = events.derive(self.snap(line), NOW)
+        got = by_where(ivs)
         self.assertEqual(got[("closure", nap("NALP"))]["magnitude"], 0.0)
-        self.assertEqual(got[("capacity", nap("NDEL"))]["magnitude"], 0.5)
-        self.assertIn("rest of the line", got[("capacity", nap("NDEL"))]["reason"])
+        (rest,) = [i for i in ivs if "line" in i["where"]]
+        self.assertEqual(rest["where"], {"line": "l1", "naptans": ["NCHA", "NDEL", "NECH"]})
+        self.assertEqual((rest["kind"], rest["magnitude"]), ("capacity", 0.5))
+        self.assertIn("rest of the line", rest["reason"])
+        self.assertNotIn(("capacity", nap("NDEL")), got)
+
+    def test_unscoped_delay_is_one_event_per_line(self):
+        ivs = events.derive(self.snap(status("l1", 6, "Severe Delays", "L1: Severe delays due to an earlier fault.")), NOW)
+        self.assertEqual(len(ivs), 1)
+        self.assertEqual(ivs[0]["where"], {"line": "l1", "naptans": ["NALP", "NBRA", "NCHA", "NDEL", "NECH"]})
+        self.assertEqual(ivs[0]["magnitude"], 0.5)
+
+    def test_station_lines_come_from_the_whole_day_not_recent_arrivals(self):
+        recent = [r for r in arrivals() if r["lineId"] == "l1"]
+        suspended = rec([status("l1", 2, "Suspended", "L1: No service.")])
+        only_recent = by_where(events.derive({"line_status": suspended, "tube": rec(recent)}, NOW))
+        self.assertIn(("closure", nap("NBRA")), only_recent)
+        got = by_where(events.derive({"line_status": suspended, "tube": rec(recent), "tube_day": rec(arrivals())}, NOW))
+        self.assertNotIn(("closure", nap("NBRA")), got)
+        self.assertEqual(got[("capacity", nap("NBRA"))]["magnitude"], 0.5)
+        self.assertEqual(got[("closure", nap("NALP"))]["magnitude"], 0.0)
+
+    def crowded_snap(self, live_share):
+        snap = self.snap(status("l1", 3, "Part Suspended", "L1: No service between Alpha and Charlie."))
+        snap["crowding"] = rec([{"naptan": "NALP", "name": "Alpha", "dataAvailable": True,
+                                 "percentageOfBaseline": 0.2 * live_share, "timeUtc": "2030-03-02T17:55:00.000Z"}])
+        snap["crowding_profile"] = rec([profile("NALP", 0.2)])
+        return snap
+
+    def test_busy_station_is_never_closed(self):
+        with self.assertLogs("multiverse.events", "INFO") as cm:
+            ivs = events.derive(self.crowded_snap(0.8), NOW)
+        got = by_where(ivs)
+        self.assertNotIn(("closure", nap("NALP")), got)
+        self.assertNotIn(("capacity", nap("NALP")), got)
+        self.assertIn(("closure", nap("NCHA")), got)
+        self.assertTrue(any("NALP reads 80% of typical" in m and "closure not emitted" in m for m in cm.output))
+        self.assertIn(("closure", nap("NALP")), by_where(events.derive(self.crowded_snap(0.3), NOW)))
+
+    def test_planned_closure_on_a_line_not_running_is_not_scheduled(self):
+        parked = [dict(r, currentLocation="At Platform") if r["lineId"] == "l2" else r for r in arrivals()]
+        snap = {"line_status": rec([status("l2", 4, "Planned Closure", "L2: no service at weekends.")]),
+                "tube": rec(parked)}
+        with self.assertLogs("multiverse.events", "INFO") as cm:
+            self.assertEqual(events.derive(snap, NOW), [])
+        self.assertTrue(any("l2 Planned Closure" in m and "not scheduled" in m for m in cm.output))
+        snap["line_status"] = rec([status("l2", 2, "Suspended", "L2: No service.")])
+        self.assertTrue(events.derive(snap, NOW))
 
     def test_part_status_without_section_and_unknown_line_skipped(self):
         with self.assertLogs("multiverse.events", "INFO") as cm:
@@ -279,7 +326,7 @@ class MergeAndDeterminism(unittest.TestCase):
     def test_every_intervention_matches_the_shape(self):
         for iv in events.derive(self.full_snapshot(), NOW):
             self.assertIn(iv["kind"], {"closure", "capacity", "demand_surge", "demand_drop", "weather"})
-            self.assertTrue(set(iv["where"]) in ({"segments"}, {"lat", "lon", "radius_m"}, {"naptan"}))
+            self.assertTrue(set(iv["where"]) in ({"segments"}, {"lat", "lon", "radius_m"}, {"naptan"}, {"line", "naptans"}))
             self.assertLess(iv["start"], iv["end"])
             self.assertIsInstance(iv["magnitude"], float)
             self.assertTrue(iv["reason"] and iv["source"] and isinstance(iv["planned"], bool))
@@ -300,6 +347,22 @@ class Replay(unittest.TestCase):
         self.assertEqual([ts for ts, _ in out], [NOW, NOW + MIN])
         self.assertTrue(any(i["kind"] == "closure" for i in out[0][1]))
         self.assertEqual(out[1][1], [])
+
+    def test_replay_reads_station_lines_from_the_whole_day(self):
+        l1 = [r for r in arrivals() if r["lineId"] == "l1"]
+        with tempfile.TemporaryDirectory() as d:
+            for source, ts, payload in (
+                    ("tube", "2030-03-02T17:59:00Z", l1),
+                    ("line_status", "2030-03-02T18:00:00Z", [status("l1", 2, "Suspended", "L1: No service.")]),
+                    ("tube", "2030-03-02T21:00:00Z", arrivals())):
+                path = Path(d) / source / ts[:10] / f"{ts[11:13]}.ndjson.gz"
+                path.parent.mkdir(parents=True, exist_ok=True)
+                with gzip.open(path, "at") as f:
+                    f.write(json.dumps({"ts": ts, "source": source, "payload": payload}) + "\n")
+            ((ts, ivs),) = list(events.replay(d, NOW - 5 * MIN, NOW + 5 * MIN))
+        got = by_where(ivs)
+        self.assertEqual(got[("capacity", nap("NBRA"))]["magnitude"], 0.5)
+        self.assertEqual(got[("closure", nap("NALP"))]["magnitude"], 0.0)
 
 
 class NoHardcodedNames(unittest.TestCase):

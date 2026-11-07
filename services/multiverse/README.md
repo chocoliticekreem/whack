@@ -206,6 +206,18 @@ of the worlds (`EVENT_PRIOR`, a fixed coin per world and event; children inherit
 a wrong "station closed" call costs every world that carries it as soon as TfL publishes the station busy.
 `{"events": "off"}` on `/spawn` turns them off.
 
+Tube line status (`line_disruption`) guards against false closures:
+- A station is `closure` only when every line serving it is closed by line status, the station inside the stated
+  section. The lines serving a station come from the whole recorded day of arrivals (`tube_day` in replay), so a line
+  with no recent train is never read as "all lines shut"; a partly closed station gets `capacity` at its open share.
+- A station reading at least 50 % of typical on live crowding (`CLOSURE_MAX_LIVE_RATIO`) is never closed; the
+  closure and its displacement are dropped and logged.
+- A line with a Planned Closure status and no train seen moving between stations (TfL keeps parked trains listed
+  "At Platform") is not scheduled at that time, not disrupted: nothing is emitted for it.
+- A delay with no section (whole line, "on the rest of the line") is one `capacity` event per line,
+  `where: {line, naptans}`. `central.resolve_events` has no branch for that shape yet, so these neither enter the
+  worlds nor show in `/state`.
+
 ### Endpoints (central seed)
 
 | Endpoint | Shape |

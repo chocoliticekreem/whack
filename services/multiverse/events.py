@@ -6,10 +6,15 @@ venue or date.
 
 snapshot: {source: {"ts": iso, "payload": ...}} with the recorder's payload shapes; for
 `crowding_profile` the payload is the list of per-station profiles. `tube` may be the union of
-several recent arrival snapshots (replay does that) so the line graph has more links.
+several recent arrival snapshots (replay does that) so the line graph has more links. Optional
+`tube_day`: arrival rows from the whole recorded day, read only for which lines serve a station and
+which stations neighbour each other (fixed network facts); whether a line is running is read from
+`tube` alone.
 
 Intervention: {id, kind, where, start, end, magnitude, source, rule, reason, planned[, shape]}
 - closure / capacity at a naptan: magnitude = remaining capacity fraction (closure is 0).
+- capacity on a line: where {line, naptans}, one event for a delay that covers a whole line or
+  "the rest of the line"; magnitude = that line's remaining capacity fraction.
 - closure on streets: where {lat, lon, radius_m}; the engine picks the segments inside it.
 - demand_surge: magnitude = extra demand as a fraction of the place's typical flow.
 - weather: magnitude = rain in mm/h, where = a citywide radius.
@@ -42,6 +47,8 @@ HORIZON_MIN = 30
 CLOSED_SEVERITIES = {1, 2, 3, 4, 5}
 PART_SEVERITIES = {3, 5}
 PLANNED_SEVERITIES = {4, 5}
+PLANNED_CLOSURE = 4
+CLOSURE_MAX_LIVE_RATIO = 0.5
 DELAY_FACTOR = {6: 0.5, 7: 0.75}
 FAMILY_WORDS = {"closed": ("no service", "suspended", "closed", "closure"),
                 "severe": ("severe delays",), "reduced": ("reduced service",)}
@@ -151,28 +158,35 @@ class Typical:
 
 # ---- tube network from arrivals --------------------------------------------------------------
 
+def is_between(row: dict) -> bool:
+    return (row.get("currentLocation") or "").lower().startswith("between ")
+
+
 class Network:
     """Stations, line membership and adjacency, all read from the tube arrivals feed.
 
     Adjacency comes from `currentLocation` "Between A and B" strings: a train seen between two
-    stations proves they are neighbours on that line.
+    stations proves they are neighbours on that line. `moving` holds the lines with such a train in
+    `arrivals` (not `topology`): TfL keeps parked trains listed "At Platform" on a line that is not
+    running, so rows alone do not show a line is in service.
     """
 
-    def __init__(self, arrivals: list[dict] | None):
+    def __init__(self, arrivals: list[dict] | None, topology: list[dict] | None = None):
         self.name: dict[str, str] = {}
         self.lines: dict[str, set[str]] = defaultdict(set)
         self.by_line_name: dict[str, dict[str, str]] = defaultdict(dict)
         self.edges: dict[str, dict[str, set[str]]] = defaultdict(lambda: defaultdict(set))
-        rows = [r for r in arrivals or [] if r.get("naptanId") and r.get("lineId")]
+        live = [r for r in arrivals or [] if r.get("naptanId") and r.get("lineId")]
+        self.moving = {r["lineId"] for r in live if is_between(r)}
+        rows = live + [r for r in topology or [] if r.get("naptanId") and r.get("lineId")]
         for r in rows:
             nap, line = r["naptanId"], r["lineId"]
             self.name.setdefault(nap, display(r.get("stationName") or nap))
             self.lines[nap].add(line)
             self.by_line_name[line].setdefault(norm(r.get("stationName") or nap), nap)
         for r in rows:
-            loc = r.get("currentLocation") or ""
-            if loc.lower().startswith("between "):
-                pair = self.split_pair(r["lineId"], loc[8:])
+            if is_between(r):
+                pair = self.split_pair(r["lineId"], r["currentLocation"][8:])
                 if pair:
                     a, b = pair
                     self.edges[r["lineId"]][a].add(b)
@@ -274,13 +288,34 @@ def find_scope(net: Network, line: str, reason: str, family: str) -> tuple[str, 
     return kind, stations, label, word
 
 
+def network(snapshot: dict) -> Network:
+    _, arrivals = record(snapshot, "tube")
+    _, topology = record(snapshot, "tube_day")
+    return Network(arrivals, topology)
+
+
+def live_ratios(snapshot: dict, typical: Typical) -> dict[str, float]:
+    """Live busyness over typical per naptan, from the newest crowding record (stations with a real profile)."""
+    ts, rows = record(snapshot, "crowding")
+    out = {}
+    for row in rows or []:
+        nap, live = row.get("naptan"), row.get("percentageOfBaseline")
+        if not nap or not row.get("dataAvailable") or not isinstance(live, (int, float)):
+            continue
+        typ, real = typical.at(nap, parse_ms(row["timeUtc"]) if row.get("timeUtc") else ts)
+        if real and typ is not None and typ >= CROWD_MIN_TYPICAL:
+            out[nap] = live / typ
+    return out
+
+
 def line_rule(snapshot: dict, now: int, typical: Typical) -> list[dict]:
     ts, payload = record(snapshot, "line_status")
-    _, arrivals = record(snapshot, "tube")
     if ts is None:
         return []
-    net = Network(arrivals)
+    net = network(snapshot)
     station_lines: dict[str, dict[str, tuple[float, bool, str]]] = defaultdict(dict)
+    line_wide: list[dict] = []
+    end = now + HORIZON_MIN * 60_000
     for ln in payload or []:
         line, lname = ln.get("id"), ln.get("name") or ln.get("id")
         statuses = [s for s in ln.get("statuses") or [] if s.get("statusSeverity") in CLOSED_SEVERITIES | set(DELAY_FACTOR)]
@@ -288,6 +323,9 @@ def line_rule(snapshot: dict, now: int, typical: Typical) -> list[dict]:
             continue
         if not net.stations(line):
             log.info("line_status: no station data for %s, skipped", line)
+            continue
+        if line not in net.moving and any(s["statusSeverity"] == PLANNED_CLOSURE for s in statuses):
+            log.info("line_status: %s Planned Closure and no train seen moving on it: not scheduled now, skipped", line)
             continue
         covered: set[str] = set()
         plans = []
@@ -307,12 +345,17 @@ def line_rule(snapshot: dict, now: int, typical: Typical) -> list[dict]:
             planned = sev in PLANNED_SEVERITIES or any(w in norm(reason) for w in PLANNED_WORDS)
             what = f"{word or desc.lower()} {label}".strip() if label else (f"{word} on the rest of the line" if kind == "rest" else (word or desc.lower()))
             text = f"{lname} {desc}: {what} (TfL line status {hhmm(ts)})"
+            if kind != "section" and factor > 0:
+                line_wide.append(make("capacity", {"line": line, "naptans": targets}, ts, end, factor, "line_status",
+                                      "line_disruption", f"{text}. {len(targets)} stations, line capacity x{factor:.2f}",
+                                      planned))
+                continue
             for nap in targets:
                 old = station_lines[nap].get(line)
                 if old is None or factor < old[0]:
                     station_lines[nap][line] = (factor, planned, text)
-    out = []
-    end = now + HORIZON_MIN * 60_000
+    out = line_wide
+    busy = live_ratios(snapshot, typical)
     for nap in sorted(station_lines):
         hit = station_lines[nap]
         n = max(len(net.lines.get(nap, ())), 1)
@@ -322,6 +365,10 @@ def line_rule(snapshot: dict, now: int, typical: Typical) -> list[dict]:
         texts = "; ".join(sorted({t for _, _, t in hit.values()}))
         name = net.name.get(nap, nap)
         kind = "closure" if factor <= 1e-9 else "capacity"
+        if kind == "closure" and busy.get(nap, 0.0) >= CLOSURE_MAX_LIVE_RATIO:
+            log.info("line_status: %s reads %.0f%% of typical on live crowding, closure not emitted (%s)",
+                     nap, busy[nap] * 100, texts)
+            continue
         reason = f"{texts}. {name}: {len(hit)}/{n} lines affected, capacity x{factor:.2f}"
         out.append(make(kind, {"naptan": nap}, ts, end, max(factor, 0.0), "line_status", "line_disruption", reason, planned))
         if closed > 0:
@@ -586,8 +633,7 @@ def derive(snapshot: dict, now: int) -> list[dict]:
     """Every intervention the current feeds imply at `now` (ms). Pure: same input, same output."""
     _, profiles = record(snapshot, "crowding_profile")
     typical = Typical(profiles if isinstance(profiles, list) else [profiles] if profiles else [])
-    _, arrivals = record(snapshot, "tube")
-    net = Network(arrivals)
+    net = network(snapshot)
     items = (line_rule(snapshot, now, typical) + crowding_rule(snapshot, now, typical) + road_rule(snapshot, now)
              + fixture_rule(snapshot, now, net) + rain_rule(snapshot, now))
     return merge(items)
@@ -635,16 +681,25 @@ def add_tube_rows(rows: dict, payload: Any) -> bool:
 def replay(raw_dir: str | Path, start: int, end: int) -> Iterator[tuple[int, list[dict]]]:
     """(ts, interventions) at every recorded update of a rule's feed between start and end (ms).
 
-    The tube network is the union of every arrivals snapshot so far: a suspended section has no
-    trains on it, so its links only show up in earlier snapshots.
+    `tube` is the union of every arrivals snapshot so far: a suspended section has no trains on it,
+    so its links only show up in earlier snapshots. `tube_day` adds the rows of the whole recorded
+    (UTC) day, so a station's lines are known before a train on each has been seen; only which lines
+    serve which stations is read from it.
     """
+    day_end = parse_ms(datetime.fromtimestamp(end / 1000, timezone.utc).strftime("%Y-%m-%dT23:59:59Z"))
     events = []
+    topology: dict[tuple, dict] = {}
     for source in SOURCES:
-        for ts, payload in read_source(Path(raw_dir), source, start, end):
+        for ts, payload in read_source(Path(raw_dir), source, start, day_end if source == "tube" else end):
+            if source == "tube":
+                add_tube_rows(topology, payload)
             if ts <= end:
                 events.append((ts, SOURCES.index(source), source, payload))
     events.sort(key=lambda e: (e[0], e[1]))
     snap: dict[str, dict] = {}
+    if topology:
+        snap["tube_day"] = {"ts": datetime.fromtimestamp(day_end / 1000, timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                            "payload": [topology[k] for k in sorted(topology, key=str)]}
     profiles: dict[str, dict] = {}
     tube: dict[tuple, dict] = {}
     tube_cache: list[dict] = []

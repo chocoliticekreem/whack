@@ -78,16 +78,17 @@ def main() -> None:
         for iv in ivs:
             for fam in iv["rule"].split("+"):
                 all_rules[fam] += 1
-            nap = iv["where"].get("naptan")
-            if nap not in watched or iv["kind"] not in DIRECTION:
-                continue
-            here.add(nap)
-            for fam in iv["rule"].split("+"):
-                eps = episodes[(fam, iv["kind"], nap)]
-                if eps and ts - eps[-1][1] <= EPISODE_GAP_MIN * 60_000:
-                    eps[-1][1] = ts
-                else:
-                    eps.append([ts, ts])
+            naps = [iv["where"]["naptan"]] if "naptan" in iv["where"] else iv["where"].get("naptans", [])
+            for nap in naps:
+                if nap not in watched or iv["kind"] not in DIRECTION:
+                    continue
+                here.add(nap)
+                for fam in iv["rule"].split("+"):
+                    eps = episodes[(fam, iv["kind"], nap)]
+                    if eps and ts - eps[-1][1] <= EPISODE_GAP_MIN * 60_000:
+                        eps[-1][1] = ts
+                    else:
+                        eps.append([ts, ts])
         active.append(here)
 
     def quiet_at(t: int) -> set[str]:
