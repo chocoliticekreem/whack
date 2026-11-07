@@ -41,6 +41,7 @@ What we learned, What's next for OverWatch.
 | 21 | ~20:35 | — | "If someone on the train sees it stop before the API does, can they trade on that?" | Courtsiding defences: bet delay, pause on feed change, tighter caps. Measured edge 0 for head starts up to 44 s |
 | 22 | ~20:40 | — | "The judges are Marshall Wace quants; they'll ask these." | Judge-prep pressure test: the hardest questions, honest answers, a fix list |
 | 23 | ~20:40 | A what-if settings form | "This makes no sense." | Redesigned as direct manipulation: click a street, pick an action, see the odds move |
+| 24 | ~20:55 | Market cards stacked with clue lines, a futures fan, counts, source and rules | "I don't understand even a bit of it. Any person should be able to understand how to trade." | Plain-language cards: a question, big answer buttons with chance and payout, details behind a tap, 3-step onboarding |
 
 ## Challenges (for Devpost)
 - **Markets that were obvious.** At first 286 of 309 markets opened with a favourite above 90%.
