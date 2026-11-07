@@ -1,0 +1,423 @@
+/* What if: direct manipulation on the map. Colours from the tokens on .tl-root (city.css); the accent marks
+   what a what-if moves, --no marks what it closes. */
+
+.tl[data-scenario] .tl-ai,
+.tl[data-scenario] .tl-strip {
+  opacity: 0.35;
+  pointer-events: none;
+  transition: opacity 0.2s ease;
+}
+
+.tl[data-scenario] .cm-hub {
+  opacity: 0.3 !important;
+  pointer-events: none;
+}
+
+.tl-whatif[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--surface-2);
+}
+
+/* The bar over the map: one sentence, the small print, the exit. */
+.sc {
+  position: absolute;
+  z-index: 25;
+  top: calc(var(--bar-h) + var(--strip-h) + env(safe-area-inset-top) + var(--s3));
+  left: calc(var(--side-w) + var(--s3));
+  right: calc(var(--ai-w) + var(--s3));
+  max-width: 760px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  padding: var(--s3) var(--s3) var(--s3) var(--s4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  box-shadow: var(--shadow-pop);
+}
+
+.sc-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--s3);
+}
+
+.sc-main {
+  min-width: 0;
+}
+
+.sc-lead {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 550;
+  line-height: 1.4;
+  letter-spacing: -0.005em;
+}
+
+.sc-small {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.sc-badge {
+  padding: 0 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-s);
+  font-weight: 500;
+}
+
+.sc-link {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--ink-2) !important;
+  font-size: 12px !important;
+  font-weight: 500;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+
+.sc-actions {
+  display: flex;
+  flex: none;
+  gap: var(--s1);
+}
+
+.sc-ghost,
+.sc-exit {
+  height: 32px;
+  padding: 0 var(--s3);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  background: var(--surface);
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sc-ghost:hover {
+  background: var(--surface-2);
+}
+
+.sc-exit {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: var(--on-ink) !important;
+}
+
+.sc-exit:hover {
+  background: var(--ink-2);
+}
+
+.sc-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
+
+.sc-chip {
+  max-width: 100%;
+  padding: 6px var(--s3);
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--surface-2);
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.sc-chip:hover {
+  border-color: var(--ink-2);
+  background: var(--surface);
+}
+
+.sc-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2) var(--s3);
+  font-size: 13px;
+}
+
+.sc-chg {
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.sc-chg b {
+  font-weight: 650;
+}
+
+.sc-chg[data-dir="up"] b {
+  color: var(--accent);
+}
+
+.sc-adjust {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2) var(--s4);
+}
+
+.sc-field {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: 12px;
+}
+
+.sc-field > span {
+  color: var(--muted);
+}
+
+.sc-seg {
+  display: inline-flex;
+  gap: 2px;
+  padding: 2px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+}
+
+.sc-seg button {
+  min-height: 26px;
+  padding: 0 var(--s2);
+  border: 0;
+  border-radius: var(--r-s);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sc-seg button[data-on] {
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-tag);
+}
+
+.sc .sc-error {
+  margin: 0;
+}
+
+/* Popover at the click: the place, then the verbs. */
+.sc-pop-anchor {
+  position: absolute;
+  width: 0;
+  height: 0;
+}
+
+.sc-pop {
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 200px;
+  padding: var(--s3);
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #e4e4de);
+  border-radius: var(--r-l, 10px);
+  box-shadow: var(--shadow-pop);
+  color: var(--ink, #151517);
+  font-family: var(--sans);
+  font-size: 13px;
+  transform: translateX(-50%);
+}
+
+.sc-pop::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -5px;
+  width: 9px;
+  height: 9px;
+  background: inherit;
+  border-right: 1px solid var(--line, #e4e4de);
+  border-bottom: 1px solid var(--line, #e4e4de);
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.sc-pop-title {
+  font-size: 14px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.sc-pop-sub {
+  color: var(--muted, #74766c);
+  font-size: 12px;
+}
+
+.sc-pop-verbs {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  margin-top: var(--s2);
+}
+
+.sc-pop-verbs button {
+  height: 34px;
+  padding: 0 var(--s3);
+  border: 1px solid var(--line-strong, #c9cac2);
+  border-radius: var(--r, 6px);
+  background: var(--surface, #fff);
+  color: var(--ink, #151517);
+  font: inherit;
+  font-weight: 500;
+  text-align: left;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.sc-pop-verbs button:hover {
+  border-color: var(--ink, #151517);
+  background: var(--surface-2, #f7f7f4);
+}
+
+/* What-if line on a market card. */
+.sc-card {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px var(--s2);
+  margin-top: var(--s2);
+  padding: var(--s2) var(--s3);
+  border-left: 2px solid var(--accent);
+  background: var(--surface-2);
+  border-radius: 0 var(--r-s) var(--r-s) 0;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.sc-card-tag {
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.sc-card-o {
+  color: var(--ink-2);
+}
+
+.sc-card-o .tl-data {
+  font-family: var(--mono);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.sc-card-o .tl-data[data-up] {
+  color: var(--accent);
+}
+
+.sc-card-note {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Result pins: accent for a rise, outlined ink for a fall; strength scales with the change. */
+.sc-pin {
+  --w: 0.5;
+  position: absolute;
+  width: 0;
+  height: 0;
+  pointer-events: none;
+}
+
+.sc-pin-dot {
+  position: absolute;
+  left: calc(-6px - var(--w) * 6px);
+  top: calc(-6px - var(--w) * 6px);
+  width: calc(12px + var(--w) * 12px);
+  height: calc(12px + var(--w) * 12px);
+  border-radius: 50%;
+  background: var(--accent, #d6246e);
+  opacity: calc(0.5 + var(--w) * 0.5);
+  box-shadow: 0 0 0 2px var(--surface, #fff), var(--shadow-tag);
+}
+
+.sc-pin[data-dir="down"] .sc-pin-dot {
+  background: var(--surface, #fff);
+  box-shadow: inset 0 0 0 2px var(--ink-2, #3d3e38), var(--shadow-tag);
+  opacity: 1;
+}
+
+.sc-pin-tag {
+  position: absolute;
+  left: 0;
+  bottom: 16px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 var(--s2, 8px);
+  border-radius: var(--r-s, 4px);
+  background: var(--surface, #fff);
+  box-shadow: var(--shadow-tag);
+  color: var(--ink, #151517);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+
+.sc-pin-tag b {
+  font-weight: 650;
+  color: var(--ink-2, #3d3e38);
+}
+
+.sc-pin[data-dir="up"] .sc-pin-tag b {
+  color: var(--accent, #d6246e);
+}
+
+/* Phone: the bar sits under the header, over the traders strip; markets stay in their sheet below. */
+@media (max-width: 720px) {
+  .sc {
+    top: calc(var(--bar-h) + env(safe-area-inset-top) + var(--s2));
+    left: var(--s2);
+    right: var(--s2);
+    padding: var(--s3);
+  }
+
+  .sc-row {
+    flex-direction: column;
+    gap: var(--s2);
+  }
+
+  .sc-lead {
+    font-size: 14px;
+  }
+
+  .sc-actions {
+    align-self: stretch;
+  }
+
+  .sc-actions button {
+    flex: 1;
+  }
+
+  .sc-chg {
+    display: none;
+  }
+
+  .sc-chip {
+    padding: 5px var(--s3);
+    font-size: 12px;
+  }
+
+  .sc-small {
+    font-size: 11px;
+  }
+}

@@ -66,6 +66,11 @@ function fit(map: MapLibreMap, hubs: Hotspot[], duration: number) {
   map.easeTo({ center, zoom, offset, pitch: PITCH, bearing: BEARING, duration, essential: true });
 }
 
+/** The loaded map, for overlays such as scenario mode; null until the style has loaded. */
+export function getCityMap(): MapLibreMap | null {
+  return liveLoaded ? liveMap : null;
+}
+
 /** Frames the given hubs, clear of the cards; safe to call before the map loads (applied once it does). */
 export function flyToHotspots(hubs: Hotspot[]) {
   if (!hubs.length) return;
