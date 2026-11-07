@@ -381,6 +381,7 @@ class ExchangeHooks(unittest.TestCase):
         from exchange import Clock as ExClock, Exchange
 
         self.tc = tc
+        tc.no_delay(self)
         self.raw = tc.Raw()
         self.addCleanup(self.raw.dir.cleanup)
         tc.city(self.raw, tc.T0 + 30 * tc.MIN)
@@ -558,6 +559,7 @@ class Restart(unittest.TestCase):
 
     def test_bets_on_a_recorded_market_settle_from_data_after_a_restart(self):
         tc = self.tc
+        tc.no_delay(self)
         ex = self.exchange()
         ex.ledger.open_account("alice")
         ex.tick(tc.T0)

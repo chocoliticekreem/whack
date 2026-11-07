@@ -11,6 +11,8 @@ export interface MyBet {
   /** Points paid out if this option wins (stake × the odds locked at bet time). */
   payout: number;
   done?: "won" | "lost" | "void";
+  /** Accepted but not booked yet: it fills at `fillsAt` at the price then, or is cancelled (bet delay). */
+  pending?: { betId: string; fillsAt: number };
 }
 
 export interface Wallet {

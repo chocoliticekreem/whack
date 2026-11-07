@@ -3,7 +3,7 @@ import { mockHandle } from "../mock";
 const CITY_URL = process.env.CITY_URL ?? "http://127.0.0.1:8051";
 // Why: exact paths only, so nothing a caller puts in [...path] can reach any other upstream path.
 const GET_ROUTES = new Set(["hotspots", "traders", "markets", "round", "signals", "leaderboard", "stats",
-  "wallet", "ledger", "positions", "history"]);
+  "wallet", "ledger", "positions", "history", "bet"]);
 const POST_ROUTES = new Set(["settle", "bet", "limits", "break", "player/new", "player/name"]);
 const NO_STORE = { "cache-control": "no-store" };
 
@@ -13,7 +13,8 @@ async function forward(request: Request, path: string[], allowed: Set<string>): 
   const url = new URL(request.url);
   const body = request.method === "POST" ? (await request.text()) || "{}" : undefined;
   if (url.searchParams.get("mock") === "1") {
-    const { status, data } = mockHandle(route, request.method, body ? JSON.parse(body) : {});
+    const args = body ? JSON.parse(body) : Object.fromEntries(url.searchParams);
+    const { status, data } = mockHandle(route, request.method, args);
     return Response.json(data, { status, headers: NO_STORE });
   }
   const headers: Record<string, string> = { "content-type": "application/json" };

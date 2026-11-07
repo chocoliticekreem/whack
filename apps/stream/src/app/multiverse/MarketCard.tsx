@@ -298,12 +298,23 @@ export function MarketCard({
               to win <span className="tl-data">{fmtPts(stakeN * drafted.odds)}</span>
             </span>
           </button>
+          {m.integrity && m.integrity.delayS > 0 && (
+            <span className="tl-muted tl-stake-note">
+              Fills {m.integrity.delayS} s after you confirm, at the price then
+            </span>
+          )}
         </div>
       )}
 
       {bet && (
         <p className="tl-mine" data-result={bet.done}>
-          {!bet.done && (
+          {!bet.done && bet.pending && (
+            <>
+              Pending · <b className="tl-data">{fmtPts(bet.stake)}</b> on {bet.label}
+              {bet.pending.fillsAt > now ? <> · fills in <span className="tl-data">{Math.ceil((bet.pending.fillsAt - now) / 1000)}s</span></> : " · filling…"}
+            </>
+          )}
+          {!bet.done && !bet.pending && (
             <>
               Your bet: <b className="tl-data">{fmtPts(bet.stake)}</b> on {bet.label}, pays <b className="tl-data">{fmtPts(bet.payout)}</b>
             </>

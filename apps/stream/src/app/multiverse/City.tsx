@@ -17,6 +17,7 @@ import {
 import type { BetResponse, CitySignals, Hotspot, LeaderRow, Market, MarketsResponse, SettleResponse, Trader } from "./city-types";
 import { CityStrip } from "./Clues";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
+import { cancelNote, usePendingFills, type Fill } from "./pending-bets";
 import { WalletPanel, createPlayer, setNickname, useServerWallet, useStakeConfirm } from "./Wallet";
 
 const POLL_MS = 3000;
@@ -125,6 +126,7 @@ export function City() {
   const [pop, setPop] = useState<Pop | null>(null);
   const [glow, setGlow] = useState<string | null>(null);
   const [betError, setBetError] = useState<string | null>(null);
+  const [betNote, setBetNote] = useState<string | null>(null);
   const [book, setBook] = useState<Book>({ markets: {}, hist: {} });
   const settling = useRef(new Set<string>());
   // Wallet hook: the server ledger owns the balance; wallet.points mirrors it outside the demo mock.
@@ -226,7 +228,7 @@ export function City() {
       }
       setWallet((w) => {
         const bet = w.bets[m.id];
-        if (!bet || bet.done) return w;
+        if (!bet || bet.done || bet.pending) return w;
         const isVoid = res.void || res.winner == null;
         const won = !isVoid && bet.option === res.winner;
         const done: MyBet["done"] = isVoid ? "void" : won ? "won" : "lost";
@@ -342,6 +344,14 @@ export function City() {
           setBetError(r.data.error ?? "Bet rejected");
           return;
         }
+        setBetNote(null);
+        if (r.data.status === "pending" && r.data.betId && r.data.fillsAt) {
+          const pending = { betId: r.data.betId, fillsAt: r.data.fillsAt };
+          const bet: MyBet = { market: m.id, option: opt.id, label: opt.label, stake: amount, payout: 0, pending };
+          setWallet((cur) => ({ ...cur, bets: { ...cur.bets, [m.id]: bet } }));
+          setDraft(null);
+          return;
+        }
         const odds = r.data.odds ?? opt.odds;
         const payout = r.data.payout ?? Math.floor(amount * odds);
         if (r.data.options) {
@@ -366,6 +376,34 @@ export function City() {
     },
     [draft, stake, mock, book, askStake, dropToken],
   );
+
+  const onFill = useCallback(
+    (market: string, fill: Fill) => {
+      setWallet((cur) => {
+        const bet = cur.bets[market];
+        if (!bet?.pending) return cur;
+        const filled = { ...bet, payout: fill.payout, pending: undefined };
+        return { ...cur, points: mock ? cur.points - bet.stake : cur.points, bets: { ...cur.bets, [market]: filled } };
+      });
+      if (!mock) void refreshWallet();
+    },
+    [mock, refreshWallet],
+  );
+  const onCancelled = useCallback(
+    (market: string, reason: string | undefined) => {
+      const bet = wallet.bets[market];
+      if (!bet?.pending) return;
+      setWallet((cur) => {
+        const { [market]: _gone, ...bets } = cur.bets;
+        void _gone;
+        return { ...cur, bets };
+      });
+      setDraft({ market, option: bet.option });
+      setBetNote(cancelNote(reason));
+    },
+    [wallet.bets],
+  );
+  usePendingFills(wallet.bets, wallet.player, wallet.token, mock, onFill, onCancelled);
 
   const confirm = () => {
     if (!wallet.name) {
@@ -538,6 +576,11 @@ export function City() {
         {betError && (
           <div className="tl-error" onClick={() => setBetError(null)}>
             {betError}
+          </div>
+        )}
+        {betNote && (
+          <div className="tl-error" data-quiet onClick={() => setBetNote(null)}>
+            {betNote}
           </div>
         )}
         {shown.length === 0 && <div className="tl-market tl-empty">Opening markets…</div>}
