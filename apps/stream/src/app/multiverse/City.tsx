@@ -1,6 +1,6 @@
 "use client";
 
-import { Trophy, X } from "lucide-react";
+import { Flame, Trophy, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LIVE_SETTINGS, setDemoSettings } from "@/platform/demo";
 import { setCurrentOrigin } from "@/twin/config";
@@ -19,7 +19,7 @@ import {
   type Wallet,
 } from "./city-store";
 import type { BetResponse, Hotspot, LeaderRow, Market, MarketsResponse, SettleResponse, Trader } from "./city-types";
-import { MarketCard, phaseOf, type TipTarget } from "./MarketCard";
+import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
 
 // Why: this module only loads in the browser (ssr: false), so the twin is re-centred before World first renders.
 setCurrentOrigin(CITY_ORIGIN);
@@ -65,7 +65,7 @@ function core(hubs: Hotspot[]): Hotspot[] {
 
 function frame(hubs: Hotspot[]) {
   if (isPhone()) flyToHotspots(core(hubs), { x: -0.03, z: 0.09, zoom: 2.1, steep: true });
-  else flyToHotspots(hubs, { x: -0.22, z: 0.05, zoom: 1, steep: false });
+  else flyToHotspots(hubs, { x: -0.26, z: 0.05, zoom: 1, steep: false });
 }
 
 function useNow(ms = 500) {
@@ -398,19 +398,26 @@ export function City() {
 
       <header className="tl-bar">
         <div className="tl-brand">
+          <span className="tl-title">
+            <span className="tl-mark" aria-hidden />
+            OverWatch
+          </span>
           <span className="tl-live" data-live={liveMode || undefined}>
             <span className="tl-live-dot" />
-            <span className="tl-desk">London · </span>
-            {liveMode ? "Live" : "Replay"} <span className="tl-num">{londonClock(clockMs)}</span>
+            {liveMode ? "Live" : "Replay"}
+            <span className="tl-clock">
+              <span className="tl-data">{londonClock(clockMs)}</span>
+              <span className="tl-desk"> London</span>
+            </span>
           </span>
-          <span className="tl-title">Trade London</span>
         </div>
         <div className="tl-wallet tl-num" aria-label="Your points">
           <span className="tl-pts">
-            <b>{fmtPts(wallet.points)}</b> pts
+            <b className="tl-data">{fmtPts(wallet.points)}</b> pts
           </span>
-          <span className="tl-streak" data-hot={wallet.streak > 0 || undefined}>
-            🔥 {wallet.streak}
+          <span className="tl-streak" data-hot={wallet.streak > 0 || undefined} aria-label={`Win streak ${wallet.streak}`}>
+            <Flame size={14} strokeWidth={2.5} />
+            <span className="tl-data">{wallet.streak}</span>
           </span>
           {broke && (
             <button type="button" className="tl-refill" onClick={() => setWallet((w) => ({ ...w, points: START_POINTS, streak: 0 }))}>
@@ -440,13 +447,13 @@ export function City() {
         </div>
         {healthOpen && (
           <div className="tl-pop tl-health-list" onClick={(e) => e.stopPropagation()}>
-            <b>Live feeds{mock ? " (demo data)" : ""}</b>
+            <b>Live feeds{mock ? ", demo data" : ""}</b>
             {offline && <span className="tl-bad">Exchange unreachable</span>}
             {Object.entries(feed?.feeds ?? {}).map(([id, f]) => (
               <span key={id} className="tl-feed" data-ok={f.ok || undefined}>
                 <span className="tl-health-dot" />
                 {FEED_NAMES[id] ?? id}
-                <span className="tl-muted tl-num">{f.ageS == null ? "no data" : f.ageS < 90 ? `${f.ageS}s ago` : `${Math.round(f.ageS / 60)} min ago`}</span>
+                <span className="tl-muted tl-data">{f.ageS == null ? "no data" : f.ageS < 90 ? `${f.ageS}s ago` : `${Math.round(f.ageS / 60)} min ago`}</span>
               </span>
             ))}
           </div>
@@ -455,7 +462,7 @@ export function City() {
 
       <aside className="tl-ai">
         <div className="tl-ai-head">
-          <b>{traders.length || 6} AI traders.</b> Each one reads ONE live London feed and bets against you.
+          <b>{traders.length || 6} AI traders.</b> Each reads one live London feed and bets against you.
         </div>
         <div className="tl-ai-list">
           {traders.map((t) => (
@@ -470,13 +477,13 @@ export function City() {
                 setTip({ trader: t.id, why: lastWhy.get(t.id), el: e.currentTarget });
               }}
             >
-              <span className="tl-emoji tl-av">{t.emoji}</span>
+              <Badge id={t.id} name={t.name} />
               <span className="tl-trader-text">
                 <b>{t.name}</b>
                 <span className="tl-muted">{t.watches}</span>
               </span>
-              <span className="tl-rec tl-num">
-                {t.record.won}W {t.record.lost}L
+              <span className="tl-rec tl-data" aria-label={`${t.record.won} won, ${t.record.lost} lost`}>
+                {t.record.won}–{t.record.lost}
               </span>
             </button>
           ))}
@@ -486,10 +493,7 @@ export function City() {
       <section className="tl-markets" aria-live="polite">
         <div className="tl-intro">
           <h1>Bet on what London does next.</h1>
-          <p>
-            Pick a market, stake points, beat the AI traders. Real TfL data settles every bet.
-            {mock && <span className="tl-demo"> Demo data</span>}
-          </p>
+          {mock && <span className="tl-demo">Demo data</span>}
         </div>
         {betError && (
           <div className="tl-error" onClick={() => setBetError(null)}>
@@ -536,14 +540,14 @@ export function City() {
           onClick={(e) => e.stopPropagation()}
         >
           <div className="tl-tip-head">
-            <span className="tl-emoji tl-av">{tipTrader.emoji}</span>
+            <Badge id={tipTrader.id} name={tipTrader.name} />
             <b>{tipTrader.name}</b>
-            <span className="tl-rec tl-num">
-              {tipTrader.record.won}W {tipTrader.record.lost}L
+            <span className="tl-rec tl-data">
+              {tipTrader.record.won} won, {tipTrader.record.lost} lost
             </span>
           </div>
           <div>
-            <span className="tl-muted">watches:</span> {tipTrader.watches}
+            <span className="tl-muted">Reads</span> {tipTrader.watches}
           </div>
           {tip.why && <q>{tip.why}</q>}
           <div className="tl-muted">{tipTrader.style}</div>
@@ -586,21 +590,20 @@ export function City() {
                 <X size={18} />
               </button>
             </div>
-            <p className="tl-muted">Humans and AI traders, ranked together by points.</p>
             <ol>
               {boardRows.map((r, i) => {
                 const t = r.kind === "ai" ? traders.find((x) => x.name === r.name) : undefined;
                 const me = r.kind === "human" && r.name === (wallet.name ?? defaultName(wallet.player));
                 return (
                   <li key={`${r.kind}-${r.name}`} data-me={me || undefined} data-kind={r.kind}>
-                    <span className="tl-rank tl-num">{i + 1}</span>
-                    <span className="tl-emoji">{t?.emoji ?? (me ? "🫵" : "👤")}</span>
+                    <span className="tl-rank tl-data">{i + 1}</span>
+                    <Badge id={t?.id ?? r.name} name={r.name} kind={r.kind === "ai" ? "ai" : me ? "me" : "human"} />
                     <span className="tl-board-name">
                       {r.name}
                       {me && " (you)"}
                     </span>
-                    <span className="tl-kind">{r.kind === "ai" ? "AI" : "Human"}</span>
-                    <b className="tl-num">{fmtPts(r.points)}</b>
+                    <span className="tl-kind">{r.kind === "ai" ? "AI trader" : "Player"}</span>
+                    <b className="tl-data">{fmtPts(r.points)}</b>
                   </li>
                 );
               })}
