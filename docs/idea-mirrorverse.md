@@ -1,7 +1,7 @@
 ---
 title: "Idea: Mirrorverse — London's what-if engine"
 date: 2026-11-07
-status: ideating
+status: ideating (code reuse approved, not pulled yet)
 track: Marshall Wace — New Worlds (see marshall-wace-track.md)
 prior_art: https://github.com/chocoliticekreem/mirrorverse (built 2026-10-17, VAST hackathon)
 ---
@@ -75,17 +75,13 @@ street across the West End.
 4. **Reality vs mirror split-screen** with a timeline scrubber.
 5. Drop the IRL-streamer-safety framing. The pitch is "a mirror world for what-ifs".
 
-## ⚠ Rules risk: reusing last month's code
-Mirrorverse was built at another hackathon (17 Oct 2026). Many hackathons require projects to
-be **started at the event**. MLH's rules allow libraries and open source but not prior project
-code, and WarwickHack has been an MLH event. **Ask an organiser before writing code.** Options,
-best first:
-1. **Allowed:** fork it, say so openly in the submission, and judge only the new layer
-   (intervene + cascade + West End).
-2. **Not allowed:** rebuild clean in a fresh repo (this one). Reuse the *design and learnings*,
-   and pull in open-source libs (three.js, OSM data, TfL API) rather than our own code.
-   The Predict design (persona groups + graph re-planning + interventions) is about 1 day of work
-   rebuilt from scratch, so keep the scope tight.
+## Reusing last month's code: approved
+Mirrorverse was built at another hackathon (17 Oct 2026). **The organisers confirmed on
+Sat 7 Nov that we can build on it.** The plan:
+- Fork it and **say so openly in the submission**. Pitch and get judged on the new layer:
+  intervene, cascade, West End, split screen.
+- **Don't pull the code yet. We're still ideating.** Lock the idea and scope first, then bring in
+  only the pieces in the reuse map above.
 
 ## Scope for 24 hours (Sat 11:00 → Sun 11:00)
 **Must have (the demo):**
@@ -121,7 +117,7 @@ best first:
 5. "Marshall Wace stress-tests portfolios. We stress-test a city." Close on the split screen.
 
 ## Open questions
-- [ ] **Organiser: can we build on code from a previous hackathon?** This decides everything.
+- [x] **Organiser: can we build on code from a previous hackathon?** Yes (confirmed Sat 7 Nov). Disclose it in the submission.
 - [ ] MW stand: does a city-sim reading of "New Worlds" land with them? Pitch it at the 14:00 talk.
 - [ ] Team: who owns twin/UX, sim/cascade, data, pitch?
 - [ ] West End only, or a selectable origin?
