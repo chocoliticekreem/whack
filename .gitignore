@@ -3,3 +3,4 @@
 !.env.example
 .playwright-mcp/
 data/
+__pycache__/
