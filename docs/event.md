@@ -1,18 +1,21 @@
 ---
-title: WHACK 26 event rundown
+title: WHACK 26 — event
 date: 2026-11-07
-source: https://warwickhack.co.uk (read 2026-11-07)
+sources:
+  - https://warwickhack.co.uk (read 2026-11-07)
+  - WHACK 26 Opening Ceremony Slides (PDF, 78 pages; supersede the site)
+  - https://whack-2025.devpost.com (last year's winners)
 ---
 
-# WHACK 26 — Event Rundown
+# WHACK 26: the event
 
-Warwick's flagship on-campus hackathon.
+Logistics, rules, timetable, every track and prize. Our track is covered in
+[marshall-wace.md](marshall-wace.md).
 
 | | |
 |---|---|
 | Dates | Sat 7 – Sun 8 November 2026 |
 | Venue | The Oculus Building, University of Warwick |
-| Source | Website + **opening ceremony slides (supersede the site where they differ)** |
 | Opening ceremony room | OC0.03 |
 | Eligibility | All university students nationwide |
 | Team size | Up to 4 |
@@ -94,11 +97,24 @@ All prize categories will also be posted on Discord.
 
 **Gold** (each sets a problem statement):
 - **Brevan Howard** — global alternative investment manager.
-- **Marshall Wace** — alternatives manager, ~$85bn AUM. Tech internship and grad programmes. See [marshall-wace-track.md](marshall-wace-track.md).
+- **Marshall Wace**: alternatives manager, $92.6bn AUM. See [marshall-wace.md](marshall-wace.md).
 - **Capital One** — credit and technology; hiring for grad and summer internships.
 - **incident.io** — incident response platform ($62m Series B; customers include OpenAI, Lovable, Netflix).
 
 **Silver:** Bloomberg, Netcraft.
+
+## Last year: WHACK 2025 winners
+MW were not a sponsor in 2025.
+| Prize | Winner | What it is |
+|---|---|---|
+| Capital One Title | [Snackonomics](https://devpost.com/software/snackonomics) | Snack and habit tracker |
+| Brevan Howard Title | [Whackyyy](https://devpost.com/software/whackyyy-information-accuracy-dashboard) | Dashboard that uses LLMs to check how accurate systems are |
+| incident.io Title | [CharacterCompass](https://devpost.com/software/charactercompass) | Real-time AI character profiles for authors |
+| Most Creative | [WHACKMOPOLY](https://devpost.com/software/whackmopoly) | "Monopoly if it was made after the 2008 financial crisis" |
+| WHACKiest | [Finance Clicker](https://devpost.com/software/finance-clicker) | A clicker game about finance |
+| Best Solo | [PINN-acle](https://devpost.com/software/isaac-mortiboy) | Physics-informed neural nets for local-vol surfaces, explained by an LLM |
+
+Judges here like finance-flavoured humour. The general prizes are extra chances to win.
 
 ## Links
 - Site: https://warwickhack.co.uk
