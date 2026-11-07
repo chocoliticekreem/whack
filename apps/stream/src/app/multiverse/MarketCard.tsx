@@ -8,7 +8,7 @@ import type { Market, Trader } from "./city-types";
 import { MarketClues, usualGhost } from "./Clues";
 import { FuturesFan } from "./FuturesFan";
 import { WhatIfLine, type WhatIfOdds } from "./Scenario";
-import { plainLabel, plainResult, plainTitle } from "./plain";
+import { pausedText, plainLabel, plainResult, plainTitle } from "./plain";
 
 export type Phase = "open" | "halted" | "locked" | "awaiting" | "settled" | "void";
 
@@ -98,7 +98,7 @@ function sourceLine(m: Market): string {
 const REF_STAKE = 100;
 
 function clockText(phase: Phase, m: Market, now: number): string {
-  if (phase === "halted") return `Paused · closes ${londonClock(m.closesAt)}`;
+  if (phase === "halted") return `Paused · betting ends ${londonClock(m.closesAt)}`;
   if (phase === "locked") return `Betting closed · result in ${countdown(m.settlesAt - now)}`;
   if (phase === "awaiting") return "Waiting for the result";
   return `Ended ${londonClock(m.settlesAt)}`;
@@ -368,6 +368,8 @@ export function MarketCard({
 
       <h3 className="tl-q">{plainTitle(m)}</h3>
 
+      {phase === "halted" && <p className="tl-paused">{pausedText(m.haltReason, now)}</p>}
+
       {whatIf && <WhatIfLine odds={whatIf} />}
 
       {ended ? (
@@ -400,7 +402,7 @@ export function MarketCard({
                     <span className="tl-data">{Math.round(o.prob * 100)}%</span> chance
                   </span>
                   <span className="tl-opt-pay">
-                    <span className="tl-data">{REF_STAKE}</span> pts wins <span className="tl-data">{fmtPts(REF_STAKE * o.odds)}</span>
+                    Bet <span className="tl-data">{REF_STAKE}</span> pts, get <span className="tl-data">{fmtPts(REF_STAKE * o.odds)}</span> back
                   </span>
                 </span>
               </button>
@@ -431,7 +433,7 @@ export function MarketCard({
           <button type="button" className="tl-confirm" data-side={draftedSide} disabled={stakeN <= 0} onClick={onConfirm}>
             Bet {fmtPts(stakeN)} on {plainLabel(m, drafted.id)}
             <span className="tl-confirm-win">
-              wins <span className="tl-data">{fmtPts(stakeN * drafted.odds)}</span>
+              get <span className="tl-data">{fmtPts(stakeN * drafted.odds)}</span> back if right
             </span>
           </button>
           {m.integrity && m.integrity.delayS > 0 && (

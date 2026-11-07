@@ -8,6 +8,7 @@ import { buildCityStyle, LOOK } from "./city-map-style";
 // map-3d: deck.gl overlay mount (see CityLayers.tsx)
 import { CityLayers } from "./CityLayers";
 import type { Hotspot, HubsVsUsual } from "./city-types";
+import { busyText } from "./plain";
 
 export interface Pop {
   key: number;
@@ -236,11 +237,10 @@ export function CityMapGL({
     const rows = new Map((vsUsual?.hubs ?? []).map((h) => [h.id, h]));
     for (const [id, p] of pins.current) {
       const row = rows.get(id);
-      const vs = row ? `${Math.round(row.vsUsual * 100)}%` : "";
       const name = p.el.querySelector(".cm-hub-name")?.textContent ?? "";
-      p.vs.replaceChildren(vs);
+      p.vs.replaceChildren(row ? busyText(row.vsUsual) : "");
       p.el.toggleAttribute("data-laggard", !!row && vsUsual?.laggard === id);
-      p.el.setAttribute("aria-label", row ? `${name}, ${vs} of a usual ${vsUsual?.day}` : name);
+      p.el.setAttribute("aria-label", row ? `${name}, ${busyText(row.vsUsual, vsUsual?.day)}` : name);
     }
   }, [ready, hotspots, vsUsual]);
 
@@ -262,6 +262,11 @@ export function CityMapGL({
       <div ref={container} className="cm-map" style={{ background: LOOK.land }} />
       {/* map-3d: deck.gl columns, surge arcs and settle pulse */}
       <CityLayers map={glMap} hotspots={hotspots} vsUsual={vsUsual} winner={winner} />
+      {vsUsual && (
+        <p className="cm-legend">
+          % = how busy each station is vs a usual {vsUsual.day}. 100% = usual.
+        </p>
+      )}
     </>
   );
 }

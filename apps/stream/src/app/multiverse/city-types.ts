@@ -76,6 +76,8 @@ export interface Market {
   /** Full one-line settlement rule. */
   rule?: string;
   status?: MarketStatus;
+  /** Sent while halted: "stale feed", "jump: …" or "suspended: …; reopens HH:MM:SS". */
+  haltReason?: string;
   /** 1–2 clues from services/city/signals.py; null or missing renders nothing. */
   signals?: Signal[] | null;
   integrity?: Integrity;

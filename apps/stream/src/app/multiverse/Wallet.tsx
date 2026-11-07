@@ -426,13 +426,13 @@ export function WalletPanel({
                   </div>
                   <PnlChart series={series} />
                   <span className="wl-note tl-num">
-                    Cumulative P&amp;L by settled bet · {record}
+                    Points won or lost, bet by bet · {record}
                   </span>
                 </section>
 
                 <section className="wl-section">
                   <h3>
-                    Open positions <span className="wl-count tl-num">{positions.length}</span>
+                    Bets still running <span className="wl-count tl-num">{positions.length}</span>
                   </h3>
                   {positions.length === 0 ? (
                     <p className="wl-empty">No open bets.</p>
@@ -467,7 +467,7 @@ export function WalletPanel({
 
                 <section className="wl-section">
                   <h3>
-                    History <span className="wl-count tl-num">{wallet.totals.betsSettled}</span>
+                    Finished bets <span className="wl-count tl-num">{wallet.totals.betsSettled}</span>
                   </h3>
                   {history.length === 0 ? (
                     <p className="wl-empty">Settled bets appear here with the reading that settled them.</p>
