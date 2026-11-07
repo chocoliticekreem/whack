@@ -209,7 +209,7 @@ export function CameraRig() {
       dampingFactor={0.08}
       maxPolarAngle={Math.PI / 2.05}
       minDistance={cctv ? 1 : 12}
-      maxDistance={1800}
+      maxDistance={cinematic ? 6000 : 1800}
       onStart={() => {
         flying.current = false;
       }}

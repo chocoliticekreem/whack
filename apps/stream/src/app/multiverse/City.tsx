@@ -1,0 +1,613 @@
+"use client";
+
+import { Trophy, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { LIVE_SETTINGS, setDemoSettings } from "@/platform/demo";
+import { setCurrentOrigin } from "@/twin/config";
+import { useOrigin } from "@/twin/origin";
+import { World } from "@/twin/World";
+import { CITY_ORIGIN, City3D, flyToHotspots, type Pop } from "./City3D";
+import {
+  START_POINTS,
+  defaultName,
+  fmtPts,
+  loadWallet,
+  londonClock,
+  saveWallet,
+  type MyBet,
+  type Settled,
+  type Wallet,
+} from "./city-store";
+import type { BetResponse, Hotspot, LeaderRow, Market, MarketsResponse, SettleResponse, Trader } from "./city-types";
+import { MarketCard, phaseOf, type TipTarget } from "./MarketCard";
+
+// Why: this module only loads in the browser (ssr: false), so the twin is re-centred before World first renders.
+setCurrentOrigin(CITY_ORIGIN);
+useOrigin.setState({ origin: CITY_ORIGIN });
+
+const POLL_MS = 3000;
+const SETTLE_POLL_MS = 2500;
+const GIVE_UP_MS = 120_000;
+const SHOW_SETTLED_MS = 25_000;
+const HISTORY_CAP = 200;
+
+const FEED_NAMES: Record<string, string> = {
+  crowding: "TfL Crowding",
+  line_status: "TfL line status",
+  jamcams: "TfL JamCams",
+  rain_now: "Open-Meteo rain",
+  bus: "TfL bus arrivals",
+};
+
+const forcedMock = () => new URLSearchParams(window.location.search).get("mock") === "1";
+
+async function call<T>(mock: boolean, path: string, body?: unknown): Promise<{ ok: boolean; status: number; data: T }> {
+  const res = await fetch(`/api/city/${path}${mock ? "?mock=1" : ""}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: { "content-type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+    cache: "no-store",
+  });
+  const data = (await res.json()) as T;
+  return { ok: res.ok, status: res.status, data };
+}
+
+const isPhone = () => window.matchMedia("(max-width: 720px)").matches;
+
+/** A portrait phone cannot fit all of central London; frame the three hubs nearest the middle instead. */
+function core(hubs: Hotspot[]): Hotspot[] {
+  if (hubs.length <= 3) return hubs;
+  const lat = hubs.reduce((s, h) => s + h.lat, 0) / hubs.length;
+  const lon = hubs.reduce((s, h) => s + h.lon, 0) / hubs.length;
+  const d = (h: Hotspot) => (h.lat - lat) ** 2 + ((h.lon - lon) * 0.62) ** 2;
+  return [...hubs].sort((a, b) => d(a) - d(b)).slice(0, 3);
+}
+
+function frame(hubs: Hotspot[]) {
+  if (isPhone()) flyToHotspots(core(hubs), { x: -0.03, z: 0.09, zoom: 2.1, steep: true });
+  else flyToHotspots(hubs, { x: -0.22, z: 0.05, zoom: 1, steep: false });
+}
+
+function useNow(ms = 500) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), ms);
+    return () => window.clearInterval(id);
+  }, [ms]);
+  return now;
+}
+
+type Health = "green" | "amber" | "red";
+
+interface Book {
+  markets: Record<string, Market>;
+  hist: Record<string, Record<string, number[]>>;
+}
+
+const NO_HISTORY: Record<string, number[]> = {};
+
+/** Merges fresh market copies in and appends each option's price to its history for the sparkline. */
+function absorb(b: Book, markets: Market[]): Book {
+  const next: Book = { markets: { ...b.markets }, hist: { ...b.hist } };
+  for (const m of markets) {
+    next.markets[m.id] = m;
+    const per = { ...(next.hist[m.id] ?? {}) };
+    for (const o of m.options) {
+      const prev = per[o.id] ?? (o.history?.length ? [...o.history] : []);
+      per[o.id] = (prev[prev.length - 1] === o.prob ? prev : [...prev, o.prob]).slice(-HISTORY_CAP);
+    }
+    next.hist[m.id] = per;
+  }
+  return next;
+}
+
+function healthOf(feeds: MarketsResponse["feeds"], offline: boolean): Health {
+  if (offline) return "red";
+  const list = Object.values(feeds ?? {});
+  if (!list.length) return "green";
+  const bad = list.filter((f) => !f.ok).length;
+  return bad === 0 ? "green" : bad === list.length ? "red" : "amber";
+}
+
+export function City() {
+  const now = useNow();
+  const [mock, setMock] = useState(forcedMock);
+
+  // Real London is dark by 17:00 in November; daylight keeps the hotspots readable for judges.
+  useEffect(() => setDemoSettings({ ...LIVE_SETTINGS, time: "day" }), []);
+  const [offline, setOffline] = useState(false);
+  const [hotspots, setHotspots] = useState<Hotspot[]>([]);
+  const [traders, setTraders] = useState<Trader[]>([]);
+  const [feed, setFeed] = useState<MarketsResponse | null>(null);
+  const [results, setResults] = useState<Record<string, Settled & { at: number }>>({});
+  const [wallet, setWallet] = useState<Wallet>(loadWallet);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [draft, setDraft] = useState<{ market: string; option: string } | null>(null);
+  const [stake, setStake] = useState<number | "all">(100);
+  const [askName, setAskName] = useState(false);
+  const [nameInput, setNameInput] = useState("");
+  const [board, setBoard] = useState<LeaderRow[] | null>(null);
+  const [boardOpen, setBoardOpen] = useState(false);
+  const [healthOpen, setHealthOpen] = useState(false);
+  const [tip, setTip] = useState<TipTarget | null>(null);
+  const [toast, setToast] = useState<{ key: number; text: string; sub: string; good: boolean } | null>(null);
+  const [pop, setPop] = useState<Pop | null>(null);
+  const [glow, setGlow] = useState<string | null>(null);
+  const [betError, setBetError] = useState<string | null>(null);
+  const [book, setBook] = useState<Book>({ markets: {}, hist: {} });
+  const settling = useRef(new Set<string>());
+
+  useEffect(() => saveWallet(wallet), [wallet]);
+
+  const traderMap = useMemo(() => new Map(traders.map((t) => [t.id, t])), [traders]);
+  const hubMap = useMemo(() => new Map(hotspots.map((h) => [h.id, h])), [hotspots]);
+
+  const pollMarkets = useCallback(async () => {
+    try {
+      const r = await call<MarketsResponse & { error?: string }>(mock, "markets");
+      if (!r.ok) throw new Error(r.data.error ?? `HTTP ${r.status}`);
+      setBook((b) => absorb(b, r.data.markets));
+      setFeed(r.data);
+      setOffline(false);
+    } catch {
+      if (!mock) setMock(true);
+      else setOffline(true);
+    }
+  }, [mock]);
+
+  useEffect(() => {
+    let live = true;
+    const loadStatic = async () => {
+      try {
+        const [h, t] = await Promise.all([
+          call<{ hotspots: Hotspot[] }>(mock, "hotspots"),
+          call<{ traders: Trader[] }>(mock, "traders"),
+        ]);
+        if (!live) return;
+        if (h.ok) setHotspots(h.data.hotspots);
+        if (t.ok) setTraders(t.data.traders);
+      } catch {
+        // pollMarkets flips to the mock if the engine is down; static lists reload with it.
+      }
+    };
+    const first = window.setTimeout(() => {
+      void loadStatic();
+      void pollMarkets();
+    }, 0);
+    const id = window.setInterval(() => void pollMarkets(), POLL_MS);
+    const tid = window.setInterval(() => void loadStatic(), 15_000);
+    return () => {
+      live = false;
+      window.clearTimeout(first);
+      window.clearInterval(id);
+      window.clearInterval(tid);
+    };
+  }, [mock, pollMarkets]);
+
+  useEffect(() => {
+    if (hotspots.length && !selected) frame(hotspots);
+  }, [hotspots, selected]);
+
+  const postScore = useCallback(
+    (w: Wallet) => {
+      void call(mock, "score", { player: w.player, name: w.name ?? defaultName(w.player), points: Math.round(w.points) }).catch(() => undefined);
+    },
+    [mock],
+  );
+
+  const applyResult = useCallback(
+    (m: Market, res: Settled) => {
+      setResults((r) => ({ ...r, [m.id]: { ...res, at: Date.now() } }));
+      const isVoidResult = res.void || res.winner == null;
+      const winHub = isVoidResult ? null : (m.options.find((o) => o.id === res.winner)?.hotspot ?? m.hotspots[0] ?? null);
+      if (winHub) {
+        setGlow(winHub);
+        window.setTimeout(() => setGlow((g) => (g === winHub ? null : g)), 6000);
+      }
+      setWallet((w) => {
+        const bet = w.bets[m.id];
+        if (!bet || bet.done) return w;
+        const isVoid = res.void || res.winner == null;
+        const won = !isVoid && bet.option === res.winner;
+        const done: MyBet["done"] = isVoid ? "void" : won ? "won" : "lost";
+        const next: Wallet = {
+          ...w,
+          points: w.points + (isVoid ? bet.stake : won ? bet.payout : 0),
+          streak: isVoid ? w.streak : won ? w.streak + 1 : 0,
+          bets: { ...w.bets, [m.id]: { ...bet, done } },
+        };
+        const winLabel = m.options.find((o) => o.id === res.winner)?.label ?? "";
+        const key = Date.now();
+        setToast({
+          key,
+          good: won,
+          text: isVoid ? `Refunded ${fmtPts(bet.stake)}` : won ? `+${fmtPts(bet.payout)}` : `−${fmtPts(bet.stake)}`,
+          sub: isVoid ? "No data — market void" : res.reading.includes(winLabel) ? res.reading : `${winLabel} · ${res.reading}`,
+        });
+        window.setTimeout(() => setToast((t) => (t?.key === key ? null : t)), 4500);
+        if (winHub) setPop({ key, hotspot: winHub, text: won ? `+${fmtPts(bet.payout)}` : `−${fmtPts(bet.stake)}`, good: won });
+        postScore(next);
+        return next;
+      });
+    },
+    [postScore],
+  );
+
+  const due = useMemo(
+    () =>
+      Object.values(book.markets).filter(
+        (m) => !results[m.id] && (now >= m.settlesAt || m.status === "settled" || m.status === "void"),
+      ),
+    [now, results, book],
+  );
+
+  useEffect(() => {
+    for (const m of due) {
+      if (settling.current.has(m.id)) continue;
+      settling.current.add(m.id);
+      const attempt = async () => {
+        try {
+          const r = await call<SettleResponse>(mock, "settle", { id: m.id });
+          if (r.ok && r.data.settled) {
+            applyResult(m, r.data);
+            return;
+          }
+        } catch {
+          // Network blip: retry below until the give-up deadline.
+        }
+        if (Date.now() > m.settlesAt + GIVE_UP_MS) {
+          applyResult(m, { settled: true, winner: null, reading: "No data — void", aiResults: [], void: true, localVoid: true });
+          return;
+        }
+        window.setTimeout(attempt, SETTLE_POLL_MS);
+      };
+      void attempt();
+    }
+  }, [due, mock, applyResult]);
+
+  const shown = useMemo(() => {
+    const live = new Set(feed?.markets.map((m) => m.id) ?? []);
+    return Object.values(book.markets)
+      .filter((m) => {
+        const r = results[m.id];
+        if (r) return now - r.at < SHOW_SETTLED_MS;
+        return live.has(m.id) || (wallet.bets[m.id] && !wallet.bets[m.id].done);
+      })
+      .sort((a, b) => rank(a) - rank(b) || a.closesAt - b.closesAt);
+
+    // Why: your own result is the payoff, so it leads; then what you can still bet on, then markets already locked.
+    function rank(m: Market) {
+      if (results[m.id]) return wallet.bets[m.id] ? 0 : 3;
+      if (wallet.bets[m.id] || now < m.closesAt) return 1;
+      return 2;
+    }
+  }, [book, feed, results, now, wallet.bets]);
+
+  const selectedMarket = shown.find((m) => m.id === selected) ?? null;
+  const selectedHubs = selected ? (book.markets[selected]?.hotspots.join(",") ?? "") : "";
+  useEffect(() => {
+    const hubs = selectedHubs
+      .split(",")
+      .map((h) => hubMap.get(h))
+      .filter((h): h is Hotspot => !!h);
+    if (hubs.length) frame(hubs);
+  }, [selectedHubs, hubMap]);
+
+  const placeBet = useCallback(
+    async (w: Wallet) => {
+      if (!draft) return;
+      const m = book.markets[draft.market];
+      const opt = m?.options.find((o) => o.id === draft.option);
+      if (!m || !opt) return;
+      const amount = Math.round(stake === "all" ? w.points : Math.min(stake, w.points));
+      if (amount <= 0) return;
+      setBetError(null);
+      try {
+        const r = await call<BetResponse>(mock, "bet", { player: w.player, market: m.id, option: opt.id, stake: amount });
+        if (!r.ok || !r.data.ok) {
+          setBetError(r.data.error ?? "Bet rejected");
+          return;
+        }
+        const odds = r.data.odds ?? opt.odds;
+        const payout = Math.round(r.data.shares ?? amount * odds);
+        if (r.data.options) {
+          const updated: Market = {
+            ...m,
+            options: m.options.map((o) => {
+              const u = r.data.options?.find((x) => x.id === o.id);
+              return u ? { ...o, prob: u.prob, odds: u.odds } : o;
+            }),
+          };
+          setBook((b) => absorb(b, [updated]));
+        }
+        setWallet((cur) => ({
+          ...cur,
+          points: cur.points - amount,
+          bets: { ...cur.bets, [m.id]: { market: m.id, option: opt.id, label: opt.label, stake: amount, payout } },
+        }));
+        setDraft(null);
+      } catch {
+        setBetError("Could not reach the exchange");
+      }
+    },
+    [draft, stake, mock, book],
+  );
+
+  const confirm = () => {
+    if (!wallet.name) {
+      setNameInput(defaultName(wallet.player));
+      setAskName(true);
+      return;
+    }
+    void placeBet(wallet);
+  };
+
+  const saveName = () => {
+    const name = nameInput.trim().slice(0, 18) || defaultName(wallet.player);
+    const w = { ...wallet, name };
+    setWallet(w);
+    setAskName(false);
+    postScore(w);
+    void placeBet(w);
+  };
+
+  useEffect(() => {
+    if (!boardOpen) return;
+    let live = true;
+    const load = () =>
+      call<{ rows: LeaderRow[] }>(mock, "leaderboard")
+        .then((r) => live && r.ok && setBoard(r.data.rows))
+        .catch(() => undefined);
+    void load();
+    const id = window.setInterval(load, 5000);
+    return () => {
+      live = false;
+      window.clearInterval(id);
+    };
+  }, [boardOpen, mock]);
+
+  const health = healthOf(feed?.feeds, offline);
+  const liveMode = feed?.live ?? false;
+  const clockMs = liveMode ? now : (feed?.asOf ?? now);
+  const openBets = Object.values(wallet.bets).filter((b) => !b.done).length;
+  const broke = wallet.points < 1 && openBets === 0;
+  const active = selectedMarket?.hotspots ?? [];
+  const lastWhy = useMemo(() => {
+    const out = new Map<string, string>();
+    for (const m of feed?.markets ?? []) for (const b of m.aiBets) out.set(b.trader, b.why);
+    return out;
+  }, [feed]);
+
+  const tipTrader = tip ? traderMap.get(tip.trader) : null;
+  const tipRect = tip?.el.getBoundingClientRect();
+
+  const boardRows = useMemo(() => {
+    const myName = wallet.name ?? defaultName(wallet.player);
+    const rows = (board ?? []).filter((r) => !(r.kind === "human" && r.name === myName));
+    rows.push({ name: myName, points: wallet.points, kind: "human" });
+    return rows.sort((a, b) => b.points - a.points);
+  }, [board, wallet]);
+
+  return (
+    <div className="tl" onClick={() => setTip(null)}>
+      <div className="tl-world">
+        <World bare>
+          {hotspots.length > 0 && <City3D hotspots={hotspots} active={active} winner={glow} pop={pop} />}
+        </World>
+      </div>
+
+      <header className="tl-bar">
+        <div className="tl-brand">
+          <span className="tl-live" data-live={liveMode || undefined}>
+            <span className="tl-live-dot" />
+            <span className="tl-desk">London · </span>
+            {liveMode ? "Live" : "Replay"} <span className="tl-num">{londonClock(clockMs)}</span>
+          </span>
+          <span className="tl-title">Trade London</span>
+        </div>
+        <div className="tl-wallet tl-num" aria-label="Your points">
+          <span className="tl-pts">
+            <b>{fmtPts(wallet.points)}</b> pts
+          </span>
+          <span className="tl-streak" data-hot={wallet.streak > 0 || undefined}>
+            🔥 {wallet.streak}
+          </span>
+          {broke && (
+            <button type="button" className="tl-refill" onClick={() => setWallet((w) => ({ ...w, points: START_POINTS, streak: 0 }))}>
+              Refill
+            </button>
+          )}
+        </div>
+        <div className="tl-bar-right">
+          <button
+            type="button"
+            className="tl-health"
+            data-h={health}
+            aria-label={`Data health: ${health}`}
+            aria-expanded={healthOpen}
+            onClick={(e) => {
+              e.stopPropagation();
+              setHealthOpen((o) => !o);
+            }}
+          >
+            <span className="tl-health-dot" />
+            <span className="tl-desk">Data</span>
+          </button>
+          <button type="button" className="tl-board-btn" onClick={() => setBoardOpen(true)}>
+            <Trophy size={16} />
+            <span className="tl-desk">Leaderboard</span>
+          </button>
+        </div>
+        {healthOpen && (
+          <div className="tl-pop tl-health-list" onClick={(e) => e.stopPropagation()}>
+            <b>Live feeds{mock ? " (demo data)" : ""}</b>
+            {offline && <span className="tl-bad">Exchange unreachable</span>}
+            {Object.entries(feed?.feeds ?? {}).map(([id, f]) => (
+              <span key={id} className="tl-feed" data-ok={f.ok || undefined}>
+                <span className="tl-health-dot" />
+                {FEED_NAMES[id] ?? id}
+                <span className="tl-muted tl-num">{f.ageS == null ? "no data" : f.ageS < 90 ? `${f.ageS}s ago` : `${Math.round(f.ageS / 60)} min ago`}</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </header>
+
+      <aside className="tl-ai">
+        <div className="tl-ai-head">
+          <b>{traders.length || 6} AI traders.</b> Each one reads ONE live London feed and bets against you.
+        </div>
+        <div className="tl-ai-list">
+          {traders.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              className="tl-trader"
+              onMouseEnter={(e) => setTip({ trader: t.id, why: lastWhy.get(t.id), el: e.currentTarget })}
+              onMouseLeave={() => setTip(null)}
+              onClick={(e) => {
+                e.stopPropagation();
+                setTip({ trader: t.id, why: lastWhy.get(t.id), el: e.currentTarget });
+              }}
+            >
+              <span className="tl-emoji tl-av">{t.emoji}</span>
+              <span className="tl-trader-text">
+                <b>{t.name}</b>
+                <span className="tl-muted">{t.watches}</span>
+              </span>
+              <span className="tl-rec tl-num">
+                {t.record.won}W {t.record.lost}L
+              </span>
+            </button>
+          ))}
+        </div>
+      </aside>
+
+      <section className="tl-markets" aria-live="polite">
+        <div className="tl-intro">
+          <h1>Bet on what London does next.</h1>
+          <p>
+            Pick a market, stake points, beat the AI traders. Real TfL data settles every bet.
+            {mock && <span className="tl-demo"> Demo data</span>}
+          </p>
+        </div>
+        {betError && (
+          <div className="tl-error" onClick={() => setBetError(null)}>
+            {betError}
+          </div>
+        )}
+        {shown.length === 0 && <div className="tl-market tl-empty">Opening markets…</div>}
+        {shown.map((m) => (
+          <MarketCard
+            key={m.id}
+            market={m}
+            now={now}
+            traders={traderMap}
+            bet={wallet.bets[m.id]}
+            result={results[m.id]}
+            selected={selected === m.id}
+            draft={draft?.market === m.id ? draft.option : null}
+            stake={stake}
+            points={wallet.points}
+            history={book.hist[m.id] ?? NO_HISTORY}
+            onSelect={() => setSelected((s) => (s === m.id ? null : m.id))}
+            onPick={(option) => {
+              if (phaseOf(m, Date.now(), results[m.id]) !== "open") return;
+              setSelected(m.id);
+              setDraft({ market: m.id, option });
+              setBetError(null);
+            }}
+            onStake={setStake}
+            onConfirm={confirm}
+            onCancel={() => setDraft(null)}
+            onTip={setTip}
+          />
+        ))}
+      </section>
+
+      {tip && tipTrader && tipRect && (
+        <div
+          className="tl-tip"
+          style={{
+            left: Math.max(8, Math.min(window.innerWidth - 288, tipRect.left)),
+            top: tipRect.bottom + 6 + 150 > window.innerHeight ? undefined : tipRect.bottom + 6,
+            bottom: tipRect.bottom + 6 + 150 > window.innerHeight ? window.innerHeight - tipRect.top + 6 : undefined,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="tl-tip-head">
+            <span className="tl-emoji tl-av">{tipTrader.emoji}</span>
+            <b>{tipTrader.name}</b>
+            <span className="tl-rec tl-num">
+              {tipTrader.record.won}W {tipTrader.record.lost}L
+            </span>
+          </div>
+          <div>
+            <span className="tl-muted">watches:</span> {tipTrader.watches}
+          </div>
+          {tip.why && <q>{tip.why}</q>}
+          <div className="tl-muted">{tipTrader.style}</div>
+        </div>
+      )}
+
+      {toast && (
+        <div key={toast.key} className="tl-toast" data-good={toast.good || undefined}>
+          <span className="tl-toast-big tl-num">{toast.text}</span>
+          <span className="tl-toast-sub">{toast.sub}</span>
+        </div>
+      )}
+
+      {askName && (
+        <div className="tl-modal-bg" onClick={() => setAskName(false)}>
+          <form
+            className="tl-modal"
+            onClick={(e) => e.stopPropagation()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              saveName();
+            }}
+          >
+            <h2>Your trader name</h2>
+            <p className="tl-muted">Shown on the leaderboard next to the AI traders.</p>
+            <input value={nameInput} onChange={(e) => setNameInput(e.target.value)} maxLength={18} autoFocus aria-label="Trader name" />
+            <button type="submit" className="tl-confirm">
+              Place my bet
+            </button>
+          </form>
+        </div>
+      )}
+
+      {boardOpen && (
+        <div className="tl-modal-bg" onClick={() => setBoardOpen(false)}>
+          <div className="tl-modal tl-board" onClick={(e) => e.stopPropagation()}>
+            <div className="tl-board-head">
+              <h2>Leaderboard</h2>
+              <button type="button" className="tl-stake-x" aria-label="Close" onClick={() => setBoardOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <p className="tl-muted">Humans and AI traders, ranked together by points.</p>
+            <ol>
+              {boardRows.map((r, i) => {
+                const t = r.kind === "ai" ? traders.find((x) => x.name === r.name) : undefined;
+                const me = r.kind === "human" && r.name === (wallet.name ?? defaultName(wallet.player));
+                return (
+                  <li key={`${r.kind}-${r.name}`} data-me={me || undefined} data-kind={r.kind}>
+                    <span className="tl-rank tl-num">{i + 1}</span>
+                    <span className="tl-emoji">{t?.emoji ?? (me ? "🫵" : "👤")}</span>
+                    <span className="tl-board-name">
+                      {r.name}
+                      {me && " (you)"}
+                    </span>
+                    <span className="tl-kind">{r.kind === "ai" ? "AI" : "Human"}</span>
+                    <b className="tl-num">{fmtPts(r.points)}</b>
+                  </li>
+                );
+              })}
+            </ol>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
