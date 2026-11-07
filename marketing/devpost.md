@@ -2,7 +2,7 @@
 title: Devpost submission draft
 event: WHACK 26 (https://warwickhack.co.uk)
 track: Marshall Wace — New Worlds
-status: draft, checked against main through #46 and the live system on Sat 7 Nov ~19:30. Fill the two [FILL]s (group name, team) and re-check the live link before submitting (Sun 09:00–11:00)
+status: draft, checked against main through #46 and the live system on Sat 7 Nov ~19:30. Add every teammate on Devpost and re-check the live link before submitting (Sun 09:00–11:00)
 ---
 
 # Devpost submission
@@ -18,10 +18,11 @@ Copy each section below into the matching Devpost field.
 ---
 
 ## Project name
-[FILL: group name]
+OverWatch
 
 ## Team
-[FILL: every teammate]
+Team name: OverWatch.
+Members: add every teammate on Devpost.
 
 ## Tagline (≤ 200 chars)
 OverWatch: a live stock exchange on London's next five minutes. 50 simulated futures per price, ruled out by real TfL data, traded against six AI traders.
