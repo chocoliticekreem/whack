@@ -60,6 +60,8 @@ export type MarketStatus = "open" | "closed" | "halted" | "settled" | "void";
 
 export interface Market {
   id: string;
+  /** The recurring question this market belongs to, e.g. "city_pulse". */
+  series?: string;
   kind: "versus" | "yesno" | "overunder";
   question: string;
   hotspots: string[];

@@ -16,6 +16,7 @@ import {
 } from "./city-store";
 import type { BetResponse, CitySignals, Hotspot, LeaderRow, Market, MarketsResponse, SettleResponse, Trader } from "./city-types";
 import { CityStrip } from "./Clues";
+import { HowItWorks } from "./HowItWorks";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
 import { cancelNote, usePendingFills, type Fill } from "./pending-bets";
 import { Scenario, type WhatIfOdds } from "./Scenario";
@@ -502,6 +503,7 @@ export function City() {
           )}
         </div>
         <div className="tl-bar-right">
+          <HowItWorks />
           <button type="button" className="tl-board-btn tl-whatif" aria-pressed={scenarioOpen} onClick={() => setScenarioOpen((o) => !o)}>
             What if…
           </button>
