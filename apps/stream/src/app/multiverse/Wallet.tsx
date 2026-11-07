@@ -100,12 +100,18 @@ export function createPlayer() {
 export const setNickname = (player: string, token: string, name: string) => post("player/name", { player, name }, token);
 
 /** The player's balance as the server's ledger has it. `null` until the first reply, and always in demo mode.
- *  A 401 means the token no longer matches (a wiped ledger): `onUnauthorized` lets the caller make a new player. */
-export function useServerWallet(player: string, token: string | null, enabled: boolean, onCash: (cash: number) => void, onUnauthorized: () => void) {
+ *  A 401 means the token no longer matches (a wiped ledger): `onUnauthorized` gets that token so the caller can make a new player. */
+export function useServerWallet(
+  player: string,
+  token: string | null,
+  enabled: boolean,
+  onCash: (cash: number) => void,
+  onUnauthorized: (staleToken: string | null) => void,
+) {
   const [data, setData] = useState<ServerWallet | null>(null);
   const refresh = useCallback(async () => {
     const r = await get<ServerWallet>(`wallet?player=${encodeURIComponent(player)}&since=${SESSION_START}`, token);
-    if (r.status === 401) onUnauthorized();
+    if (r.status === 401) onUnauthorized(token);
     if (!r.data) return;
     setData(r.data);
     onCash(r.data.cash);
