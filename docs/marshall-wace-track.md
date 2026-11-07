@@ -44,8 +44,11 @@ sources:
   "best-of-breed open source" with one integrated platform across the business.
 - Values they use: integrity, client-first, **cognitive diversity**, "every day, our people are
   empowered to do things differently."
-- TOPS framing: Talent, Operations, Products, Stewardship. Stewardship covers UN PRI signatory
-  status and ESG engagement.
+- **TOPS = Trade Optimised Portfolio System**, MW's founding idea (2002) and the first
+  **alpha capture** platform. Brokers submit trade ideas with a rationale, timeframe and
+  conviction; MW measure every source's track record and weight ideas by who has been right.
+  (An earlier version of this doc said "Talent, Operations, Products, Stewardship". That was
+  wrong.) MW are also a UN PRI signatory.
 - From their slides: **$92.6bn AUM**, 782+ people, **~200 developers**. Flat, meritocratic: "as
   much responsibility and autonomy as you can handle".
 - Roles: 10-week internship (2027/2028 grads), 6-month AI placement (London), and a rotational
