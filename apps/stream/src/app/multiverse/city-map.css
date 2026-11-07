@@ -1,0 +1,243 @@
+/* MapLibre city view. Colours come from the tokens on .tl-root (city.css); magenta marks hotspots only. */
+.cm-map {
+  position: absolute;
+  inset: 0;
+}
+
+/* Zero-size anchor at the hotspot's exact point; dot, ring, tag and payout hang off it. */
+.cm-hub {
+  --hub: #ff3da8;
+  position: absolute;
+  width: 0;
+  height: 0;
+  cursor: pointer;
+  transition: opacity 0.3s ease;
+}
+
+.cm-hub-dot {
+  position: absolute;
+  left: -5px;
+  top: -5px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--hub);
+  box-shadow: 0 0 0 2px var(--surface, #fff), var(--shadow-tag);
+  transition: transform 0.3s ease;
+}
+
+.cm-hub-ring {
+  position: absolute;
+  left: -16px;
+  top: -16px;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: var(--hub);
+  opacity: 0;
+  animation: cm-pulse 2.8s ease-out infinite;
+  pointer-events: none;
+}
+
+/* A small white tag with a pointer down to the spot, as in city.css's .tl-pin. */
+.cm-hub-tag {
+  position: absolute;
+  left: 0;
+  bottom: 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  padding: 0 var(--s2, 8px);
+  border-radius: var(--r-s, 4px);
+  background: var(--surface, #fff);
+  box-shadow: var(--shadow-tag);
+  color: var(--ink, #151517);
+  font-family: var(--sans);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  transform: translateX(-50%);
+  transform-origin: 50% 100%;
+  transition: background 0.25s ease, color 0.25s ease;
+}
+
+.cm-hub-tag::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: -4px;
+  width: 8px;
+  height: 8px;
+  background: inherit;
+  transform: translateX(-50%) rotate(45deg);
+}
+
+.cm-hub-tag-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--hub);
+}
+
+/* A bigger invisible hit area so a thumb can land on the dot. */
+.cm-hub::before {
+  content: "";
+  position: absolute;
+  left: -20px;
+  top: -20px;
+  width: 40px;
+  height: 40px;
+}
+
+.cm-hub[data-dim] {
+  opacity: 0.5;
+}
+
+.cm-hub[data-active] {
+  z-index: 2;
+}
+
+.cm-hub[data-win] {
+  z-index: 3;
+}
+
+.cm-hub[data-dim] .cm-hub-ring {
+  animation: none;
+}
+
+.cm-hub[data-active] .cm-hub-dot {
+  transform: scale(1.25);
+}
+
+.cm-hub[data-active] .cm-hub-ring {
+  animation-duration: 1.8s;
+}
+
+.cm-hub[data-active] .cm-hub-tag,
+.cm-hub[data-win] .cm-hub-tag {
+  height: 28px;
+  padding: 0 10px;
+  background: var(--ink, #151517);
+  color: var(--on-ink, #fff);
+  font-size: 13px;
+}
+
+.cm-hub[data-win] .cm-hub-dot {
+  transform: scale(1.6);
+}
+
+.cm-hub[data-win] .cm-hub-ring {
+  animation: cm-win 1.1s ease-out 4;
+}
+
+.cm-hub[data-win] .cm-hub-tag {
+  background: var(--hub);
+  animation: cm-bump 0.6s ease-out;
+}
+
+.cm-hub[data-win] .cm-hub-tag-dot {
+  background: var(--on-ink, #fff);
+}
+
+/* Payout, beside the winning tag: ink for a loss, the gain colour for a win (matches .tl-pop3d). */
+.cm-hub-pop {
+  position: absolute;
+  left: 0;
+  bottom: 52px;
+  padding: var(--s1, 4px) var(--s3, 12px);
+  border-radius: var(--r, 6px);
+  background: var(--ink, #151517);
+  color: var(--on-ink, #fff);
+  font-family: var(--mono);
+  font-size: 22px;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: var(--shadow-pop);
+  opacity: 0;
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.cm-hub-pop[data-good] {
+  background: var(--yes, #00865a);
+}
+
+.cm-hub-pop[data-show] {
+  animation: cm-pop 4.5s ease-out forwards;
+}
+
+@keyframes cm-pulse {
+  0% {
+    transform: scale(0.3);
+    opacity: 0.32;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
+
+@keyframes cm-win {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.5;
+  }
+  100% {
+    transform: scale(3.2);
+    opacity: 0;
+  }
+}
+
+@keyframes cm-bump {
+  40% {
+    transform: translateX(-50%) scale(1.1);
+  }
+}
+
+@keyframes cm-pop {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 12px);
+  }
+  10% {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+  80% {
+    opacity: 1;
+    transform: translate(-50%, -6px);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -14px);
+  }
+}
+
+@media (max-width: 720px) {
+  .cm-hub-tag {
+    height: 22px;
+    padding: 0 6px;
+    font-size: 11px;
+  }
+
+  .cm-hub[data-active] .cm-hub-tag,
+  .cm-hub[data-win] .cm-hub-tag {
+    height: 24px;
+    font-size: 12px;
+  }
+
+  .cm-hub-pop {
+    font-size: 18px;
+    bottom: 46px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cm-hub-ring,
+  .cm-hub[data-win] .cm-hub-ring,
+  .cm-hub[data-win] .cm-hub-tag {
+    animation: none;
+  }
+}
