@@ -2,7 +2,7 @@
 
 Our build for **WHACK 26** (Warwick, 7–8 Nov 2026) on the **Marshall Wace "New Worlds"** track.
 
-**Status:** ideating. Leading idea: **The Exchange of Worlds**, *a stock exchange where every
+**Status:** building (see [docs/build.md](docs/build.md) §0). Idea: **The Exchange of Worlds**, *a stock exchange where every
 stock is a possible future of London, and reality is the market.* Pitch in docs/idea.md ★.
 
 ## Docs, in reading order

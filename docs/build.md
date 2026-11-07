@@ -1,16 +1,37 @@
 ---
 title: Build — what we reuse, what we record, what we need
 date: 2026-11-07
-status: not started · scope is final once idea.md is decided
+status: in progress · recorder live on main · prototype on local branch build/multiverse (not pushed)
 prior_art: https://github.com/chocoliticekreem/mirrorverse (built 2026-10-17 at a VAST hackathon)
 ---
 
 # Build
 
-## 1. Code reuse: approved, not pulled yet
-- **The organisers confirmed (Sat 7 Nov) that we can build on Mirrorverse.** Say so openly in
-  the Devpost submission, and get judged on the new layer.
-- **Don't pull code until the idea is locked.** Then bring in only what the table below needs.
+## 0. Status (Sat 7 Nov, ~13:00)
+| Piece | State | Where |
+|---|---|---|
+| **Recorder** | **Live since 12:06** on Anson's laptop (TfL key, 300/min cap). Bus, tube, line/road status, disruptions, bikes, crowding, JamCam metadata. No YOLO counts yet (`--yolo` off) | `main`: `recorder/`, data in `data/raw/` (gitignored) |
+| **History backfill** | Done: 7 days of rain/temp (721 rows), Thames gauges (1,338), 14 days of grid demand (698) and carbon (698) | `data/backfill/` |
+| **Multiverse engine** | Built: spawn, observe, prune, resample; common random numbers; 50 worlds in under 1 s; delist reasons; consensus + implied volatility per zone | `build/multiverse`: `services/multiverse/` |
+| **Exchange board** | Built: `/multiverse` page with world prices, sparklines, lineage, a 2D zone map, "place an event" | `build/multiverse`: `apps/stream/src/app/multiverse/` |
+| **Persona brokers (TOPS)** | Built: 10 personas, Claude Haiku 4.5 (one batched call per observation), rules fallback, track records, leaderboard. **Being tuned now** with live Haiku | `build/multiverse`: `services/multiverse/brokers.py` |
+| **Upstream Mirrorverse #52** (live-data resilience, cleaner 3D twin) | Being pulled in now | `build/multiverse` |
+| **3D ghost-world view** | **Not started.** Highest-value presentation task | twin in `apps/stream/src/twin/` |
+| Keys | TfL app key and Anthropic key in the main checkout's gitignored `.env` | — |
+
+**Gaps, ranked:**
+1. The engine runs on a **synthetic fixture**. It needs a real Oxford Circus seed whose camera IDs
+   match the recorder's.
+2. **No people counts yet:** start `services/yolo` and restart the recorder with `--yolo`.
+3. **3D ghost worlds** in the twin (the presentation centrepiece).
+4. Optional: null-model check (shuffle reality, no world should win); "follow this person".
+5. Known engine bug: bus riders are counted at the station before their bus arrives.
+
+## 1. Code reuse: approved
+- **The organisers confirmed (Sat 7 Nov) that we can build on Mirrorverse.** It's disclosed in
+  the Devpost draft and in the reused READMEs. We get judged on the new layer.
+- Brought in on the local `build/multiverse` branch: `services/predict`, `services/yolo`,
+  `apps/stream`.
 
 ## 2. What Mirrorverse already has
 | Need | Status | Where in `chocoliticekreem/mirrorverse` |
@@ -34,28 +55,23 @@ Full research is in **[data-sources.md](data-sources.md)**: what Mirrorverse use
 alternative data, the city comparison and the gotchas. Short version: London, every live TfL feed
 is keyless, history is thin, so record now.
 
-## 5. Starter stack: record now
-One recorder process writing timestamped NDJSON/Parquet per source. Fresh code in this repo.
+## 5. Recorder (built, running)
+Polls, per `recorder/README.md`:
+| Source | Poll |
+|---|---|
+| Bus snapshot `/Mode/bus/Arrivals?count=1` (~17,400 stops) | 60 s |
+| Tube arrivals, line status, road status | 60 s |
+| Disruptions (only written when changed) | 5 min |
+| BikePoint (796 docks) | 2 min |
+| Crowding live, 20 central stations (+ typical profiles once a day) | 5 min |
+| JamCam metadata, ~83 central cams (`--yolo` adds people/vehicle counts) | 90 s |
 
-| Source | Poll | TfL calls/min |
-|---|---|---|
-| Bus snapshot `/Mode/bus/Arrivals?count=1` | 60 s (timeout ≥ 60 s; keep stop, vehicle, line, time to station only) | 1 |
-| Tube arrivals + line status + road status | 60 s | 3 |
-| BikePoint | 2 min | 0.5 |
-| Crowding live, ~20 key stations (+ typical profiles once) | 5 min | 4 |
-| JamCam clips for 30–50 cameras in our area, through YOLO counts | 60–90 s | 0 (S3) |
-| **Backfill once:** Open-Meteo 7 days at 15 min, EA `since=`, Elexon 2 weeks, adsb.lol 1–2 days | once | — |
-
-The backfill gives **an instant 7–14 day backtest** (e.g. every downpour vs grid demand vs
-flights) without waiting.
-
-**Gotchas:**
-- About 9 TfL calls/min, under the anonymous ~50/min, but that budget is shared with the app.
-  **Get a free TfL app_key now** (500/min) and keep it in env, never in git.
-- YouTube cams are embed-only under their terms, so keep them to the demo.
-- Attribute adsb.lol (ODbL).
+- About 320 MB/day, mostly the bus snapshot.
+- It only runs while the laptop is awake and online (`caffeinate -i`).
+- Start it with: `caffeinate -i python3 recorder/record.py` from the main checkout.
+- Attribute adsb.lol (ODbL) if we use it. YouTube cams are embed-only.
 
 ## 6. Open
 - [ ] Who owns: engine, UI/3D, data recorder, pitch?
-- [ ] West End only, or a selectable area?
-- [ ] Where the recorder runs (VM or laptop)?
+- [x] Where the recorder runs: Anson's laptop (keep it plugged in and awake).
+- [x] Area: Oxford Circus / West End.
