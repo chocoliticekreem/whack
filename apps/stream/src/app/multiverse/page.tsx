@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { departure, syne } from "./fonts";
 import { MultiverseClient } from "./multiverse-client";
+import "./theme.css";
 
 export const metadata: Metadata = {
   title: "Exchange of Worlds",
@@ -7,5 +9,9 @@ export const metadata: Metadata = {
 };
 
 export default function MultiversePage() {
-  return <MultiverseClient />;
+  return (
+    <div className={`mv ${syne.variable} ${departure.variable}`}>
+      <MultiverseClient />
+    </div>
+  );
 }

@@ -1,15 +1,19 @@
 "use client";
 
+import { Bus, Camera, Layers, Pause, Play, Radio, RotateCcw, StepForward, Users, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Board } from "./Board";
 import { Brokers } from "./Brokers";
 import { CityMap } from "./CityMap";
-import type { Geometry, MultiverseState, WorldRow } from "./types";
+import type { Geometry, MultiverseState, ZoneStat } from "./types";
 
 const SPEEDS = [1, 2, 4];
 const LIVE_POLL_MS = 60_000;
 const DELISTED_SHOWN = 15;
 const KINDS = ["incident", "closure", "event", "weather"] as const;
+const SPIKE_PCT = 15;
+
+type VixPoint = { t: number; vix: number; spike?: boolean };
 
 async function api<T>(path: string, body?: unknown): Promise<T> {
   const res = await fetch(`/api/multiverse/${path}`, {
@@ -23,44 +27,30 @@ async function api<T>(path: string, body?: unknown): Promise<T> {
   return data as T;
 }
 
-function WorldDetail({ world }: { world: WorldRow }) {
+// Fallback when the engine has no `vix` yet: mean-weighted coefficient of variation of the zone forecasts.
+function deriveVix(stats: ZoneStat[]): number {
+  const mean = stats.reduce((a, s) => a + s.mean, 0);
+  if (mean <= 0) return 0;
+  return (stats.reduce((a, s) => a + s.sd, 0) / mean) * 100;
+}
+
+function vixOf(s: MultiverseState): number {
+  return s.vix ?? deriveVix(s.consensusHorizon);
+}
+
+function VixSpark({ points }: { points: VixPoint[] }) {
+  const w = 160;
+  const h = 36;
+  if (points.length < 2) return <svg width={w} height={h} aria-hidden />;
+  const vals = points.map((p) => p.vix);
+  const max = Math.max(...vals);
+  const min = Math.min(...vals);
+  const span = Math.max(max - min, 1e-6);
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * w},${h - ((v - min) / span) * (h - 4) - 2}`).join(" ");
   return (
-    <div className="rounded-xl border border-line bg-surface p-3 text-sm">
-      <div className="flex items-baseline justify-between">
-        <span className="text-lg font-semibold">{world.id}</span>
-        <span className="text-muted">
-          gen {world.generation} · parent {world.parent ?? "—"} · sim {world.simMs} ms
-        </span>
-      </div>
-      <div className="mt-2 text-xs uppercase tracking-wide text-muted">Assumptions</div>
-      <ul className="mt-1 list-disc pl-5 text-muted">
-        {world.labels.map((l) => (
-          <li key={l}>{l}</li>
-        ))}
-      </ul>
-      <div className="mt-2 text-xs uppercase tracking-wide text-muted">Explanation trail</div>
-      <ul className="mt-1 space-y-0.5 text-xs text-muted">
-        {world.trail.length === 0 && <li>No observations scored yet.</li>}
-        {world.trail.map((t) => (
-          <li key={t.obs}>
-            obs {t.obs} (+{t.minute} min): log-lik {t.ll.toFixed(2)}
-            {t.worst && t.worst.cam !== "bus" && ` · worst cam ${t.worst.cam}: forecast ${t.worst.predicted.toFixed(0)}, saw ${t.worst.observed.toFixed(0)}`}
-            {t.worst && t.worst.cam === "bus" && ` · bus delay assumed ${t.worst.predicted.toFixed(1)}, saw ${t.worst.observed.toFixed(1)}`}
-          </li>
-        ))}
-        {world.delistReason && <li className="text-ember">Delisted: {world.delistReason}</li>}
-      </ul>
-      {world.events.length > 0 && (
-        <>
-          <div className="mt-2 text-xs uppercase tracking-wide text-muted">What happens in this world</div>
-          <ul className="mt-1 space-y-0.5 text-xs text-muted">
-            {world.events.map((e, i) => (
-              <li key={i}>{e}</li>
-            ))}
-          </ul>
-        </>
-      )}
-    </div>
+    <svg width={w} height={h} aria-hidden>
+      <polyline className="mv-spark-vix" fill="none" strokeWidth={2} points={pts} />
+    </svg>
   );
 }
 
@@ -74,35 +64,46 @@ export function MultiverseClient() {
   const [n, setN] = useState(50);
   const [withBrokers, setWithBrokers] = useState(true);
   const [selected, setSelected] = useState<string | null>(null);
+  const [forkOpen, setForkOpen] = useState(false);
   const [eventZone, setEventZone] = useState("");
   const [eventKind, setEventKind] = useState<(typeof KINDS)[number]>("incident");
-  const [eventAt, setEventAt] = useState(10);
+  const [eventAt, setEventAt] = useState(3);
   const [view, setView] = useState<"now" | "horizon">("horizon");
+  const [vixLocal, setVixLocal] = useState<VixPoint[]>([]);
   const busyRef = useRef(false);
 
-  const run = useCallback(async (fn: () => Promise<MultiverseState>) => {
-    if (busyRef.current) return null;
-    busyRef.current = true;
-    setBusy(true);
-    try {
-      const next = await fn();
-      setState(next);
-      setError(null);
-      return next;
-    } catch (e) {
-      setError((e as Error).message);
-      setPlaying(false);
-      return null;
-    } finally {
-      busyRef.current = false;
-      setBusy(false);
-    }
+  const accept = useCallback((next: MultiverseState, reset: boolean) => {
+    setState(next);
+    const point = { t: next.minute, vix: vixOf(next) };
+    setVixLocal((h) => (reset ? [point] : [...h.filter((p) => p.t !== point.t), point]));
   }, []);
+
+  const run = useCallback(
+    async (fn: () => Promise<MultiverseState>, reset = false) => {
+      if (busyRef.current) return null;
+      busyRef.current = true;
+      setBusy(true);
+      try {
+        const next = await fn();
+        accept(next, reset);
+        setError(null);
+        return next;
+      } catch (e) {
+        setError((e as Error).message);
+        setPlaying(false);
+        return null;
+      } finally {
+        busyRef.current = false;
+        setBusy(false);
+      }
+    },
+    [accept],
+  );
 
   const spawn = useCallback(
     async (mode: "replay" | "live") => {
       setPlaying(false);
-      const next = await run(() => api<MultiverseState>("spawn", { n, mode, brokers: withBrokers ? "on" : "off" }));
+      const next = await run(() => api<MultiverseState>("spawn", { n, mode, brokers: withBrokers ? "on" : "off" }), true);
       if (next) {
         setGeometry(await api<Geometry>("geometry"));
         setEventZone(next.zones[0]?.id ?? "");
@@ -120,7 +121,7 @@ export function MultiverseClient() {
   useEffect(() => {
     api<MultiverseState>("state")
       .then(async (s) => {
-        setState(s);
+        accept(s, true);
         setEventZone(s.zones[0]?.id ?? "");
         setGeometry(await api<Geometry>("geometry"));
       })
@@ -139,132 +140,236 @@ export function MultiverseClient() {
   const placeEvent = () =>
     run(() => api<MultiverseState>("intervene", { kind: eventKind, zoneId: eventZone, atMin: eventAt }));
 
+  const horizon = state?.horizon_min ?? 5;
   const live = state?.board.filter((r) => r.status === "live") ?? [];
   const dead = state?.board.filter((r) => r.status === "delisted").slice(-DELISTED_SHOWN).reverse() ?? [];
-  const selectedWorld = state?.board.find((r) => r.id === selected) ?? live[0];
   const last = state?.observations[state.observations.length - 1];
   const stats = view === "now" ? state?.consensusNow ?? [] : state?.consensusHorizon ?? [];
+  const vixHistory = state?.vix_history?.length ? state.vix_history : vixLocal;
+  const vix = state ? vixOf(state) : null;
+  const prevVix = vixHistory.length > 1 ? vixHistory[vixHistory.length - 2].vix : null;
+  const vixDelta = vix != null && prevVix ? ((vix - prevVix) / prevVix) * 100 : null;
+  const spike = state?.vix_spike ?? (vixDelta != null && vixDelta >= SPIKE_PCT);
+  const spread = [...stats].sort((a, b) => b.iv - a.iv);
+  const maxIv = Math.max(1e-6, ...spread.map((s) => s.iv));
 
   return (
-    <div className="h-full overflow-y-auto">
-      <div className="mx-auto max-w-7xl space-y-4 px-4 py-5">
-        <header className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <h1 className="text-2xl font-bold">
-              {state ? `${state.live} Londons` : "Spawning Londons"} that could exist in {state?.horizonMin ?? 30} minutes
-            </h1>
-            <p className="text-sm text-muted">
-              Watch reality kill the ones that are wrong. {state?.area} · seed {state?.seedSource} · common random numbers
-              (seed {state?.crnSeed})
-            </p>
+    <div className="mv-wrap">
+      <header className="flex flex-wrap items-stretch justify-between gap-4">
+        <div className="flex flex-col justify-between gap-4">
+          <h1 className="mv-title">
+            <span className="mv-grad-text">{state?.live ?? "··"}</span> Londons
+            <span className="mv-chip ml-3 align-middle text-sm c-amber">{horizon} MIN</span>
+          </h1>
+          <div className="flex flex-wrap items-end gap-6">
+            <Stat label="Live" value={state?.live ?? 0} tone="c-cyan" />
+            <Stat label="Dead" value={state?.delisted ?? 0} tone="c-magenta" />
+            <Stat label="ESS" value={state?.effectiveWorlds ?? 0} tone="c-violet" />
+            <span className="mv-chip mv-num c-dim">+{state?.minute ?? 0}′</span>
+            {state?.mode === "replay" ? (
+              <span className="mv-chip mv-num">
+                <span className="c-cyan">▮</span>
+                {state.replay.cursor}/{state.replay.frames}
+              </span>
+            ) : (
+              state && (
+                <span className="mv-chip c-lime">
+                  <Radio size={12} /> live
+                </span>
+              )
+            )}
           </div>
-          <div className="flex gap-4 text-right text-sm tabular-nums">
-            <Stat label="now" value={`+${state?.minute ?? 0} min`} />
-            <Stat label="live" value={state?.live ?? 0} />
-            <Stat label="delisted" value={state?.delisted ?? 0} />
-            <Stat label="effective worlds" value={state?.effectiveWorlds ?? 0} />
-            <Stat label="mode" value={state?.mode ?? "—"} />
-          </div>
-        </header>
-
-        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-line bg-surface p-3 text-sm">
-          <label className="flex items-center gap-1 text-muted">
-            worlds
-            <input type="number" min={2} max={200} value={n} onChange={(e) => setN(Number(e.target.value))}
-              className="w-16 rounded bg-surface-2 px-2 py-1 text-text" />
-          </label>
-          <label className="flex items-center gap-1 text-muted">
-            <input type="checkbox" checked={withBrokers} onChange={(e) => setWithBrokers(e.target.checked)} />
-            brokers
-          </label>
-          <Btn onClick={() => spawn("replay")} disabled={busy}>Spawn (replay)</Btn>
-          <Btn onClick={step} disabled={busy || !state}>Next observation</Btn>
-          <Btn onClick={() => setPlaying((p) => !p)} disabled={!state}>{playing ? "Pause" : "Play"}</Btn>
-          <select value={speed} onChange={(e) => setSpeed(Number(e.target.value))} className="rounded bg-surface-2 px-2 py-1">
-            {SPEEDS.map((s) => (
-              <option key={s} value={s}>{s}x</option>
-            ))}
-          </select>
-          <Btn onClick={() => spawn("live")} disabled={busy}>Go live</Btn>
-          <span className="text-muted">
-            {state?.mode === "replay" ? `frame ${state.replay.cursor}/${state.replay.frames}` : "polling cameras every 60 s"}
-          </span>
-          <span className="mx-2 h-5 w-px bg-line" />
-          <select value={eventKind} onChange={(e) => setEventKind(e.target.value as (typeof KINDS)[number])} className="rounded bg-surface-2 px-2 py-1">
-            {KINDS.map((k) => (
-              <option key={k}>{k}</option>
-            ))}
-          </select>
-          <select value={eventZone} onChange={(e) => setEventZone(e.target.value)} className="max-w-48 rounded bg-surface-2 px-2 py-1">
-            {state?.zones.map((z) => (
-              <option key={z.id} value={z.id}>{z.name}</option>
-            ))}
-          </select>
-          <label className="flex items-center gap-1 text-muted">
-            at +
-            <input type="number" min={0} max={state?.horizonMin ?? 30} value={eventAt} onChange={(e) => setEventAt(Number(e.target.value))}
-              className="w-14 rounded bg-surface-2 px-2 py-1 text-text" />
-            min
-          </label>
-          <Btn onClick={placeEvent} disabled={busy || !state || !eventZone} accent>Place event (fork the cloud)</Btn>
         </div>
+        <div
+          className="mv-panel mv-grain mv-tip flex items-center gap-5 px-5"
+          data-accent="magenta"
+          data-tip={state?.vix_driver ?? undefined}
+        >
+          <div>
+            <div className="mv-label">London VIX</div>
+            <div className="mv-vix mv-num" data-spike={spike} key={vixHistory.length}>
+              {vix == null ? "--" : vix.toFixed(1)}
+            </div>
+          </div>
+          <div className="flex flex-col items-end gap-1">
+            <span className={`mv-num ${vixDelta == null ? "c-dim" : vixDelta >= 0 ? "c-magenta" : "c-lime"}`}>
+              {vixDelta == null ? "·" : `${vixDelta >= 0 ? "▲" : "▼"}${Math.abs(vixDelta).toFixed(1)}%`}
+            </span>
+            <VixSpark points={vixHistory} />
+          </div>
+        </div>
+      </header>
 
-        {error && <div className="rounded-xl border border-ember bg-ember-soft p-3 text-sm">{error}</div>}
-        {last && (
-          <div className="text-sm text-muted">
-            Last observation #{last.index} at +{last.minute} min: {last.compared} cameras
-            {last.busDelayMin != null && `, buses ${last.busDelayMin} min late`} → {last.delisted.length} delisted,{" "}
-            {last.spawned.length} spawned.
+      <div className="mv-panel flex flex-wrap items-center gap-2">
+        <Btn label="Play" onClick={() => setPlaying((p) => !p)} disabled={!state} on={playing} accent="lime">
+          {playing ? <Pause size={16} /> : <Play size={16} />}
+        </Btn>
+        <Btn label="Next observation" onClick={step} disabled={busy || !state}>
+          <StepForward size={16} />
+        </Btn>
+        <div className="flex">
+          {SPEEDS.map((s) => (
+            <Btn key={s} label={`${s}x speed`} onClick={() => setSpeed(s)} on={speed === s}>
+              {s}x
+            </Btn>
+          ))}
+        </div>
+        <span className="mx-1 h-6 w-px" aria-hidden />
+        <label className="mv-chip h-[34px]" title="Worlds">
+          <Layers size={14} className="c-cyan" />
+          <input
+            type="number"
+            min={2}
+            max={200}
+            value={n}
+            onChange={(e) => setN(Number(e.target.value))}
+            className="mv-num w-12 bg-transparent outline-none"
+            aria-label="Worlds"
+          />
+        </label>
+        <Btn label="Brokers" onClick={() => setWithBrokers((b) => !b)} on={withBrokers} accent="violet">
+          <Users size={16} />
+        </Btn>
+        <Btn label="Respawn replay" onClick={() => spawn("replay")} disabled={busy}>
+          <RotateCcw size={16} />
+        </Btn>
+        <Btn label="Go live" onClick={() => spawn("live")} disabled={busy} accent="amber">
+          <Radio size={16} />
+        </Btn>
+        <span className="flex-1" />
+        <Btn label="Fork an event" onClick={() => setForkOpen((o) => !o)} on={forkOpen} accent="magenta">
+          <Zap size={16} /> Fork
+        </Btn>
+        {forkOpen && (
+          <div className="flex w-full flex-wrap items-center gap-2 pt-2">
+            <select value={eventKind} onChange={(e) => setEventKind(e.target.value as (typeof KINDS)[number])} className="mv-field" aria-label="Event kind">
+              {KINDS.map((k) => (
+                <option key={k}>{k}</option>
+              ))}
+            </select>
+            <select value={eventZone} onChange={(e) => setEventZone(e.target.value)} className="mv-field max-w-56" aria-label="Zone">
+              {state?.zones.map((z) => (
+                <option key={z.id} value={z.id}>{z.name}</option>
+              ))}
+            </select>
+            <label className="mv-chip h-[34px]">
+              +
+              <input
+                type="number"
+                min={0}
+                max={horizon}
+                value={eventAt}
+                onChange={(e) => setEventAt(Number(e.target.value))}
+                className="mv-num w-10 bg-transparent outline-none"
+                aria-label="Minutes from now"
+              />
+              ′
+            </label>
+            <Btn label="Place event" onClick={placeEvent} disabled={busy || !state || !eventZone} accent="magenta" on>
+              <Zap size={16} />
+            </Btn>
           </div>
         )}
+      </div>
 
-        <div className="grid gap-4 lg:grid-cols-[1.1fr_1fr]">
-          <div className="space-y-4">
-            <div className="flex gap-2 text-sm">
-              <Btn onClick={() => setView("now")} accent={view === "now"}>Consensus now</Btn>
-              <Btn onClick={() => setView("horizon")} accent={view === "horizon"}>At +{state?.horizonMin ?? 30} min</Btn>
+      {error && <div className="mv-error mv-tip" data-tip={error}>✕ engine</div>}
+
+      {last && (
+        <div className="flex flex-wrap gap-2 mv-num">
+          <span className="mv-chip" title="Observation">
+            <span className="c-cyan">#{last.index}</span>
+          </span>
+          <span className="mv-chip" title="Cameras compared">
+            <Camera size={12} className="c-cyan" /> {last.compared}
+          </span>
+          {last.busDelayMin != null && (
+            <span className="mv-chip" title="Bus delay, minutes">
+              <Bus size={12} className="c-amber" /> {last.busDelayMin}′
+            </span>
+          )}
+          <span className="mv-chip c-magenta" title="Delisted">✕ {last.delisted.length}</span>
+          <span className="mv-chip c-lime" title="Spawned">+ {last.spawned.length}</span>
+        </div>
+      )}
+
+      <div className="mv-grid">
+        <div className="grid content-start gap-4">
+          <div className="mv-panel mv-grain">
+            <div className="mv-head">
+              <div className="flex">
+                <Btn label="Consensus now" onClick={() => setView("now")} on={view === "now"}>
+                  Now
+                </Btn>
+                <Btn label={`Forecast at +${horizon} min`} onClick={() => setView("horizon")} on={view === "horizon"} accent="magenta">
+                  +{horizon}′
+                </Btn>
+              </div>
+              <span className="mv-label mv-num">{stats.length}</span>
             </div>
-            <CityMap geometry={geometry} stats={stats} label={view === "now" ? `Now (+${state?.minute ?? 0} min)` : `Forecast at +${state?.horizonMin ?? 30} min`} />
-            <div className="rounded-xl border border-line bg-surface p-3 text-sm">
-              <div className="mb-1 text-xs uppercase tracking-wide text-muted">Implied volatility by zone</div>
-              {[...stats].sort((a, b) => b.iv - a.iv).map((s) => (
-                <div key={s.zoneId} className="flex items-center gap-2 py-0.5">
-                  <span className="w-56 truncate">{s.name}</span>
-                  <span className="w-24 text-right tabular-nums text-muted">{s.mean}±{s.sd}</span>
-                  <span className="h-2 rounded bg-candy" style={{ width: `${Math.min(100, s.iv * 100)}%`, maxWidth: 200 }} />
-                  <span className="tabular-nums text-muted">{(s.iv * 100).toFixed(0)}%</span>
+            <CityMap geometry={geometry} stats={stats} />
+          </div>
+          <div className="mv-panel" data-accent="magenta">
+            <div className="mv-head">
+              <span className="mv-label">Spread</span>
+              <span className="mv-label mv-num c-magenta">{spread[0] ? `${(spread[0].iv * 100).toFixed(0)}%` : ""}</span>
+            </div>
+            <div className="flex h-16 items-end gap-1.5">
+              {spread.map((s) => (
+                <div
+                  key={s.zoneId}
+                  className="mv-tip flex-1"
+                  style={{ height: "100%", display: "flex", alignItems: "flex-end" }}
+                  data-tip={`${s.name} · ${Math.round(s.mean)}±${Math.round(s.sd)} · ${(s.iv * 100).toFixed(0)}%`}
+                >
+                  <div className="mv-bar w-full" style={{ height: `${Math.max(6, (s.iv / maxIv) * 100)}%` }} />
                 </div>
               ))}
             </div>
-            {selectedWorld && <WorldDetail world={selectedWorld} />}
           </div>
-          <div className="space-y-2">
-            {state?.brokers && <Brokers rows={state.brokers} />}
-            <div className="text-xs uppercase tracking-wide text-muted">Exchange of Worlds · price = chance it is the London we are in</div>
-            <Board rows={[...live, ...dead]} selected={selectedWorld?.id ?? null} onSelect={setSelected} />
-          </div>
+        </div>
+        <div className="grid content-start gap-4">
+          {state?.brokers && <Brokers rows={state.brokers} />}
+          <Board rows={[...live, ...dead]} brokers={state?.brokers ?? null} selected={selected} onSelect={setSelected} />
         </div>
       </div>
     </div>
   );
 }
 
-function Stat({ label, value }: { label: string; value: string | number }) {
+function Stat({ label, value, tone }: { label: string; value: string | number; tone: string }) {
   return (
     <div>
-      <div className="text-lg font-semibold">{value}</div>
-      <div className="text-xs text-muted">{label}</div>
+      <div className={`mv-stat mv-num ${tone}`}>{value}</div>
+      <div className="mv-label">{label}</div>
     </div>
   );
 }
 
-function Btn({ children, onClick, disabled, accent }: { children: React.ReactNode; onClick: () => void; disabled?: boolean; accent?: boolean }) {
+function Btn({
+  children,
+  label,
+  onClick,
+  disabled,
+  on,
+  accent,
+}: {
+  children: React.ReactNode;
+  label: string;
+  onClick: () => void;
+  disabled?: boolean;
+  on?: boolean;
+  accent?: "magenta" | "violet" | "lime" | "amber";
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className={`rounded-lg px-3 py-1.5 font-medium disabled:opacity-40 ${accent ? "bg-candy text-white" : "bg-surface-3 hover:bg-line-strong"}`}
+      aria-label={label}
+      title={label}
+      className="mv-btn"
+      data-on={on ? "true" : "false"}
+      data-accent={accent}
     >
       {children}
     </button>
