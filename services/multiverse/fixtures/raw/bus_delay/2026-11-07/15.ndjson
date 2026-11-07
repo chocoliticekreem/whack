@@ -1,0 +1,6 @@
+{"ts": "2026-11-07T15:05:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 3.1, "buses": 12}}
+{"ts": "2026-11-07T15:10:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 3.6, "buses": 12}}
+{"ts": "2026-11-07T15:15:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 3.6, "buses": 12}}
+{"ts": "2026-11-07T15:20:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 2.6, "buses": 12}}
+{"ts": "2026-11-07T15:25:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 4.4, "buses": 12}}
+{"ts": "2026-11-07T15:30:00Z", "source": "bus_delay", "payload": {"meanDelayMin": 2.9, "buses": 12}}
