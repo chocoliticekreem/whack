@@ -1,41 +1,46 @@
 ---
 title: Build — what we reuse, what we record, what we need
 date: 2026-11-07
-status: in progress · recorder live on main · prototype on local branch build/multiverse (not pushed)
+status: MVP live on main (Trade London) · see §0
 prior_art: https://github.com/chocoliticekreem/mirrorverse (built 2026-10-17 at a VAST hackathon)
 ---
 
 # Build
 
-## 0. Status (Sat 7 Nov, ~13:00)
-| Piece | State | Where |
+## 0. Status (Sat 7 Nov, ~18:15)
+**MVP is live:** Trade London at `/multiverse`. It runs city-wide markets on real TfL data, priced by
+simulated futures and settled by real readings, against 6 AI traders. Verified end to end: a 100-point
+bet on "Over 12 people on the Oxford Circus camera at 17:51" settled on JamCam 00001.07451 (13 people)
+and paid out.
+
+| Piece | State | Where (all on `main`) |
 |---|---|---|
-| **Recorder** | **Live since 12:06** on Anson's laptop (TfL key, 300/min cap). Bus, tube, line/road status, disruptions, bikes, crowding, JamCam metadata. No YOLO counts yet (`--yolo` off) | `main`: `recorder/`, data in `data/raw/` (gitignored) |
-| **History backfill** | Done: 7 days of rain/temp (721 rows), Thames gauges (1,338), 14 days of grid demand (698) and carbon (698) | `data/backfill/` |
-| **Multiverse engine** | Built: spawn, observe, prune, resample; common random numbers; 50 worlds in under 1 s; delist reasons; consensus + implied volatility per zone | `build/multiverse`: `services/multiverse/` |
-| **Exchange board** | Built: `/multiverse` page with world prices, sparklines, lineage, a 2D zone map, "place an event" | `build/multiverse`: `apps/stream/src/app/multiverse/` |
-| **Persona brokers (TOPS)** | Built: 10 personas, Claude Haiku 4.5 (one batched call per observation), rules fallback, track records, leaderboard. **Being tuned now** with live Haiku | `build/multiverse`: `services/multiverse/brokers.py` |
-| **Upstream Mirrorverse #52** (live-data resilience, cleaner 3D twin) | Being pulled in now | `build/multiverse` |
-| **3D ghost-world view** | **Not started.** Highest-value presentation task | twin in `apps/stream/src/twin/` |
-| Keys | TfL app key and Anthropic key in the main checkout's gitignored `.env` | — |
+| **Recorder** | Live under a supervisor that restarts it if a key feed stalls for 3 min. YOLO counts the 13 market cameras, which stay fresh | `recorder/`, `scripts/run-data.sh` (#27, #30) |
+| **Data health** | Per-feed age and status, YOLO and TfL key checks, `GET /health` on :8052 | `services/health/` (#30) |
+| **City markets backend** | 5 hotspots. Futures-priced, LMSR, strike selection (no favourite above 85%), Kalshi-style integrity rules (source, close 60 s before settle, settlement window, fallback, void and refund, halts, position cap). 6 AI traders, one feed each. :8051 | `services/city/` (#33) |
+| **Trade London UI** | 3D London with hotspots, market cards, stakes and multipliers, settle flow, AI traders panel, leaderboard, data-health dot, phone layout | `apps/stream/src/app/multiverse/` (#32) |
+| **Oxford Circus multiverse** | 50 worlds, 5-min horizon, real seed and real data by default. Rain, crowding and bike likelihood terms. London VIX | `services/multiverse/` (#26, #31); game at `/multiverse/oxford`, board at `/multiverse/board` |
+| **Accuracy check** | On 30 real minutes, the people forecast ties "nothing changes" (MAE 2.4 vs 2.4), 80% range covers 77%. Persistence still wins on bus delay | `services/multiverse/eval_real.py` (#29, #31) |
+
+**In progress:**
+1. 5-minute rounds with recurring series and bracket ladders. Bus markets dropped. Fixes "too random, too quick".
+2. UI restyle: no emojis, Kalshi × PostHog, less "vibe-coded".
+3. A teammate is designing better questions (series).
 
 **Gaps, ranked:**
-0. **Engine upgrade, queued for after the broker tuning lands:**
-   - 5-minute markets (horizon 5 min, observation every ~60 s);
-   - the **London VIX** index;
-   - **brokers each read one alternative-data feed**, scored on which data has alpha.
-   - **In progress now (separate agent):** alternative-data feeds + scrapers in the recorder (aircraft, grid, rain, GDELT, Wikipedia; one optional events scraper).
-1. The engine runs on a **synthetic fixture**. It needs a real Oxford Circus seed whose camera IDs
-   match the recorder's.
-2. **No people counts yet:** start `services/yolo` and restart the recorder with `--yolo`.
-3. **3D ghost worlds** in the twin (the presentation centrepiece).
-4. Optional: null-model check (shuffle reality, no world should win); "follow this person".
-5. Known engine bug: bus riders are counted at the station before their bus arrives.
-6. **Demo robustness** (lessons from God's Eye View; see data-sources.md §3b):
-   - Cache the Oxford Circus OSM extract locally; Overpass refuses old clients.
-   - Show stale data as **stale**, never as zero.
-   - Have a fallback camera feed (another city's CCTV, or recorded replay).
-   - Record a scripted-camera backup video.
+1. Market questions feel random until rounds and series land.
+2. "Place an event" exists only on the Oxford Circus board. It doesn't move city prices.
+3. The city markets don't use the agent simulation; each station has its own statistical model.
+4. All state is in memory and lost on restart.
+5. Demo backup: a scripted-camera video (owned by the team).
+
+**Run it:**
+```sh
+scripts/run-data.sh &                      # recorder + YOLO + health (:8052)
+python3 services/city/server.py &          # city markets (:8051)
+python3 services/multiverse/server.py &    # Oxford Circus engine (:8049)
+cd apps/stream && npx next dev -H 0.0.0.0  # open /multiverse
+```
 
 ## 1. Code reuse: approved
 - **The organisers confirmed (Sat 7 Nov) that we can build on Mirrorverse.** It's disclosed in
