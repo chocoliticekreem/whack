@@ -1,7 +1,7 @@
 ---
 title: Our idea — the current thinking
 date: 2026-11-07
-status: leading idea chosen (Exchange of Worlds) · building on local branch · see build.md §0
+status: OverWatch · MVP live on main · see build.md §0
 ---
 
 # Our idea
@@ -10,7 +10,7 @@ Built on **Mirrorverse**, our October build: a live mirror of real London fed by
 buses and disruptions (see [build.md](build.md)). This doc covers *what we make with it*.
 
 ## ★ The pitch (consolidated)
-**The Exchange of Worlds**, built on Mirrorverse. One product in three layers. The image leads
+**OverWatch**, built on Mirrorverse. One product in three layers. The image leads
 and the mechanism comes after.
 
 | Layer | What it is | Role in the pitch |
@@ -52,7 +52,7 @@ judges touch it, not the point. Points only, never real money.
 > Prediction markets like Polymarket and Kalshi price the questions someone thought to ask. **We
 > price the world itself, starting with London.**
 >
-> The Exchange of Worlds forks the city into parallel futures. They're simulated live from TfL
+> OverWatch forks the city into parallel futures. They're simulated live from TfL
 > cameras and buses and drawn in 3D as ghost cities over the real one. Every future is a stock.
 > A **market maker**, our reality-tracking engine, quotes each world's probability. AI brokers
 > bet with conviction, TOPS-style. Every real camera frame settles the trades, and wrong worlds

@@ -1,14 +1,14 @@
 ---
 title: Build — what we reuse, what we record, what we need
 date: 2026-11-07
-status: MVP live on main (Trade London) · see §0
+status: MVP live on main (OverWatch) · see §0
 prior_art: https://github.com/chocoliticekreem/mirrorverse (built 2026-10-17 at a VAST hackathon)
 ---
 
 # Build
 
 ## 0. Status (Sat 7 Nov, ~18:15)
-**MVP is live:** Trade London at `/multiverse`. It runs city-wide markets on real TfL data, priced by
+**MVP is live:** OverWatch at `/multiverse`. It runs city-wide markets on real TfL data, priced by
 simulated futures and settled by real readings, against 6 AI traders. Verified end to end: a 100-point
 bet on "Over 12 people on the Oxford Circus camera at 17:51" settled on JamCam 00001.07451 (13 people)
 and paid out.
@@ -18,7 +18,7 @@ and paid out.
 | **Recorder** | Live under a supervisor that restarts it if a key feed stalls for 3 min. YOLO counts the 13 market cameras, which stay fresh | `recorder/`, `scripts/run-data.sh` (#27, #30) |
 | **Data health** | Per-feed age and status, YOLO and TfL key checks, `GET /health` on :8052 | `services/health/` (#30) |
 | **City markets backend** | 5 hotspots. Futures-priced, LMSR, strike selection (no favourite above 85%), Kalshi-style integrity rules (source, close 60 s before settle, settlement window, fallback, void and refund, halts, position cap). 6 AI traders, one feed each. :8051 | `services/city/` (#33) |
-| **Trade London UI** | 3D London with hotspots, market cards, stakes and multipliers, settle flow, AI traders panel, leaderboard, data-health dot, phone layout | `apps/stream/src/app/multiverse/` (#32) |
+| **OverWatch UI** | 3D London with hotspots, market cards, stakes and multipliers, settle flow, AI traders panel, leaderboard, data-health dot, phone layout | `apps/stream/src/app/multiverse/` (#32) |
 | **Oxford Circus multiverse** | 50 worlds, 5-min horizon, real seed and real data by default. Rain, crowding and bike likelihood terms. London VIX | `services/multiverse/` (#26, #31); game at `/multiverse/oxford`, board at `/multiverse/board` |
 | **Accuracy check** | On 30 real minutes, the people forecast ties "nothing changes" (MAE 2.4 vs 2.4), 80% range covers 77%. Persistence still wins on bus delay | `services/multiverse/eval_real.py` (#29, #31) |
 
