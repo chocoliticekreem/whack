@@ -10,6 +10,8 @@ import gzip
 import json
 import os
 import sys
+import urllib.error
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -20,10 +22,15 @@ sys.path.append(str(HERE.parent / "multiverse"))
 import feeds  # noqa: E402  (read-only reuse: parse_ts, alt_root)
 
 LONDON = ZoneInfo("Europe/London")
-SOURCES = ("crowding", "line_status", "jamcams", "rain_now", "bus")
-# TfL Crowding and Open-Meteo publish every 5 min, so one missed poll (not every poll gap) halts them.
-STALE_S = {"crowding": 360, "rain_now": 360, "line_status": 180, "jamcams": 180, "bus": 180}
+SOURCES = ("crowding", "line_status", "jamcams", "rain_now", "bus", "aircraft", "scrape_fixtures", "vix")
+# TfL Crowding and Open-Meteo publish every 5 min, so one missed poll (not every poll gap) halts them. Fixtures are
+# scraped every 30 min. `vix` is not a recorder source: the server polls the multiverse engine for it (live only).
+STALE_S = {"crowding": 360, "rain_now": 360, "line_status": 180, "jamcams": 180, "bus": 180, "aircraft": 180,
+           "scrape_fixtures": 3600, "vix": 180}
 BUS_DUE_S = 300
+MULTIVERSE_URL = os.environ.get("MULTIVERSE_URL", "http://127.0.0.1:8349").rstrip("/")
+WEEKDAYS = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
+DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 
 def load_hotspots(path: Path = HERE / "hotspots.json") -> list[dict]:
@@ -63,7 +70,8 @@ def reduce_lines(payload: Any, ctx: dict) -> dict | None:
             continue
         worst = min(statuses, key=lambda s: s["statusSeverity"])
         out[line["id"]] = {"sev": int(worst["statusSeverity"]), "desc": worst.get("statusSeverityDescription") or "",
-                           "name": line.get("name") or line["id"], "mode": line.get("mode") or ""}
+                           "name": line.get("name") or line["id"], "mode": line.get("mode") or "",
+                           "reason": " ".join((worst.get("reason") or "").split())}
     return out or None
 
 
@@ -107,10 +115,60 @@ def reduce_bus(payload: Any, ctx: dict) -> dict | None:
     return out
 
 
+def reduce_aircraft(payload: Any, ctx: dict) -> dict | None:
+    summary = payload.get("summary") if isinstance(payload, dict) else None
+    total = num((summary or {}).get("holding_total"))
+    if total is None:
+        return None
+    stacks = {k: int(v) for k, v in (summary.get("holding") or {}).items() if num(v) is not None}
+    return {"total": int(total), "stacks": stacks}
+
+
+def reduce_fixtures(payload: Any, ctx: dict) -> dict | None:
+    keys = ("home", "away", "status", "home_score", "away_score", "kickoff_utc", "egress_est_utc", "venue",
+            "stations")
+    rows = [{k: e.get(k) for k in keys} for e in payload if isinstance(e, dict)] if isinstance(payload, list) else []
+    return {"fixtures": rows}
+
+
 REDUCERS: dict[str, Callable[[Any, dict], dict | None]] = {
     "crowding": reduce_crowding, "line_status": reduce_lines, "jamcams": reduce_jamcams,
-    "rain_now": reduce_rain, "bus": reduce_bus,
+    "rain_now": reduce_rain, "bus": reduce_bus, "aircraft": reduce_aircraft, "scrape_fixtures": reduce_fixtures,
 }
+
+
+def parse_profile(payload: Any) -> tuple[str, dict[str, dict[str, float]]] | None:
+    """TfL crowding_profile -> (naptan, {weekday: {"HH:MM" band start: typical fraction of baseline}})."""
+    if not isinstance(payload, dict) or not payload.get("naptan"):
+        return None
+    days = {}
+    for day in payload.get("daysOfWeek") or []:
+        bands = {b["timeBand"][:5]: v for b in day.get("timeBands") or []
+                 if b.get("timeBand") and (v := num(b.get("percentageOfBaseLine"))) is not None}
+        if day.get("dayOfWeek") and bands:
+            days[day["dayOfWeek"]] = bands
+    return payload["naptan"], days
+
+
+def band_of(ms: int) -> tuple[str, str]:
+    """(weekday code, "HH:MM" start of the 15-min TfL band) for a timestamp, Europe/London."""
+    d = datetime.fromtimestamp(ms / 1000, LONDON)
+    return WEEKDAYS[d.weekday()], f"{d.hour:02d}:{d.minute - d.minute % 15:02d}"
+
+
+def day_name(ms: int) -> str:
+    return DAY_NAMES[datetime.fromtimestamp(ms / 1000, LONDON).weekday()]
+
+
+def fetch_vix(url: str = MULTIVERSE_URL, timeout: float = 2.0) -> dict | None:
+    """GET <multiverse>/vix: {vix, vix_history [{ts, vix, delta, driver, driverDelta, spike}], vix_driver}.
+    None when the engine is down or has not spawned yet (it answers 404 before the first /spawn)."""
+    try:
+        with urllib.request.urlopen(f"{url}/vix", timeout=timeout) as resp:
+            data = json.loads(resp.read())
+    except (OSError, ValueError, urllib.error.URLError):
+        return None
+    return data if isinstance(data, dict) and isinstance(data.get("vix_history"), list) else None
 
 
 class Store:
@@ -123,6 +181,8 @@ class Store:
         self.ts: dict[str, list[int]] = {s: [] for s in SOURCES}
         self.snap: dict[str, list[dict]] = {s: [] for s in SOURCES}
         self.files: dict[Path, tuple[float, int]] = {}
+        self.profile: dict[str, dict[str, dict[str, float]]] = {}
+        self.profile_file: Path | None = None
 
     @property
     def cam_names(self) -> dict[str, str]:
@@ -138,9 +198,47 @@ class Store:
         self.snap[source].insert(i, snap)
 
     def refresh(self, start_ms: int, end_ms: int) -> None:
-        for source in SOURCES:
+        for source in REDUCERS:
             for path in self.hour_paths(source, start_ms, end_ms):
                 self.read_file(source, path)
+        self.load_profile()
+
+    def load_profile(self) -> None:
+        """The newest recorded crowding_profile file (TfL's typical day per station; the recorder takes it once)."""
+        files = sorted(self.root.glob("crowding_profile/*/*.ndjson*"))
+        if not files or files[-1] == self.profile_file:
+            return
+        out = {}
+        opener = gzip.open if files[-1].suffix == ".gz" else open
+        try:
+            with opener(files[-1], "rt") as f:
+                for line in f:
+                    try:
+                        got = parse_profile(json.loads(line).get("payload"))
+                    except (ValueError, AttributeError):
+                        continue
+                    if got:
+                        out[got[0]] = got[1]
+        except (OSError, EOFError):
+            return
+        if out:
+            self.profile, self.profile_file = out, files[-1]
+
+    def typical(self, naptan: str, ms: int) -> float | None:
+        """TfL's typical fraction of baseline for this station, weekday and 15-min band (None if unknown or 0)."""
+        day, band = band_of(ms)
+        return self.profile.get(naptan, {}).get(day, {}).get(band) or None
+
+    def ingest_vix(self, payload: dict) -> int:
+        """Add the multiverse's VIX history (one point per frame); each point carries the engine's spawn time."""
+        hist = [e for e in payload.get("vix_history") or []
+                if isinstance(e, dict) and num(e.get("ts")) and num(e.get("vix")) is not None]
+        spawns = [int(e["ts"]) for e in hist if e.get("driver") == "spawn"]
+        spawn = max(spawns) if spawns else None
+        for e in hist:
+            self.add("vix", int(e["ts"]), {"vix": float(e["vix"]), "driver": e.get("driver") or "",
+                                           "driverDelta": num(e.get("driverDelta")) or 0.0, "spawnTs": spawn})
+        return len(hist)
 
     def hour_paths(self, source: str, start_ms: int, end_ms: int) -> list[Path]:
         t = datetime.fromtimestamp(start_ms / 1000, timezone.utc).replace(minute=0, second=0, microsecond=0)

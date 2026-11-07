@@ -104,6 +104,133 @@ class LevelSim(CrowdSim):
         return bracket_of(math.exp(self.paths[i][0][-1]) * 100, self.edges)
 
 
+class RaceSim(CrowdSim):
+    """Versus on "vs usual" (live % / the typical % for that weekday and 15-min band), one log walk per hub.
+
+    mode "gain": biggest rise in vs-usual since the frozen open reading (hub_surge). mode "level": highest vs-usual
+    at settle (hub_hour). typ0 / typ_t: each hub's typical value at open and at the expected settle reading.
+    Ties go to the first hub in the fixed order."""
+
+    def __init__(self, stations, t0: int, minutes: int, rng: random.Random, typ0: list[float],
+                 typ_t: list[float], mode: str):
+        super().__init__(stations, t0, minutes, rng)
+        self.typ0, self.typ_t, self.mode = typ0, typ_t, mode
+
+    def score(self, i: int, j: int) -> float:
+        vs = math.exp(self.paths[i][j][-1]) / self.typ_t[j]
+        return vs - math.exp(self.stations[j][2]) / self.typ0[j] if self.mode == "gain" else vs
+
+    def outcome(self, i: int) -> str:
+        scores = [self.score(i, j) for j in range(len(self.stations))]
+        return self.stations[scores.index(max(scores))][0]
+
+
+class ScalarSim:
+    """Over/under on one positive number (City Pulse): a capped log walk from the last real reading.
+    value_of(snapshot) reads the number from a feed snapshot (None = not enough data in it)."""
+
+    tol = 1.5
+
+    def __init__(self, x0: float, mu: float, sd: float, t0: int, minutes: int, rng: random.Random,
+                 value_of, strike: float):
+        self.t0, self.m, self.sd, self.value_of, self.strike = t0, minutes, sd, value_of, strike
+        self.paths = []
+        for _ in range(N_FUTURES):
+            x, path = math.log(x0), [math.log(x0)]
+            for _ in range(minutes):
+                x += mu + sd * capped_gauss(rng)
+                path.append(x)
+            self.paths.append(path)
+
+    def outcome(self, i: int) -> str:
+        return "over" if math.exp(self.paths[i][-1]) > self.strike else "under"
+
+    def error(self, i: int, ts: int, snap: dict) -> float | None:
+        v = self.value_of(snap)
+        if not v:
+            return None
+        k = max(0, min(self.m, round((ts - self.t0) / MIN_MS)))
+        return abs(math.log(v) - self.paths[i][k]) / self.sd
+
+
+class DeltaSim:
+    """Over/under from today's own h-minute changes (a bootstrap): each future = the open value plus one past
+    change of the same horizon (London VIX, Heathrow stacks). Observations mid-round rule out futures whose
+    straight-line path to their final value disagrees with the reading."""
+
+    tol = 1.5
+
+    def __init__(self, x0: float, deltas: list[float], t0: int, minutes: int, rng: random.Random,
+                 value_of, strike: float):
+        self.x0, self.t0, self.m, self.value_of, self.strike = x0, t0, minutes, value_of, strike
+        self.finals = [x0 + rng.choice(deltas) for _ in range(N_FUTURES)]
+        self.sd = max(statistics.pstdev(deltas), 0.05)
+
+    def outcome(self, i: int) -> str:
+        return "over" if self.finals[i] > self.strike else "under"
+
+    def error(self, i: int, ts: int, snap: dict) -> float | None:
+        v = self.value_of(snap)
+        if v is None:
+            return None
+        frac = max(0.0, min(1.0, (ts - self.t0) / (self.m * MIN_MS)))
+        expected = self.x0 + (self.finals[i] - self.x0) * frac
+        return abs(v - expected) / (self.sd * max(0.5, math.sqrt(frac)))
+
+
+class BreakSim:
+    """Clean sheet: every future draws when the first Good line breaks (exponential, P(break by T) = p_break).
+    A reading that shows every Good line still Good rules out the futures that had already broken by then
+    (and vice versa), so the price drifts toward YES as a clean hour runs down."""
+
+    tol = 0.5
+
+    def __init__(self, p_break: float, good: list[str], t0: int, minutes: int, rng: random.Random):
+        lam = -math.log(max(1e-6, 1 - p_break)) / max(1, minutes)
+        self.good, self.t0, self.m = good, t0, minutes
+        self.break_at = [rng.expovariate(lam) for _ in range(N_FUTURES)]
+
+    def outcome(self, i: int) -> str:
+        return "no" if self.break_at[i] <= self.m else "yes"
+
+    def error(self, i: int, ts: int, snap: dict) -> float | None:
+        seen = [snap[l]["sev"] for l in self.good if l in snap]
+        if not seen:
+            return None
+        broke = any(s != GOOD_SEVERITY for s in seen)
+        return 0.0 if broke == (self.break_at[i] <= (ts - self.t0) / MIN_MS) else 9.0
+
+
+GOOD_SEVERITY = 10
+
+
+def fit_break_hazard(snaps: list[tuple[int, dict]], lines: list[str]) -> tuple[int, float]:
+    """(breaks, Good line-minutes) over line-status snapshots: a break is a line going from Good to anything
+    else between two readings. breaks / line-minutes is the per-line hazard per minute."""
+    breaks, minutes = 0, 0.0
+    for (t0, a), (t1, b) in zip(snaps, snaps[1:]):
+        gap = min(10.0, (t1 - t0) / MIN_MS)
+        for line in lines:
+            if line in a and line in b and a[line]["sev"] == GOOD_SEVERITY:
+                minutes += gap
+                breaks += b[line]["sev"] != GOOD_SEVERITY
+    return breaks, minutes
+
+
+def deltas_at(series: list[tuple[int, float]], minutes: int, tol_ms: int = 40_000) -> list[float]:
+    """Every h-minute change in a (ts, value) series: for each reading, the reading closest to ts + h (within tol)."""
+    out, j = [], 0
+    for ts, v in series:
+        target = ts + minutes * MIN_MS
+        while j < len(series) - 1 and series[j][0] < target - tol_ms:
+            j += 1
+        best = min((p for p in series[j:j + 4] if abs(p[0] - target) <= tol_ms),
+                   key=lambda p: abs(p[0] - target), default=None)
+        if best is not None:
+            out.append(best[1] - v)
+    return out
+
+
 MIN_BRACKET = 0.08
 FLOOR_BRACKET = 0.05
 TARGET_FAVOURITE = 0.40
