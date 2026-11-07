@@ -14,6 +14,7 @@ stock is a possible future of London, and reality is the market.* Pitch in docs/
 | [docs/data-sources.md](docs/data-sources.md) | Every data source: live vs history, auth, alternative data, city comparison |
 | [docs/build.md](docs/build.md) | What we reuse from Mirrorverse, the feed-recording plan, data sources |
 | [docs/all-tracks-gpt.md](docs/all-tracks-gpt.md), [docs/all-tracks-gemini.md](docs/all-tracks-gemini.md) | James's AI-generated ideas for all four tracks (raw; the takeaways are in idea.md §3b) |
+| [marketing/devpost.md](marketing/devpost.md) | The Devpost submission draft; assets go in `marketing/assets/` |
 
 ## Key times
 - **Sat 14:00:** MW workshop, OC0.01. Go, and pitch the one-liner.
