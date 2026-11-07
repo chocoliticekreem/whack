@@ -52,7 +52,12 @@ HEADLINE_CAP = 0.70
 HEADLINE_FLOOR = 0.30
 LINE_GAP_MS = 90_000
 CLEAN_MAX_GAP_MS = 5 * MIN_MS
-HUB_REVERSION = 0.01
+HUB_KAPPA = 0.0161
+HUB_POWER = 0.5
+HUB_CORR = {"oxford-circus": {"kings-cross": 0.15, "piccadilly": 0.30, "waterloo": 0.33, "bank": -0.08},
+            "kings-cross": {"piccadilly": 0.25, "waterloo": 0.18, "bank": -0.18},
+            "piccadilly": {"waterloo": 0.12, "bank": 0.30},
+            "waterloo": {"bank": -0.19}}
 CLEAN_CLOSE_BEFORE_MS = 55 * MIN_MS
 
 
@@ -441,28 +446,40 @@ def sim_view(m: Market, store: Store, now: int) -> dict | None:
 # ---------------------------------------------------------------- S1 hub_surge (every round)
 
 
-def hub_reversion(store: Store, spots: list[dict], snap: dict, ts0: int, stations: list) -> list:
-    """Pull each hub's drift toward the five hubs' mean log vs usual: the hub furthest below its usual catches up.
-    debt: HUB_REVERSION is one Saturday's fit (0.0095 ± 0.0017 per min of TfL time, 445 hub-rounds, 12:40-20:10).
-    ceiling: one day of data. upgrade: refit per weekday once the recorder holds a week."""
-    xs = [math.log(snap[h["naptan"]] / typical_at(store, h["naptan"], ts0)) for h in spots]
-    mean = sum(xs) / len(xs)
-    return [(oid, nap, x0, mu - HUB_REVERSION * (x - mean), sd) for (oid, nap, x0, mu, sd), x in zip(stations, xs)]
+def hub_corr(ids: list[str]) -> list[list[float]]:
+    """The hubs' shock correlation in `ids` order (0 for a pair HUB_CORR doesn't list)."""
+    def rho(a: str, b: str) -> float:
+        return 1.0 if a == b else HUB_CORR.get(a, {}).get(b, HUB_CORR.get(b, {}).get(a, 0.0))
+    return [[rho(a, b) for b in ids] for a in ids]
 
 
 def build_hub_surge(mid: str, store: Store, spots: list[dict], now: int, settles_at: int) -> Market | None:
-    """5-way race: the hub whose vs-usual rises most from the reading at open to the first reading after close."""
+    """5-way race: the hub whose vs-usual rises most from the reading at open to the first reading after close.
+
+    Each hub's futures follow its usual-day slope, get pulled toward the five hubs' mean vs usual and share
+    correlated shocks (pricing.RelativeRaceSim); the futures' shares are tempered by HUB_POWER. The hub furthest below
+    its usual won 37% of rounds (19/52 on 12:40-17:00) at a price of 28-30% under the previous walk, whose momentum
+    drift made its other favourites overconfident (README "Pricing").
+    debt: HUB_KAPPA, HUB_CORR and HUB_POWER are fitted on one Saturday, 12:00-17:00 (analysis/judge/fit_hub_ou.py:
+    kappa 0.0161 per min from 197 hub-steps, correlation from 30 joint 5-min steps; power = Platt fit p ∝ p^a of the
+    open prices on 52 races, a = 0.44-0.56 over 5 seeds). ceiling: one afternoon. upgrade: refit per weekday once the
+    recorder holds a week."""
     last = store.latest("crowding", now)
     if not last or vs_usual(store, spots, last[0], last[1]) is None:
         return None
     ts0, snap = last
     m0 = store.measured_at(ts0)
     t_end, minutes = crowd_walk(m0, settles_at, now)
-    stations = hub_reversion(store, spots, snap, ts0,
-                             [crowd_station(store, h, snap, now, m0, t_end, minutes) for h in spots])
+    stations = []
+    for h in spots:
+        oid, nap, x0, _, sd = crowd_station(store, h, snap, now)
+        slope = pricing.usual_drift(store.usual(nap, m0), store.usual(nap, t_end), minutes)
+        stations.append((oid, nap, x0, slope, sd))
     typ0 = [typical_at(store, h["naptan"], ts0) for h in spots]
     typ_t = [store.typical(h["naptan"], t_end) or t0 for h, t0 in zip(spots, typ0)]
-    sim = pricing.RaceSim(stations, m0, minutes, random.Random(seed_of(mid)), typ0, typ_t, "gain")
+    chol = pricing.cholesky(hub_corr([h["id"] for h in spots]))
+    sim = pricing.RelativeRaceSim(stations, m0, minutes, random.Random(seed_of(mid)), typ0, typ_t, HUB_KAPPA, chol,
+                                  HUB_POWER)
     blend_hubs(sim, store, spots, now, t_end, mid)
     spec = hub_spec(store, spots, stations, ts0, snap)
     day = spec["day"]
@@ -500,10 +517,6 @@ def pulse_of(snap: dict) -> float | None:
     return 100 * sum(snap.values()) / len(snap) if len(snap) >= PULSE_MIN_STATIONS else None
 
 
-def pulse_series(store: Store, start: int, now: int) -> list[tuple[int, float]]:
-    return [(ts, p) for ts, s in store.between("crowding", start, now) if (p := pulse_of(s))]
-
-
 def pulse_vs_usual(store: Store, start: int, now: int) -> list[tuple[int, float]]:
     """(ts, log City Pulse ÷ a usual day's pulse over the same stations) per reading; the raw log pulse when the
     usual-day profile is missing."""
@@ -528,25 +541,30 @@ def pulse_along_usual(store: Store, snap_at: tuple[int, dict], t_end: int) -> fl
     return pulse_of(vals)
 
 
+def pulse_line(sim: pricing.ScalarSim) -> float:
+    """The half point (x.0 or x.5) nearest the futures' median final City Pulse, so markets open close to 50/50."""
+    return round(statistics.median(math.exp(p[-1]) for p in sim.paths) * 2) / 2
+
+
 def build_city_pulse(mid: str, store: Store, spots: list[dict], now: int, settles_at: int) -> Market | None:
-    """Over/under on City Pulse; line = pulse at open + the median 5-min change over the last 3 h, on a .5."""
+    """Over/under on City Pulse; line = the futures' median City Pulse at the settle reading, on a .5, so the market
+    opens near 50/50 (the old line, open + the median 5-min change, missed the usual-day slope the futures drift along
+    and opened evening markets at a 94% favourite)."""
     last = store.latest("crowding", now)
     p0 = pulse_of(last[1]) if last else None
     if not p0:
         return None
-    hist = pulse_series(store, now - HISTORY_MS, now)
-    d5 = pricing.deltas_at(hist, 5, CROWD_TOL_MS)
-    line = math.floor(p0 + (statistics.median(d5) if len(d5) >= 3 else 0.0)) + 0.5
     mu, sd = pricing.fit_log_walk(pulse_vs_usual(store, now - HISTORY_MS, now), 0.01, 0.002, 0.05)
     m0 = store.measured_at(last[0])
     t_end, minutes = crowd_walk(m0, settles_at, now)
     mu += pricing.usual_drift(p0, pulse_along_usual(store, (m0, last[1]), t_end), minutes)
-    sim = pricing.ScalarSim(p0, mu, sd, m0, minutes, random.Random(seed_of(mid)), pulse_of, line)
+    sim = pricing.ScalarSim(p0, mu, sd, m0, minutes, random.Random(seed_of(mid)), pulse_of, p0)
     blend_pulse(sim, store, last, now, t_end, mid)
+    line = sim.strike = pulse_line(sim)
     hhmm = local_time(settles_at)
     rule = (f"City Pulse = 100 × the mean live TfL busyness (% of baseline) over the {PULSE_STATIONS} TfL Crowding "
             f"stations, in {crowd_settle_rule(settles_at)}. Fewer than {PULSE_MIN_STATIONS} stations reporting → "
-            f"void. Over = above {line:.1f}; Under = below {line:.1f}.")
+            f"void. Over = above {line:.1f}; exactly {line:.1f} or below counts as Under.")
     return Market(mid, "city_pulse", "overunder", f"City Pulse at {hhmm}: over or under {line:.1f}?", [], now,
                   settles_at, over_under_options(f"{line:.1f}"), sim,
                   f"TfL Crowding API · {PULSE_STATIONS} stations · {settle_stamp(settles_at)}", rule,

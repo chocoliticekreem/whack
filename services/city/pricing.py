@@ -144,6 +144,71 @@ class RaceSim(CrowdSim):
         return self.stations[scores.index(max(scores))][0]
 
 
+def cholesky(corr: list[list[float]]) -> list[list[float]]:
+    """Lower-triangular L with L·Lᵀ = corr (a positive-definite correlation matrix)."""
+    n = len(corr)
+    low = [[0.0] * n for _ in range(n)]
+    for i in range(n):
+        for j in range(i + 1):
+            s = sum(low[i][k] * low[j][k] for k in range(j))
+            low[i][j] = math.sqrt(corr[i][i] - s) if i == j else (corr[i][j] - s) / low[j][j]
+    return low
+
+
+class RelativeRaceSim(RaceSim):
+    """hub_surge: each hub's log live busyness moves by its usual-day slope (station drift), is pulled toward the five
+    hubs' mean log vs usual (at the open band's typicals) at `kappa` per minute, and takes shocks correlated across hubs
+    through `chol` (Cholesky factor of their correlation). `power` tempers the futures' shares in Futures.probs
+    (p ∝ share^power). Settles like RaceSim "gain": vs usual at the settle band minus vs usual at open."""
+
+    def __init__(self, stations, t0: int, minutes: int, rng: random.Random, typ0: list[float], typ_t: list[float],
+                 kappa: float, chol: list[list[float]], power: float):
+        self.stations, self.t0, self.m = stations, t0, minutes
+        self.typ0, self.typ_t, self.mode, self.power = typ0, typ_t, "gain", power
+        self.paths = [self.walk_all(kappa, chol, rng) for _ in range(N_FUTURES)]
+
+    def walk_all(self, kappa: float, chol: list[list[float]], rng: random.Random) -> list[list[float]]:
+        log_typ = [math.log(t) for t in self.typ0]
+        xs = [s[2] for s in self.stations]
+        paths = [[x] for x in xs]
+        for _ in range(self.m):
+            dev = [x - lt for x, lt in zip(xs, log_typ)]
+            mean = sum(dev) / len(dev)
+            e = [capped_gauss(rng) for _ in xs]
+            xs = [x + mu - kappa * (d - mean) + sd * sum(c * v for c, v in zip(row, e))
+                  for x, d, (_, _, _, mu, sd), row in zip(xs, dev, self.stations, chol)]
+            for path, x in zip(paths, xs):
+                path.append(x)
+        return paths
+
+
+def fit_relative_ou(grid: dict[int, dict[str, tuple[float, float]]], ids: list[str], step_min: float = 5.0):
+    """Fit RelativeRaceSim on readings binned into consecutive slots step_min apart: {slot: {hub: (log live,
+    log vs usual)}}. From every slot where all hubs read, d log live_i to the next slot = -k * dev_i + e_i, dev_i =
+    log vs usual_i minus the hubs' mean. Returns (kappa per minute, {hub: innovation sd per minute},
+    innovation correlation in `ids` order, joint steps used)."""
+    xs, ys, joint = [], [], []
+    for t, row in sorted(grid.items()):
+        nxt = grid.get(t + 1, {})
+        if any(h not in row for h in ids) or not nxt:
+            continue
+        mean = sum(row[h][1] for h in ids) / len(ids)
+        step = {h: (row[h][1] - mean, nxt[h][0] - row[h][0]) for h in ids if h in nxt}
+        for h, (d, dx) in step.items():
+            xs.append((h, d))
+            ys.append(dx)
+        if len(step) == len(ids):
+            joint.append(step)
+    k = -sum(d * dx for (_, d), dx in zip(xs, ys)) / sum(d * d for _, d in xs)
+    resid = {h: [] for h in ids}
+    for (h, d), dx in zip(xs, ys):
+        resid[h].append(dx + k * d)
+    sds = {h: statistics.pstdev(r) / math.sqrt(step_min) for h, r in resid.items()}
+    e = {h: [s[h][1] + k * s[h][0] for s in joint] for h in ids}
+    corr = [[statistics.correlation(e[a], e[b]) if a != b else 1.0 for b in ids] for a in ids]
+    return -math.log(1 - k) / step_min, sds, corr, len(joint)
+
+
 class ScalarSim:
     """Over/under on one positive number (City Pulse): a capped log walk from the last real reading.
     value_of(snapshot) reads the number from a feed snapshot (None = not enough data in it)."""
@@ -450,7 +515,13 @@ class Futures:
         total = sum(self.weights[i] for i in alive)
         for i in alive:
             counts[self.sim.outcome(i)] += self.weights[i] * len(alive) / total if total > 0 else 1.0
-        return smooth(counts)
+        probs = smooth(counts)
+        power = getattr(self.sim, "power", 1.0)
+        if power == 1.0:
+            return probs
+        tempered = {o: p ** power for o, p in probs.items()}
+        s = sum(tempered.values())
+        return {o: p / s for o, p in tempered.items()}
 
 
 class Book:

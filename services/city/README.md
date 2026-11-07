@@ -86,11 +86,18 @@ with a refund.
 ## Pricing
 
 Each market runs 50 futures. Every future starts from the last real reading:
-- crowding (hub_surge, city_pulse): a log random walk per station (or of City Pulse) from TfL's own stamp on the
-  open reading to the expected settle reading. Sigma and drift (half the last hour's trend, capped) are fitted on
-  today's changes around TfL's usual day, and the walk adds the usual day's slope (a smooth curve through the 15-min
-  bands) over its horizon; without it, copying the usual curve beat the house by 32-48% a bet. hub_surge also pulls
-  each hub toward the five hubs' mean vs usual (0.01 per min, fitted on today's replay). Steps are capped at 2.5σ.
+- city_pulse: a log random walk of City Pulse from TfL's own stamp on the open reading to the expected settle
+  reading. Sigma and drift (half the last hour's trend, capped) are fitted on today's changes around TfL's usual day,
+  and the walk adds the usual day's slope (a smooth curve through the 15-min bands) over its horizon; without it,
+  copying the usual curve beat the house by 32-48% a bet. The line is the futures' median at the settle reading, on a
+  .5, so the market opens near 50/50 (the old line, open + the median 5-min change, ignored that slope and opened
+  evening markets at a 94% favourite). Steps are capped at 2.5σ.
+- hub_surge: each hub's log live busyness follows its usual-day slope (no trend drift), is pulled toward the five
+  hubs' mean log vs usual at 0.0161 per min, and takes shocks correlated across hubs (`pricing.RelativeRaceSim`);
+  sigma per hub is fitted on today's changes as above. The futures' shares are tempered, p ∝ share^0.5. Reversion
+  rate and correlation come from `analysis/judge/fit_hub_ou.py` on 12:00–17:00, the 0.5 from a Platt fit of the open
+  prices on the 52 races in that window. The old walk's trend drift made its favourites overconfident (priced 36% on
+  average, won 13/52 = 25%) while the hub furthest below its usual won 37% at a 29% price.
 - hub_hour: the same walk and usual slope with sigma fitted on 60-min changes, widened until the favourite at open is
   ≤ 70% (the 5-min fit priced it at 89% against a real 56%).
 - london_vix, heathrow_stack: a bootstrap of today's own h-minute changes (VIX: post-warm-up frames only).
@@ -99,6 +106,13 @@ Each market runs 50 futures. Every future starts from the last real reading:
 
 Today's replay (15:05–18:30, 42 rounds): favourite at open in 30–70% for city_pulse 86%, heathrow_stack 82%, both
 headlines 100%; hub_surge sits at 0.25–0.45 as a 5-way race should (Tube Crowd's furthest-below pick won 15/42 = 36%).
+
+Out of sample (hub_surge and City Pulse fitted on 12:00–17:00, scored on markets opened 17:00–21:30, 54 each):
+hub_surge open Brier 0.752 (was 0.797; uniform 0.800), log loss 1.501 (was 1.561; uniform 1.609). Copying Tube Crowd
+(10 points on the furthest-below hub at the open quote) returns +13%, 95% bootstrap CI −27% to +55% (was +32%,
+−17% to +86%): 54 races can't pin it to ±5%. City Pulse opens with the favourite in 40–65% on 52% of markets (was
+13%); the .5 step is the rest, since the futures often span less than a point. Its P(over) runs high in the evening
+(over won 21/54). Other series are unchanged.
 
 Each new observation weights every surviving future by its likelihood exp(-(e/tol)²/2), e = its error in sigmas,
 tempered so the effective sample size stays at half the survivors or more; futures off by more than tol are also

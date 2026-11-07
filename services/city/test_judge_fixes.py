@@ -2,6 +2,7 @@
 python3 -m unittest discover -s services/city"""
 from __future__ import annotations
 
+import json
 import math
 import os
 import random
@@ -66,7 +67,7 @@ class UsualSlopeTest(CityCase):
         m = mk.build_city_pulse("p", self.raw.store(now), SPOTS, now, T0 + 15 * MIN)
         finals = sorted(math.exp(p[-1]) for p in m.futures.sim.paths)
         self.assertGreater(finals[len(finals) // 2], m.spec["open"] * 1.03)
-        self.assertGreater(m.open_model["over"], 0.6)
+        self.assertGreater(m.spec["line"], m.spec["open"] + 0.5, "the line rises with the futures")
 
     def test_hub_furthest_below_its_usual_drifts_up_relative_to_the_others(self):
         raw = Raw()
@@ -75,10 +76,13 @@ class UsualSlopeTest(CityCase):
         crowd_history(raw, T0, CITY, noise=0.0)
         store = raw.store(T0)
         m = mk.build_hub_surge("hub_surge-1505", store, SPOTS, T0, T0 + 5 * MIN)
-        drift = {s[0]: s[3] for s in m.futures.sim.stations}
+        sim = m.futures.sim
+        ids = [s[0] for s in sim.stations]
+        rise = {o: sum(p[j][-1] - p[j][0] - sim.stations[j][3] * sim.m for p in sim.paths) / len(sim.paths)
+                for j, o in enumerate(ids)}
         vs = m.spec["open"]
         low, high = min(vs, key=vs.get), max(vs, key=vs.get)
-        self.assertGreater(drift[low] - drift[high], 0.5 * mk.HUB_REVERSION * math.log(vs[high] / vs[low]))
+        self.assertGreater(rise[low] - rise[high], 0.5 * mk.HUB_KAPPA * sim.m * math.log(vs[high] / vs[low]))
 
 
 class WeightedFilterTest(unittest.TestCase):
@@ -254,3 +258,74 @@ class SimWeightTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PricingRound2Test(CityCase):
+    """Out-of-sample pricing fixes: hub_surge's relative dynamics and City Pulse's line at the futures' median."""
+
+    def test_city_pulse_line_is_the_futures_median_at_settle_on_a_half_point(self):
+        rising_profile(self.raw, T0 + 15 * MIN, 0.30, 0.45)
+        crowd_history(self.raw, T0 + 3 * MIN, CITY)
+        for now, settles in ((T0 + 3 * MIN, T0 + 5 * MIN), (T0 + 10 * MIN, T0 + 15 * MIN)):
+            m = mk.build_city_pulse("city_pulse-x", self.raw.store(now), SPOTS, now, settles)
+            finals = sorted(math.exp(p[-1]) for p in m.futures.sim.paths)
+            median = (finals[24] + finals[25]) / 2
+            self.assertEqual((m.spec["line"] * 2) % 1, 0)
+            self.assertLessEqual(abs(m.spec["line"] - median), 0.5)
+            self.assertEqual(m.futures.sim.strike, m.spec["line"], "futures settle against the listed line")
+            over = sum(f > m.spec["line"] for f in finals)
+            self.assertLessEqual(abs(over - 25), 25 - 1, "never a lock either way")
+
+    def test_relative_ou_fit_recovers_known_parameters(self):
+        ids = ["a", "b", "c"]
+        corr = [[1.0, 0.5, -0.2], [0.5, 1.0, 0.1], [-0.2, 0.1, 1.0]]
+        typ = [0.4, 0.3, 0.2]
+        stations = [(h, h, math.log(t * v), 0.0, 0.01) for h, t, v in zip(ids, typ, (1.3, 0.8, 1.0))]
+        sim = pricing.RelativeRaceSim(stations, 0, 1, random.Random(5), typ, typ, 0.03, pricing.cholesky(corr), 1.0)
+        sim.m = 5 * 3000
+        path = sim.walk_all(0.03, pricing.cholesky(corr), random.Random(6))
+        grid = {k: {h: (path[j][5 * k], path[j][5 * k] - math.log(typ[j])) for j, h in enumerate(ids)}
+                for k in range(3000)}
+        kappa, sds, got, n = pricing.fit_relative_ou(grid, ids)
+        self.assertEqual(n, 2999)
+        self.assertAlmostEqual(kappa, 0.03, delta=0.006)
+        for h in ids:
+            self.assertAlmostEqual(sds[h], 0.01, delta=0.0015)  # 2.5-sigma step cap trims a little variance
+        for i in range(3):
+            for j in range(3):
+                self.assertAlmostEqual(got[i][j], corr[i][j], delta=0.08)
+
+    def test_tempering_does_not_worsen_calibration_on_the_recorded_day(self):
+        """102 hub_surge races replayed on 2026-11-07 (untempered open prices, power 1). HUB_POWER must not make
+        Brier or log loss worse, on the 12:40-17:00 window it was fitted on or on 17:00-21:05 after it."""
+        rows = json.loads((HERE / "fixtures" / "hub_surge_open_2026-11-07.json").read_text())
+        split = 1794070800000  # 2026-11-07T17:00Z
+
+        def scores(part, power):
+            b = ll = 0.0
+            for r in part:
+                w = {o: p ** power for o, p in r["open"].items()}
+                s = sum(w.values())
+                probs = {o: v / s for o, v in w.items()}
+                b += sum((p - (o == r["winner"])) ** 2 for o, p in probs.items())
+                ll -= math.log(probs[r["winner"]])
+            return b / len(part), ll / len(part)
+
+        for part in ([r for r in rows if r["opened"] < split], [r for r in rows if r["opened"] >= split]):
+            self.assertEqual(len(part) > 40, True)
+            raw_b, raw_ll = scores(part, 1.0)
+            b, ll = scores(part, mk.HUB_POWER)
+            self.assertLessEqual(b, raw_b)
+            self.assertLessEqual(ll, raw_ll)
+
+    def test_tempered_shares_feed_the_open_price(self):
+        raw = Raw()
+        self.addCleanup(raw.dir.cleanup)
+        raw.profile()
+        crowd_history(raw, T0, CITY)
+        m = mk.build_hub_surge("hub_surge-1505", raw.store(T0), SPOTS, T0, T0 + 5 * MIN)
+        self.assertEqual(m.futures.sim.power, mk.HUB_POWER)
+        m.futures.sim.power = 1.0
+        raw_probs = m.futures.probs()
+        self.assertLess(max(m.open_model.values()), max(raw_probs.values()))
+        self.assertAlmostEqual(sum(m.open_model.values()), 1.0)
