@@ -28,26 +28,31 @@ Example settled round (19:15, from `GET /round`): "Waterloo rose most: 99% → 1
 | **Accuracy check** | People forecast ties persistence: latest run (`--windows 6`, 30 real minutes to 20:44 UTC, 48 counts) MAE 2.06 vs 2.04, 79% inside the 80% range. Persistence wins on bus delay (0.34 vs 0.04 min). Central London (`--central --windows 7 --minutes 60`): station MAE 4.14 vs persistence 3.61 on 919 readings, so the sim loses by 15% | `services/multiverse/eval_real.py` (#29, #31) |
 | **Market questions** | Lineup measured on Saturday's data | `docs/questions.md`, `analysis/questions/` (#39) |
 
-**In progress** (not shipped; see [idea.md](idea.md) "Why simulate, not just read data"):
-1. Scaling the agent simulation from the Oxford Circus area to central London.
-2. A general event layer: TfL line disruptions, road closures, fixtures ending and crowding surges become simulation
-   inputs by one rule, so markets reprice before sensors move.
-3. The Simulation trader: a seventh AI trader that bets from the simulation's forecast, scored against the
-   data-only traders.
-4. Scenario mode: drop a closure or event anywhere in central London and see every open market reprice.
-5. Market structure proposal (open PR #36, a teammate's).
+**Shipped since the first MVP:** the central-London agent simulation (#54), the general event layer (#49, #60), the
+Simulation trader (#55; its prices run at `SIM_WEIGHT=0` live because the sim still loses to persistence), the futures
+fan (#50), courtsiding defences with bet delay and pause on feed change (#61), and the market-structure spec (#58).
+
+**In progress:**
+1. Fixes from docs/judge-prep.md: the Tube Crowd pricing leak, pruning stalls, AI records lost on restart, settling
+   on TfL's own timestamp, clean sheet closing early, and the VIX listing.
+2. Plain-language market cards and first-visit onboarding.
+3. Click anywhere to trade (a local market only where a real sensor can settle it).
+4. Scenario mode (click a street, pick an action, see the odds move).
+5. Colourful 3D map (deck.gl layers on MapLibre).
+6. Portfolio page.
+7. A live trading pressure test with bot players.
 
 **Gaps, ranked:**
 1. **The tunnel URL changes on restart.** It's a Cloudflare quick tunnel, so Vercel's `CITY_URL` must be reset each
    time.
 2. **The laptop is the single host** for the recorder, YOLO, the multiverse and the markets. If it sleeps or goes
    offline, the site falls back to demo data.
-3. **The 50 futures aren't visible in the UI yet.** The card only says "Prices come from 50 simulated futures".
+3. **The futures fan is too technical for new players.** Being moved behind a "Details" tap.
 4. **The VIX market lists only after a 1 h warm-up** of a live multiverse engine. Until then heathrow_stack stands in.
    At 19:20 the running engine was on a replay spawn, so every round listed heathrow_stack.
 5. **One dry Saturday of data** behind the question design; samples are small and directional.
 6. **`X-Forwarded-For` can be spoofed** past the new-player rate limit (a `debt:` note in `services/city/server.py`).
-7. City futures are statistical walks fitted to today's data; only the VIX comes from the agent simulation.
+7. City futures are statistical walks fitted to today's data. The central sim can supply a share (`SIM_WEIGHT`), but it is set to 0 live until it beats persistence.
 8. Port defaults disagree: the city server polls the VIX on :8349, the multiverse defaults to :8049. Set
    `MULTIVERSE_PORT=8349` (or `MULTIVERSE_URL`) as in the run commands below.
 
@@ -81,7 +86,7 @@ Replay instead of live: `python3 services/city/server.py --replay-from 2026-11-0
 ## 3. New for WHACK (built)
 - **Many worlds instead of one forecast:** 50 forked Predict runs with varied assumptions and common random numbers
   (`services/multiverse`, #24).
-- **Pruning** against each new real reading (likelihood weighting, at most 60% ruled out per step), in both the
+- **Pruning** against each new real reading (likelihood weighting, at most 30 of 50 ruled out in total per market), in both the
   multiverse and the city markets (#24, #33).
 - **The exchange:** city-wide 5-minute rounds, LMSR pricing, integrity rules, the wallet and the AI traders
   (#33, #40, #42, #45).
