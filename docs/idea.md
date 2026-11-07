@@ -54,6 +54,22 @@ which London is real."
   worlds shatter, the survivors snap into focus, and the board reprices.
 - **Placing an event:** click a street, a red fork ripples out, and the cloud splits.
 
+**Visual references, from God's Eye View** ([repo](https://github.com/bilawalsidhu/gods-eye-view), MIT):
+- **Take: one shader look.** Its GLSL "reskin reality" looks (FLIR thermal, night vision, CRT,
+  noir) are why it went viral. A thermal or noir treatment on the ghost worlds makes the
+  shimmer and shatter moment hit harder. Small, self-contained shaders are the cheapest thing to
+  bring into our three.js twin, with MIT attribution.
+- **Take: a scripted camera ("scene director").** Pre-authored camera moves for a reliable
+  backup demo video and the Devpost GIFs.
+- **Take: detection-box overlays** on the camera frames that reprice the market (YOLO boxes
+  are already there).
+- **Avoid:** opening on a satellite globe of live flights. "Live public data on a 3D globe" is
+  *its* identity, and judges have probably seen it (#1 on GitHub Trending, Aug 2026). **It shows
+  the present; we show the futures and let reality price them.** Lead with the multiverse,
+  not the map.
+- **Don't adopt its codebase.** It's Cesium + Vue, our twin is three.js + React, and merging
+  them would eat the night.
+
 **3-minute demo (open on the visual):**
 1. **0:00 presentation:** the 3D twin, shimmering. "These are the 50 Londons that could exist
    in 30 minutes. The blur is how uncertain the city is right now."

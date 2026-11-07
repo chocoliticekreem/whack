@@ -26,6 +26,11 @@ prior_art: https://github.com/chocoliticekreem/mirrorverse (built 2026-10-17 at 
 3. **3D ghost worlds** in the twin (the presentation centrepiece).
 4. Optional: null-model check (shuffle reality, no world should win); "follow this person".
 5. Known engine bug: bus riders are counted at the station before their bus arrives.
+6. **Demo robustness** (lessons from God's Eye View; see data-sources.md §3b):
+   - Cache the Oxford Circus OSM extract locally; Overpass refuses old clients.
+   - Show stale data as **stale**, never as zero.
+   - Have a fallback camera feed (another city's CCTV, or recorded replay).
+   - Record a scripted-camera backup video.
 
 ## 1. Code reuse: approved
 - **The organisers confirmed (Sat 7 Nov) that we can build on Mirrorverse.** It's disclosed in

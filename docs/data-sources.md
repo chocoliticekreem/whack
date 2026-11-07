@@ -58,6 +58,31 @@ V = fetched today. R = reported in docs, not fetched.
 **Skip or unreliable:** OpenSky (no anonymous history), Raspberry Shake seismometers (502 today),
 Bluesky Jetstream (websocket only, very few geotags), DfT road counts (annual only).
 
+## 3b. More sources, from God's Eye View's catalogue
+[bilawalsidhu/gods-eye-view](https://github.com/bilawalsidhu/gods-eye-view) (MIT, 63k stars, a
+live OSINT globe) keeps a vetted list in its `DATA_SOURCES.md`. It confirms our picks (TfL
+JamCams, adsb.lol, OpenSky, AISStream, GDELT, Open-Meteo) and adds these. Not fetched by us
+yet (R).
+
+| Source | Gives | Auth | Use for us |
+|---|---|---|---|
+| USGS earthquakes | Global quakes, near real-time | none | backup "shock" events / a different-city demo |
+| CelesTrak | Satellite orbits (TLEs, SGP4) | none | optional flourish: satellites overhead |
+| adsbdb (`api.adsbdb.com`) | Aircraft type/registration by ICAO hex | none | enrich adsb.lol flights |
+| Mapillary · Panoramax · KartaView | Street-level imagery + coverage | Mapillary token; the others keyless | "what this street looks like" in a world card |
+| NASA GIBS | Recent Sentinel-2/Landsat/VIIRS imagery tiles | none | the satellite-image hero shot |
+| TomTom Traffic flow tiles | Live congestion per road | free key | **a second traffic observation stream** to reprice worlds |
+| Google News RSS | Locality-matched headlines | none | backup to GDELT for "news reprices worlds" |
+| **CCTV from ~20 other networks** | NYC DOT, Hong Kong TD, Norway (HLS video), WSDOT, Caltrans, DriveBC, Ontario 511, Finland, Tallinn, Catalonia, NSW… | mostly none | **robustness:** if TfL JamCams fail, the engine can run on another city's cameras; also a "works anywhere" slide |
+
+**Robustness lessons from their code and README:**
+- Public OpenStreetMap Overpass servers now refuse old clients. Cache our OSM extract for
+  Oxford Circus locally; don't fetch it live in the demo.
+- Every layer is a separate module that fails soft and **labels stale data** ("answers say when
+  a feed is stale or on a fallback"). Mirrorverse #52 did the same (last good value, marked
+  stale). Keep that rule on the exchange board.
+- Terrain/tiles are paused on 429. Back off on rate limits everywhere; the recorder already does.
+
 ## 4. Other cities
 | City | Live | History | Verdict |
 |---|---|---|---|
