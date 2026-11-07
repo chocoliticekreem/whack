@@ -6,6 +6,7 @@ import { countdown, fmtPts, londonClock, type MyBet, type Settled } from "./city
 import type { Market, Trader } from "./city-types";
 import { MarketClues, usualGhost } from "./Clues";
 import { FuturesFan } from "./FuturesFan";
+import { WhatIfLine, type WhatIfOdds } from "./Scenario";
 
 export type Phase = "open" | "halted" | "locked" | "awaiting" | "settled" | "void";
 
@@ -117,6 +118,7 @@ export function MarketCard({
   onConfirm,
   onCancel,
   onTip,
+  whatIf,
 }: {
   market: Market;
   now: number;
@@ -134,6 +136,8 @@ export function MarketCard({
   onConfirm: () => void;
   onCancel: () => void;
   onTip: (t: TipTarget | null) => void;
+  /** Scenario mode: what-if prices beside the live ones. */
+  whatIf?: WhatIfOdds;
 }) {
   const [rules, setRules] = useState(false);
   const phase = phaseOf(m, now, result);
@@ -178,6 +182,8 @@ export function MarketCard({
       </header>
 
       <h3 className="tl-q">{m.question}</h3>
+
+      {whatIf && <WhatIfLine odds={whatIf} />}
 
       <MarketClues signals={m.signals} />
 

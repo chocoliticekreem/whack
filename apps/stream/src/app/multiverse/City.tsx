@@ -18,6 +18,7 @@ import type { BetResponse, CitySignals, Hotspot, LeaderRow, Market, MarketsRespo
 import { CityStrip } from "./Clues";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
 import { cancelNote, usePendingFills, type Fill } from "./pending-bets";
+import { Scenario, type WhatIfOdds } from "./Scenario";
 import { WalletPanel, createPlayer, setNickname, useServerWallet, useStakeConfirm } from "./Wallet";
 
 const POLL_MS = 3000;
@@ -121,6 +122,8 @@ export function City() {
   const [board, setBoard] = useState<LeaderRow[] | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
+  const [scenarioOpen, setScenarioOpen] = useState(false);
+  const [whatIf, setWhatIf] = useState<Record<string, WhatIfOdds> | null>(null);
   const [tip, setTip] = useState<TipTarget | null>(null);
   const [toast, setToast] = useState<{ key: number; text: string; sub: string; good: boolean } | null>(null);
   const [pop, setPop] = useState<Pop | null>(null);
@@ -214,8 +217,9 @@ export function City() {
   }, [mock, pollMarkets]);
 
   useEffect(() => {
-    if (hotspots.length && !selected) frame(hotspots);
-  }, [hotspots, selected]);
+    // Why: the 15 s hotspot reload would otherwise pull the camera off the street a what-if is exploring.
+    if (hotspots.length && !selected && !scenarioOpen) frame(hotspots);
+  }, [hotspots, selected, scenarioOpen]);
 
   const applyResult = useCallback(
     (m: Market, res: Settled) => {
@@ -463,7 +467,7 @@ export function City() {
   }, [board, wallet, server]);
 
   return (
-    <div className="tl" data-strip={hasStrip || undefined} onClick={() => setTip(null)}>
+    <div className="tl" data-strip={hasStrip || undefined} data-scenario={scenarioOpen || undefined} onClick={() => setTip(null)}>
       <div className="tl-world">
         <CityMapGL hotspots={hotspots} active={active} winner={glow} pop={pop} vsUsual={signals?.hubs ?? null} />
       </div>
@@ -498,6 +502,9 @@ export function City() {
           )}
         </div>
         <div className="tl-bar-right">
+          <button type="button" className="tl-board-btn tl-whatif" aria-pressed={scenarioOpen} onClick={() => setScenarioOpen((o) => !o)}>
+            What if…
+          </button>
           <button
             type="button"
             className="tl-health"
@@ -608,6 +615,7 @@ export function City() {
             onConfirm={confirm}
             onCancel={() => setDraft(null)}
             onTip={setTip}
+            whatIf={scenarioOpen ? whatIf?.[m.id] : undefined}
           />
         ))}
       </section>
@@ -636,6 +644,8 @@ export function City() {
           <div className="tl-muted">{tipTrader.style}</div>
         </div>
       )}
+
+      {scenarioOpen && <Scenario hotspots={hotspots} markets={feed?.markets ?? []} now={now} onOdds={setWhatIf} onClose={() => setScenarioOpen(false)} />}
 
       <WalletPanel player={wallet.player} token={wallet.token} wallet={server} open={walletOpen} onClose={() => setWalletOpen(false)} refresh={() => void refreshWallet()} />
       {stakeDialog}
