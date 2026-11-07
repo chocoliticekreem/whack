@@ -1,6 +1,7 @@
 """Offline tests: python3 -m unittest discover -s services/city"""
 from __future__ import annotations
 
+import dataclasses
 import json
 import math
 import random
@@ -336,7 +337,7 @@ class HubSurgeTest(CityCase):
         self.assertEqual(m.option_ids(), HUBS)
         last = self.raw.store(T0).latest("crowding", T0)[1]
         self.assertAlmostEqual(m.spec["open"]["kings-cross"], last[NAPTANS["kings-cross"]] / 0.30, places=3)
-        self.assertIn("first TfL Crowding reading published after bets close", m.rule)
+        self.assertIn("first TfL Crowding reading that TfL stamps (timeUtc) after bets close", m.rule)
         self.assertAlmostEqual(sum(m.open_model.values()), 1.0)
         self.assertLess(max(m.open_model.values()), 0.7)
 
@@ -640,7 +641,7 @@ class RoundTest(CityCase):
         res = ex.settle(m, m.closes_at + mk.CROWD_WAIT_MS)
         self.assertTrue(res["void"])
         for bet in m.ai_bets:
-            self.assertEqual(ex.record[bet["trader"]], {"won": 0, "lost": 0, "points": 1000})
+            self.assertEqual(ex.record[bet["trader"]], {"won": 0, "lost": 0, "points": 1000, "why": ""})
 
 
 # ---------------------------------------------------------------- signals
@@ -880,6 +881,8 @@ def hub_pct(**over) -> dict[str, float]:
 class SimTest(CityCase):
     def setUp(self):
         super().setUp()
+        self.addCleanup(setattr, pricing, "SIM_WEIGHT", pricing.SIM_WEIGHT)
+        pricing.SIM_WEIGHT = 0.5
         city(self.raw, T0 + 10 * MIN)
         self.now = T0 + 10 * MIN
         self.at = T0 + 15 * MIN
@@ -982,9 +985,10 @@ class SimTest(CityCase):
         ex.rounds[capped.settles_at] = {"markets": [capped.id], "skipped": {}}
         ex.markets[capped.id] = capped
         capped.decided |= others
+        capped.ai_bets.append({"trader": "sim", "option": "under", "why": "earlier", "stake": 60, "odds": 2.0})
         ex.ai_bets(capped, self.now)
-        self.assertFalse([b for b in capped.ai_bets if b["trader"] == "sim"])
         self.assertIn("position cap 75 points", ex.sat_out["sim"][1])
+        self.assertEqual(len([b for b in capped.ai_bets if b["trader"] == "sim"]), 1)
         ex.record["sim"]["points"] = 1000
         again = mk.build_city_pulse("city_pulse-1530", store, SPOTS, self.now, self.at + 15 * MIN)
         again.decided |= others
@@ -1045,6 +1049,13 @@ class CourtsidingTest(CityCase):
 
     def setUp(self):
         super().setUp()
+        # These tests exercise the integrity layer inside an hour-long betting window; the real clean sheet now
+        # closes with its opening round (test_judge_fixes.CleanSheetCloseTest), which refuses these bets outright.
+        hour_long = dataclasses.replace(mk.REGISTRY["clean_sheet"], close_before_ms=mk.CLOSE_MS)
+        for reg in (mk.REGISTRY, mk.SERIES):
+            patcher = mock.patch.dict(reg, {"clean_sheet": hour_long})
+            patcher.start()
+            self.addCleanup(patcher.stop)
         city(self.raw, T0 + 29 * MIN)
         bad = lines({"central": (6, "Severe Delays", "Signal failure at Bank")})
         minutely(self.raw, T0 + 30 * MIN, T0 + 40 * MIN, "line_status", lambda ts: lines())

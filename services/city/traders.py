@@ -14,6 +14,8 @@ from markets import Market, pulse_of, sim_view
 from pricing import MIN_MS, RAIN_MM, bracket_of
 
 STAKE = 100
+STAKE_SHARE = 0.10
+MIN_STAKE = 10
 TROUBLE = re.compile(r"cancellations|signal|faulty|points|customer|incident", re.I)
 
 TRADERS = [
@@ -46,6 +48,42 @@ BY_ID = {t["id"]: t for t in TRADERS}
 
 def pct(v: float) -> str:
     return f"{v * 100:.0f}%"
+
+
+def stake_for(points: int) -> int:
+    """min(100, 10% of the trader's points); 0 under 10 points, so a busted trader sits out instead of going deeply
+    negative (the Contrarian reached -62k in a week of simulation at a flat 100)."""
+    stake = min(STAKE, int(STAKE_SHARE * points))
+    return stake if stake >= MIN_STAKE else 0
+
+
+# ---------------------------------------------------------------- track records, kept in the ledger's SQLite
+
+RECORDS_SCHEMA = """CREATE TABLE IF NOT EXISTS ai_records (
+  id      INTEGER PRIMARY KEY AUTOINCREMENT,
+  trader  TEXT NOT NULL,
+  ts      INTEGER NOT NULL,
+  won     INTEGER NOT NULL,
+  lost    INTEGER NOT NULL,
+  points  INTEGER NOT NULL,
+  why     TEXT NOT NULL
+)"""
+
+
+def load_records(ledger) -> dict[str, dict]:
+    """{trader: {won, lost, points, why}} from each trader's newest row (append-only table, one row per settle)."""
+    with ledger.lock:
+        ledger.db.execute(RECORDS_SCHEMA)
+        rows = ledger.db.execute("SELECT trader, won, lost, points, why FROM ai_records WHERE id IN "
+                                 "(SELECT MAX(id) FROM ai_records GROUP BY trader)").fetchall()
+    return {r[0]: {"won": r[1], "lost": r[2], "points": r[3], "why": r[4]} for r in rows}
+
+
+def save_records(ledger, ts: int, records: dict[str, dict]) -> None:
+    with ledger.lock:
+        ledger.db.execute(RECORDS_SCHEMA)
+        ledger.db.executemany("INSERT INTO ai_records (trader, ts, won, lost, points, why) VALUES (?, ?, ?, ?, ?, ?)",
+                              [(tid, ts, r["won"], r["lost"], r["points"], r["why"]) for tid, r in records.items()])
 
 
 # ---------------------------------------------------------------- Tube Crowd

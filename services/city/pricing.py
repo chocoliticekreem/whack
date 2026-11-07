@@ -69,6 +69,15 @@ def fit_log_walk(series: list[tuple[int, float]], default_sigma: float, floor: f
     return max(-sigma / 5, min(sigma / 5, drift)), sigma
 
 
+def usual_drift(typ_from: float | None, typ_to: float | None, minutes: int) -> float:
+    """Per-minute log drift that carries a reading along TfL's usual-day curve from typ_from to typ_to over `minutes`.
+    Without it a walk holds the live % flat while the usual day rises or falls, and copying the usual curve beat the
+    house by 32-48% a bet (docs/judge-prep.md)."""
+    if not typ_from or not typ_to:
+        return 0.0
+    return math.log(typ_to / typ_from) / max(1, minutes)
+
+
 # ---------------------------------------------------------------- simulators
 
 
@@ -292,7 +301,9 @@ RAIN_MM = 0.1
 
 # ---------------------------------------------------------------- the central-London agent simulation
 
-SIM_WEIGHT = max(0.0, min(1.0, float(os.environ.get("SIM_WEIGHT", "0.5"))))
+# Default 0: the central sim loses to persistence (docs/judge-prep.md), so it trades as the Simulation trader but
+# stays out of the price unless SIM_WEIGHT is set.
+SIM_WEIGHT = max(0.0, min(1.0, float(os.environ.get("SIM_WEIGHT", "0"))))
 SIM_RHO = 0.5
 Z90 = 1.2816
 
@@ -328,7 +339,7 @@ def sim_draws(fc: dict, naptans: list[str], target_ms: int, rng: random.Random, 
 
 
 def sim_count() -> int:
-    """Futures sampled from the simulation: SIM_WEIGHT of the 50 (env SIM_WEIGHT, default 0.5)."""
+    """Futures sampled from the simulation: SIM_WEIGHT of the 50 (env SIM_WEIGHT, default 0)."""
     return round(SIM_WEIGHT * N_FUTURES)
 
 
@@ -367,12 +378,41 @@ def blend_scalar(sim: ScalarSim, finals: list[float], rng: random.Random) -> int
 # ---------------------------------------------------------------- particle filter + LMSR
 
 
+MIN_ESS = 0.5
+
+
+def ess(weights) -> float:
+    w = list(weights)
+    return sum(w) ** 2 / sum(x * x for x in w) if any(w) else 0.0
+
+
+def temper(weights: dict[int, float], floor: float) -> dict[int, float]:
+    """Raise the weights to the largest power in (0, 1] that keeps their effective sample size at `floor` or more,
+    so 50 fixed paths never collapse onto two or three (no resampling to refresh them)."""
+    if ess(weights.values()) >= floor:
+        return weights
+    top = max(weights.values())
+    rel = {i: w / top for i, w in weights.items()}
+    lo, hi = 0.0, 1.0
+    for _ in range(30):
+        mid = (lo + hi) / 2
+        if ess(r ** mid for r in rel.values()) >= floor:
+            lo = mid
+        else:
+            hi = mid
+    return {i: r ** lo for i, r in rel.items()}
+
+
 class Futures:
-    """Rule out futures that disagree with each real observation; never more than 60% of them in total."""
+    """A weighted particle filter over the 50 futures. Every reading multiplies each surviving future's weight by its
+    likelihood exp(-e²/2), e = the future's error in sigmas. Futures off by more than `tol` are also ruled out, never
+    more than 60% in total, so the fan keeps survivors; after that cap the weights still move the price (before, 80% of
+    markets stopped learning at the cap)."""
 
     def __init__(self, sim, option_ids: list[str]):
         self.sim, self.option_ids = sim, option_ids
         self.alive = [True] * N_FUTURES
+        self.weights = [1.0] * N_FUTURES
         self.ruled_out = 0
         self.origins: list[str] = getattr(sim, "origins", None) or ["stat"] * N_FUTURES
 
@@ -382,6 +422,7 @@ class Futures:
 
     def observe(self, ts: int, snap: dict) -> int:
         errs = [(self.sim.error(i, ts, snap), i) for i in range(N_FUTURES) if self.alive[i]]
+        self.reweight([(e, i) for e, i in errs if e is not None])
         bad = sorted(((e, i) for e, i in errs if e is not None and e > self.sim.tol), reverse=True)
         room = int(RULED_OUT_CAP * N_FUTURES) - self.ruled_out
         for _, i in bad[:max(0, room)]:
@@ -390,11 +431,25 @@ class Futures:
         self.ruled_out += cut
         return cut
 
+    def reweight(self, errs: list[tuple[float, int]]) -> None:
+        """Multiply in each future's likelihood (in log space, relative to the best future, so nothing underflows),
+        temper to the ESS floor, renormalise to mean 1."""
+        if not errs:
+            return
+        logs = {i: math.log(max(self.weights[i], 1e-300)) - 0.5 * min(e / self.sim.tol, 30.0) ** 2 for e, i in errs}
+        top = max(logs.values())
+        new = temper({i: math.exp(v - top) for i, v in logs.items()}, MIN_ESS * len(logs))
+        total = sum(new.values())
+        scale = len(new) / total
+        for i, w in new.items():
+            self.weights[i] = w * scale
+
     def probs(self) -> dict[str, float]:
-        counts = {o: 0 for o in self.option_ids}
-        for i in range(N_FUTURES):
-            if self.alive[i]:
-                counts[self.sim.outcome(i)] += 1
+        counts = {o: 0.0 for o in self.option_ids}
+        alive = [i for i in range(N_FUTURES) if self.alive[i]]
+        total = sum(self.weights[i] for i in alive)
+        for i in alive:
+            counts[self.sim.outcome(i)] += self.weights[i] * len(alive) / total if total > 0 else 1.0
         return smooth(counts)
 
 

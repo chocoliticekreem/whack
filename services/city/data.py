@@ -66,6 +66,19 @@ def reduce_crowding(payload: Any, ctx: dict) -> dict | None:
     return out or None
 
 
+def crowding_stamps(payload: Any) -> dict[str, int]:
+    """{naptan: TfL's own timeUtc for the row, ms}. Rows in one poll carry stamps up to 10 min apart, and TfL stamps
+    a row a median 7 min before we poll it (analysis/judge/crowd_latency.py), so settlement reads these, not our
+    poll time. Rows without a parseable stamp are left out."""
+    out = {}
+    for row in payload if isinstance(payload, list) else []:
+        try:
+            out[row["naptan"]] = feeds.parse_ts(row["timeUtc"])
+        except (KeyError, TypeError, ValueError, AttributeError):
+            continue
+    return out
+
+
 def reduce_lines(payload: Any, ctx: dict) -> dict | None:
     out = {}
     for line in payload if isinstance(payload, list) else []:
@@ -248,6 +261,7 @@ class Store:
         self.profile: dict[str, dict[str, dict[str, float]]] = {}
         self.profile_file: Path | None = None
         self.sim_feed: SimFeed | None = None
+        self.stamps: dict[int, dict[str, int]] = {}
 
     def sim(self, now: int) -> dict | None:
         """The fresh central-London simulation forecast (live mode only), else None."""
@@ -300,6 +314,16 @@ class Store:
         """TfL's typical fraction of baseline for this station, weekday and 15-min band (None if unknown or 0)."""
         day, band = band_of(ms)
         return self.profile.get(naptan, {}).get(day, {}).get(band) or None
+
+    def usual(self, naptan: str, ms: int) -> float | None:
+        """The typical day as a smooth curve: linear between the midpoints of neighbouring 15-min bands. Live
+        busyness moves smoothly, so a walk drifts along this, not along the band steps (settlement keeps `typical`)."""
+        band_ms = 15 * 60_000
+        mid = ms - (ms - band_ms // 2) % band_ms
+        a, b = self.typical(naptan, mid), self.typical(naptan, mid + band_ms)
+        if not a or not b:
+            return self.typical(naptan, ms)
+        return a + (b - a) * (ms - mid) / band_ms
 
     def ingest_vix(self, payload: dict) -> int:
         """Add the multiverse's VIX history (one point per frame); each point carries the engine's spawn time."""
@@ -359,8 +383,19 @@ class Store:
         snap = REDUCERS[source](rec.get("payload"), self.ctx)
         if snap is not None:
             self.add(source, ts, snap)
+            if source == "crowding":
+                self.stamps[ts] = crowding_stamps(rec.get("payload"))
 
     # ------------------------------------------------------------ queries (all capped at `now`)
+
+    def tfl_stamp(self, ts: int, naptan: str) -> int | None:
+        """TfL's timeUtc for a station in the crowding reading we polled at ts (None when the row had none)."""
+        return self.stamps.get(ts, {}).get(naptan)
+
+    def measured_at(self, ts: int) -> int:
+        """When TfL measured the crowding reading we polled at ts: the median of its rows' timeUtc (ts if none)."""
+        got = sorted(self.stamps.get(ts, {}).values())
+        return got[len(got) // 2] if got else ts
 
     def latest(self, source: str, now: int) -> tuple[int, dict] | None:
         i = bisect.bisect_right(self.ts[source], now)
