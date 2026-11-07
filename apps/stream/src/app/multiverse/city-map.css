@@ -160,6 +160,11 @@
   font-size: 13px;
 }
 
+/* The map is dusk-dark, so an ink tag needs a light edge to separate from it. */
+.cm-hub[data-active] .cm-hub-tag {
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.6), var(--shadow-tag);
+}
+
 .cm-hub[data-win] .cm-hub-dot {
   transform: scale(1.6);
 }
