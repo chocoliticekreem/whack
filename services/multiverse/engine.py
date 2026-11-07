@@ -27,6 +27,7 @@ DELIST_FRACTION = 0.1
 # Counts compared on the sqrt scale: Poisson noise gives sd 0.5 there; model error adds MODEL_SD.
 POISSON_SD = 0.5
 MODEL_SD = 1.0
+OUTLIER_LL = -4.5
 BUS_SD_MIN = 2.0
 FORK_PRIOR = 0.5
 MAX_LIVE_FACTOR = 2
@@ -51,8 +52,10 @@ FRESH_SHARE = 2
 
 
 def log_likelihood_counts(predicted: float, observed: float) -> float:
+    """Gaussian on the sqrt scale with an outlier floor: real YOLO counts at 352x288 miss people, and a walking
+    group crossing a short segment spikes the model, so one camera can cost a world at most OUTLIER_LL."""
     sd2 = POISSON_SD ** 2 + MODEL_SD ** 2
-    return -0.5 * (math.sqrt(max(observed, 0.0)) - math.sqrt(max(predicted, 0.0))) ** 2 / sd2
+    return max(OUTLIER_LL, -0.5 * (math.sqrt(max(observed, 0.0)) - math.sqrt(max(predicted, 0.0))) ** 2 / sd2)
 
 
 def log_likelihood_bus(assumed_delay: float, observed_delay: float) -> float:
