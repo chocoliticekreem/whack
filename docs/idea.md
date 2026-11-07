@@ -22,14 +22,18 @@ and the mechanism comes after.
 **Rule:** lead with the stock-market image. Say TOPS once, after it lands. Betting is how
 judges touch it, not the point. Points only, never real money.
 
-**10 s:** "We built a stock exchange where every stock is a possible future of London, and
-reality is the market."
+**10 s** (technical · presentation · creativity):
+"50 parallel Londons, **simulated live from TfL data**, **drawn in 3D**, and **traded like
+stocks**. Reality is the market."
 
-**30 s:** "Right now there are 50 versions of Oxford Circus, 30 minutes from now. Each one is a
-stock, priced by how likely it is to happen. AI brokers (a commuter, a tourist, a bus driver)
-bet on the future they believe in. Every time a real TfL camera frame arrives, the market
-reprices: wrong worlds are delisted, and brokers who called it gain track record. It's Marshall
-Wace's TOPS idea, trust whoever has been right, pointed at a city. And you can bet too."
+**30 s:**
+"Right now we're simulating 50 versions of Oxford Circus, 30 minutes from now. Each is a full
+agent simulation on the real street map, seeded from live TfL cameras and buses *(technical)*.
+You see them in 3D as ghost cities over real London: where they agree it's solid, where they
+disagree it shimmers *(presentation)*. Every world is a stock, priced by how likely it is. AI
+brokers bet on them, and every real camera frame reprices the market. Wrong worlds shatter, and
+brokers who called it gain track record. It's Marshall Wace's TOPS idea, pointed at a city
+*(creativity)*."
 
 **Close:** "Marshall Wace built TOPS to find out which brokers to trust. We built it to find out
 which London is real."
