@@ -191,6 +191,9 @@ ruled out, never more than 60% of them in total. After that cap the weights stil
 futures, clamped to [3%, 97%]. Bets move prices through LMSR with b = 1200, with the futures'
 probabilities as the base (prob_i ∝ model_i · e^(q_i/b)), so a 100-point bet on a 50% option moves it about 4 points.
 A 5% fee keeps the locked payout near the displayed `odds = 0.95/prob`.
+Where the model has a closed form (clean_sheet, heathrow_stack, hub_hour from a full reading) the price uses it in
+place of the futures' share, so those opens carry no Monte Carlo error; the filter audit, LMSR invariants and their
+tests are in `docs/pricing-engine.md`.
 
 ## TOPS loop
 

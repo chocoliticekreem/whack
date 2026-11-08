@@ -448,7 +448,7 @@ class VixAndFallbackTest(CityCase):
         store = self.raw.store(T0)
         m = mk.build_heathrow_stack("heathrow_stack-1505", store, SPOTS, T0, T0 + 5 * MIN)
         line = m.spec["line"]
-        self.assertEqual(line, pricing.count_line(m.futures.sim.finals))
+        self.assertEqual(line, pricing.poisson_line(m.futures.sim.lam))
         self.assertEqual(line % 1, 0.5)
         self.assertEqual(m.question, f"Planes holding over Heathrow at 15:05: over or under {line:g}?")
         self.assertIn(f"Over = {line + 0.5:g} or more", m.rule)
