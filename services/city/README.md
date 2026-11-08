@@ -2,8 +2,10 @@
 
 Live prediction markets across five central-London hotspots (Oxford Circus, King's Cross St Pancras,
 Piccadilly Circus, Waterloo, Bank). Simulated futures set the prices; real recorded TfL and Open-Meteo data settles them.
-Seven rule-based AI traders each read one feed and bet against the players. Each stakes min(100, 10% of its points)
-and sits out under 100 points; their records (points, won/lost, last reason) are appended to the ledger's SQLite
+Seven rule-based AI traders each read one feed and bet against the players. Each stakes min(100, 10% of the points
+not already staked on unsettled markets) and sits out when that is under 10, so losing every open bet still leaves 0
+or more (sizing on settled points alone took the Contrarian to −181 live). A negative record on file loads as 0 and is
+logged. Their records (points, won/lost, last reason) are appended to the ledger's SQLite
 (`ai_records`) on every settle and reloaded on start. The web app proxies `/api/city/*` here.
 
 ```bash
@@ -111,10 +113,19 @@ Each market runs 50 futures. Every future starts from the last real reading:
   sigma per hub is fitted on today's changes as above. The futures' shares are tempered, p ∝ share^0.5. Reversion
   rate and correlation come from `analysis/judge/fit_hub_ou.py` on 12:00–17:00, the 0.5 from a Platt fit of the open
   prices on the 52 races in that window. The old walk's trend drift made its favourites overconfident (priced 36% on
-  average, won 13/52 = 25%) while the hub furthest below its usual won 37% at a 29% price.
+  average, won 13/52 = 25%) while the hub furthest below its usual won 37% at a 29% price. A TfL publish stamped
+  after the open restarts every future from that reading for the minutes left, untempered: pruning fixed paths on it
+  left the hub that had risen most since open at a 0.27 price while it won 46% (replay, 17:00–00:05). Relative gains
+  revert in both windows (correlation −0.04 to −0.29 between consecutive 5-min gains), so the reversion sign stays.
 - hub_hour: the same walk and usual slope with sigma fitted on 60-min changes, widened until the favourite at open is
   ≤ 70% (the 5-min fit priced it at 89% against a real 56%).
-- london_vix, heathrow_stack: a bootstrap of today's own h-minute changes (VIX: post-warm-up frames only).
+- london_vix: a bootstrap of today's own h-minute changes (post-warm-up frames only).
+- heathrow_stack: each future's count is a Poisson draw around the open count pulled 47% of the way per 5 min toward
+  its trailing 30-min mean (`pricing.CountSim`, `analysis/judge/fit_heathrow.py`, fitted 13:24–17:00). The line is
+  the half point next to the futures' median whose Over share is nearest 50%. Each in-round reading resets the
+  weights to the same model run from that reading, since the count is close to a fresh draw every minute. The old
+  bootstrap of raw changes ignored where the count stood against its mean, and fading a stack that had just built
+  won +53% out of sample.
 - clean_sheet: P(break) from a rolling 3-h per-line hazard × the Good lines, held to 30–70% at open (the whole-day
   rate priced 85% against a real 43%); each future draws its break time, so a clean hour drifts toward YES.
 

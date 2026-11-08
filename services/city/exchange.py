@@ -323,10 +323,12 @@ class Exchange:
                 self.sat_out[tid] = (m.settles_at, traders.sit_out(tid, self.store, now, round_markets))
                 continue
             option, why = pick
-            stake = traders.stake_for(self.record[tid]["points"])
+            open_stakes = self.ai_open_stakes(tid)
+            stake = traders.stake_for(self.record[tid]["points"], open_stakes)
             if not stake:
-                self.sat_out[tid] = (m.settles_at, f"Sitting out: {self.record[tid]['points']} points left, so a 10% "
-                                                   f"stake is under the {traders.MIN_STAKE}-point minimum")
+                self.sat_out[tid] = (m.settles_at, f"Sitting out: {self.record[tid]['points']} points left, "
+                                                   f"{open_stakes:g} of them on unsettled bets, so a 10% stake of the "
+                                                   f"rest is under the {traders.MIN_STAKE}-point minimum")
                 continue
             cap_pct = self.integrity.cap(m.sub)
             cap = cap_pct * max(0, self.record[tid]["points"])
@@ -341,8 +343,12 @@ class Exchange:
             else:
                 self.ai_fill(m, tid, option, why)
 
+    def ai_open_stakes(self, tid: str) -> int:
+        """The trader's stakes on markets that have not settled yet (points only move at settle)."""
+        return sum(b["stake"] for m in self.active() for b in m.ai_bets if b["trader"] == tid)
+
     def ai_fill(self, m: mk.Market, tid: str, option: str, why: str) -> None:
-        stake = traders.stake_for(self.record[tid]["points"])
+        stake = traders.stake_for(self.record[tid]["points"], self.ai_open_stakes(tid))
         if not stake:
             return
         try:

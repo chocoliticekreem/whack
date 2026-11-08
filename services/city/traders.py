@@ -7,6 +7,7 @@ plays every series."""
 from __future__ import annotations
 
 import re
+import sys
 
 import signals
 from data import Store, day_name, local_time
@@ -50,10 +51,12 @@ def pct(v: float) -> str:
     return f"{v * 100:.0f}%"
 
 
-def stake_for(points: int) -> int:
-    """min(100, 10% of the trader's points); 0 under 10 points, so a busted trader sits out instead of going deeply
-    negative (the Contrarian reached -62k in a week of simulation at a flat 100)."""
-    stake = min(STAKE, int(STAKE_SHARE * points))
+def stake_for(points: int, open_stakes: int = 0) -> int:
+    """min(100, 10% of the points not already staked on unsettled markets); 0 under 10, so a busted trader sits out.
+    Sizing on points alone let the Contrarian go to -181 live: points only move at settle, and it held a dozen open
+    bets, each sized on the same pre-loss points, on markets that settle minutes after they close. With the open
+    stakes taken off first, every open stake together is at most the points, so losing all of them ends at >= 0."""
+    stake = min(STAKE, int(STAKE_SHARE * (points - open_stakes)))
     return stake if stake >= MIN_STAKE else 0
 
 
@@ -71,12 +74,19 @@ RECORDS_SCHEMA = """CREATE TABLE IF NOT EXISTS ai_records (
 
 
 def load_records(ledger) -> dict[str, dict]:
-    """{trader: {won, lost, points, why}} from each trader's newest row (append-only table, one row per settle)."""
+    """{trader: {won, lost, points, why}} from each trader's newest row (append-only table, one row per settle).
+    A negative balance, written before open stakes were reserved (stake_for), loads as 0 and is logged: the row
+    stays as history, and the trader sits out as busted rather than showing points it can never have."""
     with ledger.lock:
         ledger.db.execute(RECORDS_SCHEMA)
         rows = ledger.db.execute("SELECT trader, won, lost, points, why FROM ai_records WHERE id IN "
                                  "(SELECT MAX(id) FROM ai_records GROUP BY trader)").fetchall()
-    return {r[0]: {"won": r[1], "lost": r[2], "points": r[3], "why": r[4]} for r in rows}
+    out = {r[0]: {"won": r[1], "lost": r[2], "points": r[3], "why": r[4]} for r in rows}
+    for tid, rec in out.items():
+        if rec["points"] < 0:
+            print(f"ai record {tid}: {rec['points']} points on file, loaded as 0", file=sys.stderr)
+            rec["points"] = 0
+    return out
 
 
 def save_records(ledger, ts: int, records: dict[str, dict]) -> None:

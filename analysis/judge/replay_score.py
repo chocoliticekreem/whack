@@ -4,13 +4,15 @@
 
 For every settled market: the model's probabilities at open and at close, the LMSR price at close, the winner.
 Reports per series: n, Brier and log loss of the open model vs a uniform prior, calibration of every option
-(favourite-longshot check), the AI traders' P&L, and the house's P&L from a naive 'back the open favourite'
-bettor and a 'back the trader's pick' bettor (10 points each, through the real quote, without moving the book).
+(favourite-longshot check; also per series), the AI traders' P&L with a bootstrap CI of each one's ROI per series,
+and the house's P&L from a naive 'back the open favourite' bettor and a 'back the trader's pick' bettor (10 points
+each, through the real quote, without moving the book).
 Read-only: never writes the recorder data.
 """
 from __future__ import annotations
 
 import math
+import random
 import sys
 from collections import defaultdict
 from datetime import datetime
@@ -25,9 +27,40 @@ from data import Store, load_hotspots  # noqa: E402
 from exchange import Clock, Exchange  # noqa: E402
 from ledger import Ledger  # noqa: E402
 
+BOOT = 2000
+
 
 def ms(iso: str) -> int:
     return int(datetime.fromisoformat(iso.replace("Z", "+00:00")).timestamp() * 1000)
+
+
+def riser_at_publish(ex: Exchange, m, t: int) -> dict | None:
+    """At the first TfL publish stamped after the open reading: the model then, and the hub that rose most since open
+    with its price (the public 'top riser since open' rule)."""
+    last = ex.store.latest("crowding", t)
+    if not last or ex.store.measured_at(last[0]) <= ex.store.measured_at(m.spec["openTs"]):
+        return None
+    vs = mk.vs_usual(ex.store, ex.spots, last[0], last[1])
+    if not vs:
+        return None
+    riser = max(m.option_ids(), key=lambda h: vs[h] - m.spec["open"][h])
+    return {"model": m.futures.probs(), "riser": riser, "price": m.prices()[riser]}
+
+
+def report_inround(ex: Exchange, inround: dict) -> None:
+    got = [(r, ex.markets[mid].result["winner"]) for mid, r in inround.items()
+           if ex.markets[mid].result and ex.markets[mid].result["winner"] is not None]
+    if not got:
+        return
+    b = sum(sum((r["model"][o] - (o == w)) ** 2 for o in r["model"]) for r, w in got) / len(got)
+    ll = sum(-math.log(max(1e-9, r["model"][w])) for r, w in got) / len(got)
+    rois = [(0.95 / r["price"] if r["riser"] == w else 0) - 1 for r, w in got]
+    rng = random.Random(0)
+    boot = sorted(sum(rng.choice(rois) for _ in rois) / len(rois) for _ in range(BOOT))
+    print(f"\nhub_surge at the first in-round TfL publish (n={len(got)}): model Brier {b:.3f}, LL {ll:.3f}; top riser "
+          f"since open won {sum(r['riser'] == w for r, w in got)}/{len(got)} at a mean price "
+          f"{sum(r['price'] for r, _ in got) / len(got):.2f}, ROI {sum(rois) / len(rois):+.0%} at 0.95/price "
+          f"[{boot[int(.025 * BOOT)]:+.0%}, {boot[int(.975 * BOOT)]:+.0%}]")
 
 
 def main() -> None:
@@ -36,6 +69,7 @@ def main() -> None:
     spots = load_hotspots()
     ex = Exchange(Store(raw, spots), Clock(start), spots, Ledger(":memory:"))
     probe: dict[str, dict] = {}
+    inround: dict[str, dict] = {}
     cap = int(pricing.RULED_OUT_CAP * pricing.N_FUTURES)
     after_cap: dict[str, list[int]] = defaultdict(lambda: [0, 0])  # [readings after the cap, of which moved the model]
     t = start
@@ -64,6 +98,10 @@ def main() -> None:
                         except Exception:  # noqa: BLE001
                             pass
                 probe[m.id] = {"fav": fav, "fav_odds": odds, "longs": longs}
+            if m.sub == "hub_surge" and m.id not in inround and t < m.closes_at:
+                got = riser_at_publish(ex, m, t)
+                if got:
+                    inround[m.id] = got
         t += step
 
     rows = defaultdict(list)
@@ -143,19 +181,30 @@ def main() -> None:
     print("\nAI traders (stake min(100, 10% of points), locked odds):")
     for tid, rec in ex.record.items():
         print(f"  {tid:11} won {rec['won']:3d} lost {rec['lost']:3d} points {rec['points']}")
-    per = defaultdict(lambda: [0, 0, 0.0, 0.0])
+    per = defaultdict(list)
     for s, ms_ in rows.items():
         for m in ms_:
             for b in m.ai_bets:
-                r = per[(b["trader"], s)]
                 won = b["option"] == m.result["winner"]
-                r[0] += 1
-                r[1] += won
-                r[2] += (b["stake"] * b["odds"] if won else 0) - b["stake"]
-                r[3] += b["stake"]
-    print("  by series (bets, wins, net points, ROI per point staked):")
-    for (tid, s), (n, w, net, staked) in sorted(per.items()):
-        print(f"    {tid:11} {s:15} n={n:3d} won={w:3d} net={net:+8.0f} ROI={net / staked:+.1%}")
+                per[(b["trader"], s)].append(((b["stake"] * b["odds"] if won else 0) - b["stake"], b["stake"], won))
+    print(f"  by series (bets, wins, net points, ROI per point staked, {BOOT}-resample bootstrap 95% CI of the ROI):")
+    rng = random.Random(0)
+    for (tid, s), bets in sorted(per.items()):
+        net, staked = sum(b[0] for b in bets), sum(b[1] for b in bets)
+        boot = sorted(sum(b[0] for b in draw) / sum(b[1] for b in draw)
+                      for draw in ([rng.choice(bets) for _ in bets] for _ in range(BOOT)))
+        print(f"    {tid:11} {s:15} n={len(bets):3d} won={sum(b[2] for b in bets):3d} net={net:+8.0f} "
+              f"ROI={net / staked:+.1%} [{boot[int(.025 * BOOT)]:+.0%}, {boot[int(.975 * BOOT)]:+.0%}]")
+
+    print("\nper series, open model P(option) vs hit rate:")
+    for s in rows:
+        print(f"  {s}")
+        for lo_, hi in ((0, .2), (.2, .4), (.4, .6), (.6, .8), (.8, 1.01)):
+            b = [(p, y) for s_, p, y in allopt if s_ == s and lo_ <= p < hi]
+            if b:
+                print(f"    {lo_:.1f}-{min(hi, 1):.1f}: n={len(b):3d} mean p={sum(p for p, _ in b) / len(b):.3f} "
+                      f"hit={sum(y for _, y in b) / len(b):.3f}")
+    report_inround(ex, inround)
     st = ex.stats_json()
     print("\nopen favourite share 30-70%:", st["openFavourite"]["share30to70"], "n", st["openFavourite"]["n"],
           "rejected>85%:", st["openFavourite"]["rejectedOver85"])

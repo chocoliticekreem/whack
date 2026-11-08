@@ -52,6 +52,8 @@ HEADLINE_CAP = 0.70
 HEADLINE_FLOOR = 0.30
 LINE_GAP_MS = 90_000
 CLEAN_MAX_GAP_MS = 5 * MIN_MS
+STACK_MEAN_MS = 30 * MIN_MS
+STACK_KAPPA = 0.472
 HUB_KAPPA = 0.0161
 HUB_POWER = 0.5
 HUB_CORR = {"oxford-circus": {"kings-cross": 0.15, "piccadilly": 0.30, "waterloo": 0.33, "bank": -0.08},
@@ -556,7 +558,9 @@ def pulse_line(sim: pricing.ScalarSim) -> float:
 def build_city_pulse(mid: str, store: Store, spots: list[dict], now: int, settles_at: int) -> Market | None:
     """Over/under on City Pulse; line = the futures' median City Pulse at the settle reading, on a .5, so the market
     opens near 50/50 (the old line, open + the median 5-min change, missed the usual-day slope the futures drift along
-    and opened evening markets at a 94% favourite)."""
+    and opened evening markets at a 94% favourite). The futures already run from the newest reading's TfL stamp to
+    the first stamp after close, with the usual slope over that whole span. Dropping the walk drift, or adding
+    momentum, scored worse out of sample on the market replay (analysis/judge/fit_crowd.py, replay_score.py)."""
     last = store.latest("crowding", now)
     p0 = pulse_of(last[1]) if last else None
     if not p0:
@@ -688,19 +692,18 @@ def build_heathrow_stack(mid: str, store: Store, spots: list[dict], now: int, se
     if not last or not store.fresh("aircraft", now):
         return None
     n0 = last[1]["total"]
-    hist = [(ts, float(s["total"])) for ts, s in store.between("aircraft", now - HISTORY_MS, now)]
-    minutes = max(1, round((settles_at - now) / MIN_MS))
-    deltas = pricing.deltas_at(hist, minutes)
-    if len(deltas) < MIN_DELTAS:
+    recent = [float(s["total"]) for _, s in store.between("aircraft", now - STACK_MEAN_MS, now)]
+    if len(recent) < MIN_DELTAS:
         return None
-    line = n0 + 0.5
-    sim = pricing.DeltaSim(float(n0), deltas, now, minutes, random.Random(seed_of(mid)),
-                           lambda s: float(s["total"]), line)
+    minutes = max(1, round((settles_at - now) / MIN_MS))
+    sim = pricing.CountSim(float(n0), recent, STACK_KAPPA, now, minutes, random.Random(seed_of(mid)),
+                           lambda s: float(s["total"]), n0 + 0.5)
+    line = sim.strike = pricing.count_line(sim.finals)
     vix = vix_state(store, now)
     hhmm = local_time(settles_at)
     rule = (f"adsb.lol holding_total (aircraft in the BNN, LAM, BIG and OCK stacks over Heathrow) in the last reading "
-            f"at or before {local_time(settles_at, '%H:%M:%S')}, at most 2 min old; otherwise void. Over = {n0 + 1} "
-            f"or more. Listed in place of the London VIX while {vix['reason'] or 'it is down'}.")
+            f"at or before {local_time(settles_at, '%H:%M:%S')}, at most 2 min old; otherwise void. Over = "
+            f"{line + 0.5:g} or more. Listed in place of the London VIX while {vix['reason'] or 'it is down'}.")
     return Market(mid, "heathrow_stack", "overunder", f"Planes holding over Heathrow at {hhmm}: over or under "
                   f"{line:g}?", [], now, settles_at, over_under_options(f"{line:g}"), sim,
                   f"adsb.lol · Heathrow holding stacks · {settle_stamp(settles_at)}", rule,
