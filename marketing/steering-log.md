@@ -48,6 +48,8 @@ What we learned, What's next for OverWatch.
 | 28 | ~21:00 | A flat-looking 3D map | "I want the 3D part to be colourful… now it feels like a plane until I zoom in." Stay on MapLibre for performance | Dusk palette, pitch 70, deck.gl hub columns and arcs, still 60 fps (#68) |
 | 29 | ~21:05 | Markets only on the 5 fixed hubs | "If I click around Oxford Circus I bet on that area; if I click elsewhere the pin drops there and I trade there." | Click-anywhere local markets on the nearest real sensor within 400 m, settled only on that sensor; forecast only where there is none (#71) |
 | 30 | ~22:15 | Traders and earnings buried in panels, "81% of usual", payouts as totals | Traders as a dropdown, live earnings on the right, a subtle confetti win, "Bank −19%" instead of "81% of usual", "Bet 100 · win 400", fewer words, keep the ticker. The dark theme from row 27 was tried and rejected | Traders and earnings dropdowns, confetti on a win, change-vs-normal everywhere; the light look stays (#78). Win toasts then show profit so they add up with the earnings total (#80) |
+| 31 | ~00:40 | Recovery by link and long code | "Short code should just be a 4-digit PIN, make it easier, no link" | Nickname + 4-digit PIN (hashed, lockout after 5 tries); W play-money currency with W1,000 start |
+| 32 | ~00:55 | AI trader records were public but fed back into nothing | "Marshall Wace really likes loop engineering" | The TOPS loop: decayed, shrunk track records set each trader's trust weight, which moves opening prices only when skill is proven |
 
 ## Challenges (for Devpost)
 - **Markets that were obvious.** At first 286 of 309 markets opened with a favourite above 90%.
