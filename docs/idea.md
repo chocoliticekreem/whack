@@ -104,7 +104,7 @@ inside the 3-minute slot.
    publishes". We settle only on numbers TfL stamped after close.
 4. **1:20, the traders dropdown.** Tube Crowd's record and reason. The TOPS line, with the honest leak number.
 5. **1:50, the Exchange.** Top bar, Exchange: the same markets on an order book, no house, 2,196 AI accounts.
-6. **2:20, settle.** The fast market settles; the earnings dropdown updates and, on a win, confetti with the profit.
+6. **2:20, settle.** The fast market settles; "Your bets" shows the result for 10 s and, on a win, confetti with the profit.
 7. **2:40 close:** the TOPS line.
 
 ## Why simulate, not just read data
