@@ -14,8 +14,9 @@ buses and disruptions (see [build.md](build.md)). This doc covers *what we make 
 **OverWatch: a live stock exchange on London's next five minutes.** Every 5 minutes it lists plain-language markets
 on the city ("Will London's Tube get busier or quieter by 21:10?"). Each price comes from 50 futures fitted to today's
 data and TfL's usual Saturday; each new reading reweights them. You trade against seven computer traders that each read
-one stream of alternative data and build a public track record: the first half of TOPS. Weighting their picks into
-the price is next. Click anywhere on the map to trade the nearest real sensor, or ask "what if this street closed?"
+one stream of alternative data and build a public track record, and the market leans on the ones who've been right:
+TOPS pointed at a city. Each opening price blends in the traders' views by their decayed, shrunk track record, and
+only proven skill counts (services/city/README.md "TOPS loop"). Click anywhere on the map to trade the nearest real sensor, or ask "what if this street closed?"
 and our central-London agent simulation shows how the odds would move.
 
 Live at https://overwatchcapital.vercel.app/multiverse. Points only, never real money.
@@ -24,7 +25,7 @@ Live at https://overwatchcapital.vercel.app/multiverse. Points only, never real 
 |---|---|---|
 | **1. The futures** (engine) | 50 futures per market from the latest real reading at TfL's own stamp. City Pulse walks follow the usual-Saturday curve; the hub race mean-reverts toward the five-hub average (#72, #77). The central sim can supply a share (`SIM_WEIGHT`), set to 0 live because it loses to persistence. The London VIX comes from the agent simulation of Oxford Circus (50 worlds, common random numbers) | *The new world*: futures that don't exist yet |
 | **2. The market** (exchange) | City-wide 5-minute rounds on the London clock, plus click-anywhere local markets on 33 real sensors (#71). Each reading reweights the futures; LMSR turns them and the bets into prices. Kalshi-style rules: a source and rule on every market, close before settle, settlement on TfL's own timestamp, void and refund, a frozen reading, bet delays against courtsiding (#61, #72, #81) | *The interaction*: you bet, reality settles it |
-| **3. The traders** (the first half of TOPS) | 7 computer traders, each reading one live feed: Tube Crowd (station crowding), Camera Eye (the VIX), Line Watcher (Tube status), Rain Radar (rain), Plane Spotter (Heathrow holding stacks), The Contrarian (where the points are going), Simulation (the central sim's forecast). Each bets through the same LMSR, gives a reason citing a real number, and keeps a record that survives restarts. Their picks don't move the model price yet | *The MW hook*: their founding idea, pointed at a city |
+| **3. The traders** (the first half of TOPS) | 7 computer traders, each reading one live feed: Tube Crowd (station crowding), Camera Eye (the VIX), Line Watcher (Tube status), Rain Radar (rain), Plane Spotter (Heathrow holding stacks), The Contrarian (where the points are going), Simulation (the central sim's forecast). Each bets through the same LMSR, gives a reason citing a real number, and keeps a record that survives restarts. The TOPS loop scores every view against the futures and blends the proven ones into the opening price (at most 30%, no trader over 40% of that); with no proven skill the price is the futures | *The MW hook*: their founding idea, pointed at a city |
 | **4. The scenario room** | "What if…": click a street or station, close it or add a crowd; the central sim runs on copies and the cards show the odds it implies (#66) | *Why simulate*: answers what data can't |
 | **Output: the London VIX** | The price-weighted spread of predicted crowds across the simulated worlds of Oxford Circus, as one index. An uncertainty gauge, not a fear index | *The new data* |
 
@@ -52,8 +53,8 @@ Saturday, whether the Tube gets busier or quieter, whether London gets more unpr
 comes from 50 futures fitted to today's data and TfL's usual day, reweighted by every new reading, and an LMSR market
 maker prices them. We settle only on numbers TfL stamped after betting closed *(technical)*. Seven computer traders,
 each reading one feed, bet against you, say why and build a public track record. Click anywhere to trade the nearest
-sensor, or close a street and watch the odds move *(presentation)*. It's the first half of Marshall Wace's TOPS idea
-pointed at a city: weighting the traders into the price is next."
+sensor, or close a street and watch the odds move *(presentation)*. It's Marshall Wace's TOPS idea
+pointed at a city: the opening price leans on the traders who've been right, and only as far as their record earns."
 
 **100 words:**
 > Prediction markets like Polymarket and Kalshi price the questions someone thought to ask. **OverWatch prices a

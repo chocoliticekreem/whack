@@ -156,6 +156,14 @@ function MyLine({ m, bet, now }: { m: Market; bet: MyBet; now: number }) {
   );
 }
 
+/** TOPS loop: how far the computer traders' track records moved the opening price, on the option they moved most. */
+function topsLine(m: Market): string | null {
+  const c = Object.entries(m.tops?.contribution ?? {}).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))[0];
+  const pts = c ? Math.round(c[1] * 100) : 0;
+  if (!c || pts === 0) return null;
+  return `Computer traders moved ${plainLabel(m, c[0])} by ${pts > 0 ? "+" : ""}${pts} point${Math.abs(pts) === 1 ? "" : "s"}.`;
+}
+
 function Details({
   m,
   phase,
@@ -228,6 +236,8 @@ function Details({
             })}
           </ul>
         </section>
+
+        {topsLine(m) && <p className="tl-muted">{topsLine(m)}</p>}
 
         <section className="tl-d-sec">
           <h3>How it is decided</h3>

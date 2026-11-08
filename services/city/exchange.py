@@ -11,6 +11,7 @@ import local
 import markets as mk
 import pricing
 import signals
+import tops
 import traders
 from data import SOURCES, Store, load_hotspots, local_time
 from ledger import Ledger, WalletError, as_points
@@ -68,6 +69,7 @@ class Exchange:
         self.sat_out: dict[str, tuple[int, str]] = {}
         self.sim_views: dict[str, tuple[int, dict | None]] = {}
         self.integrity = integrity.Integrity()
+        self.tops = tops.Tops(self.ledger)
         self.local = local.LocalMarkets(self)
         self.ledger.ai_exposure = self.ai_exposure
 
@@ -93,7 +95,7 @@ class Exchange:
             mk.observe(m, self.store, now)
             self.lock_if_decided(m, now)
             if m.close_prices is None and (now >= m.closes_at or m.locked):
-                m.close_prices, m.close_model = m.prices(), m.futures.probs()
+                m.close_prices, m.close_model = m.prices(), m.model()
             try:
                 self.settle(m, now)
             except Exception as exc:  # noqa: BLE001 - the market stays unsettled and the next tick retries it
@@ -155,6 +157,7 @@ class Exchange:
                                                                  [o["id"] for o in rec["options"]]):
             return None
         m.opened_at, m.spec, m.options = rec["openedAt"], rec["spec"], rec["options"]
+        self.tops.reattach(m)
         self.markets[m.id] = m
         self.order.append(m.id)
         return m
@@ -167,8 +170,10 @@ class Exchange:
                 keep.append((m, bets))
             elif got[0] == "done":
                 self.ledger.settle_bets(bets, got[1], got[2])
+                self.tops.settle(m.id, m.settles_at, got[1], now)
             else:
                 self.ledger.settle_bets(bets, None, got[1])
+                self.tops.settle(m.id, m.settles_at, None, now)
         self.restored = keep
 
     def active(self) -> list[mk.Market]:
@@ -198,6 +203,8 @@ class Exchange:
                               or "no fresh reading", None))
             else:
                 view = mk.sim_view(m, self.store, now) if m.sub in traders.PLAYS["sim"] else None
+                m.tops_stances = tops.picks(m, self.store, now, view,
+                                            lambda feed: feed not in SOURCES or self.store.fresh(feed, now))
                 built.append((sid, series, m, None, view))
         return {"at": at, "now": now, "built": built}
 
@@ -225,7 +232,9 @@ class Exchange:
             if reason:
                 rnd["skipped"][sid] = reason
                 continue
-            self.open_favourites[sid].append(fav)
+            if m.tops_stances is not None:
+                self.tops.open(m, m.tops_stances, plan["now"])
+            self.open_favourites[sid].append(max(m.open_model.values()))
             self.markets[m.id] = m
             self.order.append(m.id)
             rnd["markets"].append(m.id)
@@ -265,7 +274,7 @@ class Exchange:
     def quote(m: mk.Market, option: str, stake: float) -> tuple[float, float]:
         """(shares, locked odds) for a stake, without touching the book. Odds never exceed the shares bought, so no
         price gives a bettor more than the market maker's own payout."""
-        shares = m.book.quote(m.futures.probs(), option, stake)
+        shares = m.book.quote(m.model(), option, stake)
         odds = pricing.locked_odds(shares, stake)
         if odds is None:
             raise WalletError("price_too_short", f"Price too short: {m.label(option)} pays under "
@@ -420,6 +429,7 @@ class Exchange:
         m.result = {"settled": True, "winner": winner, "reading": reading, "aiResults": results,
                     "futuresRuledOut": m.futures.ruled_out, "settlement": snap, "void": winner is None}
         m.settled_at = now
+        self.tops.settle(m.id, m.settles_at, winner, now)
         touched = {r["trader"] for r in results if r["won"] is not None}
         if touched:
             traders.save_records(self.ledger, now, {tid: self.record[tid] for tid in sorted(touched)})
@@ -456,6 +466,8 @@ class Exchange:
                "series": m.sub, "round": local_time(m.settles_at), "roundSettlesAt": m.settles_at,
                "signals": signals.market(m, self.store, now)}
         out["integrity"], out["rule"] = integrity.meta(m.sub), f"{m.rule} {integrity.plain(m.sub)}"
+        if m.tops:
+            out["tops"] = {k: m.tops[k] for k in ("lambda", "weights", "contribution")}
         if out["status"] == "halted":
             out["haltReason"] = self.halt_reason(m, now)
         if m.result:
@@ -493,7 +505,7 @@ class Exchange:
                    else traders.sit_out(t["id"], self.store, now, current))
             rows.append({k: t[k] for k in ("id", "name", "emoji", "watches", "style")} |
                         {"record": {"won": rec["won"], "lost": rec["lost"]}, "points": rec["points"], "why": why,
-                         "lastWhy": rec["why"]})
+                         "lastWhy": rec["why"], "trust": self.tops.trust(t["id"])})
         return {"traders": rows}
 
     def round_json(self, now: int | None = None) -> dict:

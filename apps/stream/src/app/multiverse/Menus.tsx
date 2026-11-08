@@ -28,7 +28,8 @@ export function TradersMenu({
   const btn = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   useDismiss(open, () => setOpen(false), [btn, panel]);
-  const ranked = useMemo(() => [...traders].sort((a, b) => b.points - a.points), [traders]);
+  // TOPS loop: most trusted first, points break ties.
+  const ranked = useMemo(() => [...traders].sort((a, b) => (b.trust ?? 0) - (a.trust ?? 0) || b.points - a.points), [traders]);
   const n = traders.length || 7;
   return (
     <>
@@ -50,6 +51,7 @@ export function TradersMenu({
             <p className="ow-drop-head">
               <b>{n} computer traders.</b> Each one watches one live London data feed and bets against you.
             </p>
+            <p className="ow-drop-head ow-trust-head">The market leans on traders who&apos;ve been right.</p>
             <ol className="ow-trader-list">
               {ranked.map((t, i) => (
                 <li key={t.id}>
@@ -75,6 +77,12 @@ export function TradersMenu({
                       </Tick>
                       <MiniSpark values={hist[t.id] ?? [t.points]} />
                       <span className="ow-rec">{recordText(t.record.won, t.record.lost)}</span>
+                      <span className="ow-trust">
+                        <span className="ow-trust-bar" aria-hidden>
+                          <i style={{ width: `${Math.round((t.trust ?? 0) * 100)}%` }} />
+                        </span>
+                        <span className="tl-data">{Math.round((t.trust ?? 0) * 100)}% trust</span>
+                      </span>
                     </span>
                   </button>
                 </li>

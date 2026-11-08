@@ -21,6 +21,7 @@ from typing import Callable
 
 import data
 import pricing
+import tops
 from data import STALE_S, Store, day_name, local_time
 from pricing import MIN_MS
 
@@ -138,9 +139,16 @@ class Market:
         self.result: dict | None = None
         self.settled_at: int | None = None
         self.locked: tuple | None = None
+        self.tilt: dict[str, float] | None = None
+        self.tops: dict | None = None
+        self.tops_stances: dict | None = None
+
+    def model(self) -> dict[str, float]:
+        """The futures' probabilities with the TOPS tilt from the open (tops.py); the LMSR prices on top of this."""
+        return tops.tilted(self.futures.probs(), self.tilt)
 
     def prices(self) -> dict[str, float]:
-        return self.book.prices(self.futures.probs())
+        return self.book.prices(self.model())
 
     def option_ids(self) -> list[str]:
         return [o["id"] for o in self.options]
