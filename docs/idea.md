@@ -78,8 +78,9 @@ city best."
   price beats a uniform guess (Brier 0.755 vs 0.800, t = 1.7, n=51); no other series does significantly.
 - *"Did your own trader beat the house?"* Yes: copying Tube Crowd made +32–48% a bet. We put the usual-Saturday curve
   into the futures; out of sample it's now about +13%, with a 95% CI of −27% to +55%. Not proven gone.
-- *"Real betting?"* No. Points only. The ledger is real-money grade; a house-banked LMSR is bookmaking, so the
-  order book (exchange-design.md) and licensing are the work left.
+- *"Real betting?"* No. Points only. The ledger is real-money grade; a house-banked LMSR is bookmaking. The order
+  book (exchange-design.md) is built as a prototype beside the live site, not live; taking it live and licensing are
+  the work left.
 - *"Can someone know the answer?"* Station markets settle on TfL's own post-close stamp, so nobody sees it early.
   Clean sheet is the one single-event market: bets fill 45 s later, any line change pauses it, a 10% cap, and betting
   closes with its first round. A head start under 44 s gains nothing (#61).

@@ -1,4 +1,4 @@
-"""The parallel exchange venue over HTTP (:8052), next to the live LMSR exchange (:8051). See venue.py.
+"""The parallel exchange venue over HTTP (:8062), next to the live LMSR exchange (:8051). See venue.py.
 
 It reads the same recorder files read-only and keeps everything else (order books, ledger, accounts) in memory, so it
 can run beside the live exchange without touching it, and a restart starts it clean.
@@ -31,7 +31,7 @@ from venue import CitySource, ShadowExchange, Venue
 from venue_gateway import Account
 
 HOST = os.environ.get("CITY_VENUE_HOST") or "127.0.0.1"
-PORT = int(os.environ.get("CITY_VENUE_PORT", "8052"))
+PORT = int(os.environ.get("CITY_VENUE_PORT", "8062"))
 TICK_S = 1.0
 VIX_POLL_S = 15.0
 MAX_BODY = 16 * 1024

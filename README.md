@@ -15,12 +15,15 @@ in [docs/build.md](docs/build.md) §0.
 - Click anywhere on the map to trade the nearest real sensor, or use "What if…" to see how the odds would move if a
   street closed.
 - You trade against seven computer traders, and each of them reads one live data feed.
+- A Kalshi-style order-book venue (no house, AI market makers, funds and retail) is built as a prototype beside the
+  live exchange (`services/city/venue_server.py`, :8062). The live site still runs the LMSR house.
 
 ## Quick start
 ```sh
 scripts/run-data.sh &                                   # recorder + YOLO (:8047) + health (:8052)
 MULTIVERSE_PORT=8349 python3 services/multiverse/server.py &   # Oxford Circus engine, source of the London VIX
 python3 services/city/server.py &                       # city markets + wallet (:8051); polls the VIX on :8349
+python3 services/city/venue_server.py &                 # optional: exchange venue prototype (:8062), not on the site
 cd apps/stream && npx next dev -H 0.0.0.0 -p 3349               # open /multiverse
 ```
 `run-data.sh` expects the YOLO server at `$YOLO_DIR`. It is Mirrorverse's `services/yolo`, which is not in this repo:
