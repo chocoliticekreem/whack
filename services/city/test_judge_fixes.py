@@ -18,7 +18,7 @@ import traders
 from data import Store
 from exchange import Clock, Exchange
 from ledger import Ledger
-from test_city import (CITY, MIN, OTHERS, OXFORD, SPOTS, T0, CityCase, Raw, city, crowd_history, crowding,
+from test_city import (CITY, MIN, OTHERS, OXFORD, SPOTS, T0, CityCase, Raw, city, crowd_history, crowding, edge,
                        iso, lines, oxford_station, profile, vix_payload)
 
 HERE = Path(__file__).resolve().parent
@@ -119,9 +119,15 @@ class WeightedFilterTest(unittest.TestCase):
 class TraderRecordTest(CityCase):
     """3 and 4. AI records survive a restart; stakes scale with points and a busted trader sits out."""
 
-    def test_stake_is_ten_percent_up_to_100_and_zero_under_10(self):
-        self.assertEqual([traders.stake_for(p) for p in (5000, 1000, 500, 100, 99, 0, -50)],
-                         [100, 100, 50, 10, 0, 0, 0])
+    def test_stake_is_quarter_kelly_up_to_100_and_zero_under_10(self):
+        self.assertEqual(traders.stake_for(5000, 0, 0.95, 0.2), traders.STAKE)
+        got = [traders.stake_for(p, 0, 0.6, 0.4) for p in (5000, 1000, 500, 100, 9, 0, -50)]
+        self.assertEqual(got[4:], [0, 0, 0])
+        for p, stake in zip((5000, 1000, 500, 100), got):
+            want = int(min(traders.STAKE, traders.KELLY_FRACTION * traders.kelly_stake(0.6, 0.4, p)))
+            self.assertEqual(stake, want if want >= traders.MIN_STAKE else 0)
+        self.assertEqual(got, sorted(got, reverse=True), "a bigger bankroll never stakes less")
+        self.assertLessEqual(got[0], traders.KELLY_FRACTION * traders.edge_stake(0.6, 0.4), "slippage caps it")
 
     def test_records_persist_across_a_restart(self):
         city(self.raw, T0 + 20 * MIN)
@@ -142,20 +148,22 @@ class TraderRecordTest(CityCase):
             self.assertTrue(row["lastWhy"])
 
     def test_a_busted_trader_sits_out_and_says_why(self):
+        edge(self)
         city(self.raw, T0 + 10 * MIN)
         ex = self.exchange()
-        ex.record["tube"]["points"] = 90
+        ex.record["tube"]["points"] = 9
         for t in range(T0, T0 + 20_000, 5_000):
             ex.tick(t)
         self.assertFalse([b for m in ex.markets.values() for b in m.ai_bets if b["trader"] == "tube"])
-        self.assertIn("W90 left", ex.sat_out["tube"][1])
+        self.assertIn("W9 left", ex.sat_out["tube"][1])
         ex2 = self.exchange()
         ex2.record["tube"]["points"] = 400
         for t in range(T0, T0 + 20_000, 5_000):
             ex2.tick(t)
         stakes = [b["stake"] for i in ex2.order for b in ex2.markets[i].ai_bets if b["trader"] == "tube"]
-        self.assertEqual(stakes, [traders.stake_for(400, sum(stakes[:k])) for k in range(len(stakes))])
-        self.assertEqual(stakes[:3], [40, 36, 32], "10% of what is not already staked")
+        self.assertTrue(stakes)
+        for k, stake in enumerate(stakes):
+            self.assertLessEqual(stake, traders.KELLY_FRACTION * (400 - sum(stakes[:k])), "sized on what is free")
 
 
 class StampSettlementTest(CityCase):

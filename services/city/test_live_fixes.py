@@ -19,7 +19,7 @@ import traders
 from data import Store
 from exchange import Clock, Exchange
 from ledger import Ledger, WalletError
-from test_city import (CITY, MIN, SPOTS, T0, Raw, TestSeries, aircraft, city, crowd_history, minutely, no_delay,
+from test_city import (CITY, MIN, SPOTS, T0, Raw, TestSeries, aircraft, city, crowd_history, edge, minutely, no_delay,
                        vix_payload)
 from test_judge_fixes import stamped
 from test_local import RECORDED, utc
@@ -295,6 +295,7 @@ class AiExposureTest(unittest.TestCase):
 
     def setUp(self):
         no_delay(self)
+        edge(self)
         self.raw = Raw()
         self.addCleanup(self.raw.dir.cleanup)
         city(self.raw, T0 + 30 * MIN)
@@ -347,9 +348,13 @@ class OpenStakeReserveTest(unittest.TestCase):
         self.addCleanup(ex.ledger.close)
         return ex
 
-    def test_stake_is_ten_percent_of_the_points_not_already_staked(self):
-        self.assertEqual([traders.stake_for(1000, o) for o in (0, 500, 890, 910, 1000, 2000)], [100, 50, 11, 0, 0, 0])
-        self.assertEqual(traders.stake_for(100, 10), 0, "the 10-point floor applies to what is free")
+    def test_stake_is_sized_on_the_points_not_already_staked(self):
+        got = [traders.stake_for(1000, o, 0.6, 0.4) for o in (0, 500, 890, 910, 1000, 2000)]
+        self.assertEqual(got[3:], [0, 0, 0], "under 10 free points, or none, sits out")
+        self.assertTrue(all(a >= b for a, b in zip(got, got[1:])), got)
+        for o, stake in zip((0, 500, 890), got):
+            self.assertLessEqual(stake, traders.KELLY_FRACTION * (1000 - o))
+        self.assertEqual(traders.stake_for(100, 91, 0.99, 0.2), 0, "the 10-point floor applies to what is free")
 
     def test_a_dozen_open_bets_never_stake_more_than_the_points(self):
         ex = self.exchange()
@@ -360,12 +365,14 @@ class OpenStakeReserveTest(unittest.TestCase):
         markets = ex.active()
         for k in range(15):
             m = markets[k % len(markets)]
+            ex.ai_beliefs[(m.id, m.settles_at, "contrarian")] = 0.99
             ex.ai_fill(m, "contrarian", next(iter(m.prices())), "test")
         open_stakes = ex.ai_open_stakes("contrarian")
         self.assertGreater(open_stakes, 0)
         self.assertLessEqual(open_stakes, 120, "losing every open bet must leave 0 or more")
 
     def test_no_trader_goes_below_zero_over_an_hour_of_rounds(self):
+        edge(self)
         ex = self.exchange()
         for tid in ex.record:
             ex.record[tid]["points"] = 120

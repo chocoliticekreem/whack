@@ -270,31 +270,34 @@ no face or identity processing.
 
 **Q6.1 Is the TOPS analogy real?** *(ok)*
 Yes, all three parts. TOPS collects broker ideas, scores them on outcomes and weights trust by track record. Each
-trader reads one feed and states a view at every open; each view is scored at settle against the futures prior
-(log score, decayed with a half-life of 20 settled markets, shrunk as Σw·s / (Σw + 10)); per series, trust is a
-softmax of those scores with a 5% floor and a 40% cap; the opening price is (1 − λ)·futures + λ·(weighted views),
-λ ≤ 0.3 and 0 without proven skill (`services/city/tops.py`, `GET /tops`). Out of sample on the replay
-(`analysis/judge/tops_replay.py`, 12:40–00:55 UTC, empty record at the start), after 17:00:
+trader reads one feed and states a view at every open; each view is scored at settle against the futures prior (log
+score, decayed with a half-life of 20 settled markets). Skill per trader per series is a Bayesian posterior with an
+empirical-Bayes prior (strength ≈ 23 markets: the traders barely differ beyond noise). Trust is proportional to
+P(skill > 0), with a 5% floor and a 40% cap. The opening price is (1 − λ)·futures + λ·(pooled views), where λ is
+learned from how much the pool improved log loss on past markets, shrunk n/(n+10) and capped at 0.3
+(`services/city/tops.py`, `GET /tops`, `docs/traders-and-tops.md`). Walk-forward, paired, from an empty record
+(`analysis/judge/tops_replay.py`), log loss vs the futures prior:
 
-| Series | n | mean λ | Brier futures → TOPS | diff ± SE |
+| Window | n | Old (softmax, #93) | New (Bayesian) | New − old |
 |---|---|---|---|---|
-| city_pulse | 92 | 0.061 | 0.4860 → 0.4833 | −0.0028 ± 0.0017 |
-| heathrow_stack | 93 | 0.025 | 0.4755 → 0.4752 | −0.0003 ± 0.0005 |
-| hub_surge | 92 | 0.018 | 0.7388 → 0.7389 | +0.0000 ± 0.0002 |
-| hub_hour | 6 | 0.022 | 0.9578 → 0.9581 | +0.0004 ± 0.0005 |
-| clean_sheet | 7 | 0.050 | 0.6859 → 0.6843 | −0.0016 ± 0.0038 |
+| All | 509 | −0.0006 ± 0.0004 | −0.0010 ± 0.0009 | −0.0004 ± 0.0006 |
+| Opened ≥ 17:00 | 354 | −0.0009 ± 0.0005 | −0.0018 ± 0.0012 | −0.0009 ± 0.0008 |
+| Opened ≥ 00:55 (unseen) | 54 | −0.0006 ± 0.0009 | +0.0003 ± 0.0024 | +0.0008 ± 0.0018 |
 
-Say it plainly: it helps a little where one trader has a record (City Pulse, t ≈ 1.6, not significant) and does nothing
-elsewhere, which is the right behaviour. The Tube Crowd City Pulse leak goes from +29.8% to +28.5% (CI +8% to +50%):
-the caps (λ ≤ 0.3, 40% per trader) let the price move at most 12% of the way to a trader's view, by design.
+Say it plainly: the loop is real and principled, but nobody has proven skill yet, so it moves prices very little.
+Permutation test (`analysis/judge/tops_permutation.py`, 200 reruns): of 10 trader-series about 0.5 would look
+skilled at p < 0.05 by chance; 2 do (Tube Crowd on City Pulse, Plane Spotter on Heathrow), and none survives
+Bonferroni or Benjamini–Hochberg. Known limit: λ counts markets, not how far the pool differed, so it can reach the
+cap after a handful of settles where the pool sits close to the futures (tiny price effect; documented, not tuned).
 
-**Q6.2 How are traders scored? Decay?** *(weak)*
-Points at locked odds. Each stake is min(100, 10% of the points not already staked on open markets), and a trader
-sits out when that is under 10. That's crude decay by bankroll. The Contrarian's live −181 was a bug: stakes were
-sized on settled points while about 15 minutes of open bets were unsettled, so a dozen bets were each sized on the
-same pre-loss points. Since #86 the open stakes come off first, at decision and at fill, so losing every open bet
-still ends at 0 or more; a negative record on file loads as 0 and is logged. No Sharpe. The per-series weighting is
-the TOPS loop (Q6.1): a separate log-score record per trader per series, decayed with a half-life of 20 settles.
+**Q6.2 How are traders scored and sized?** *(ok)*
+Points at locked odds. Each stake is quarter-Kelly on the LMSR: the stake that maximises expected log bankroll given
+the trader's probability, the price, LMSR slippage, the 5% fee and the odds cap, times 0.25, capped at 100 and
+floored at 10, on free points (points − open stakes). Kelly never spends past the point where the next share costs
+q/(1 − f), which has the closed form x = b/(1 − f)·ln((1 − p)/(1 − q(1 − f))), tested against `pricing.Book`. No
+edge (or no record) means no bet. A stake is at most a quarter of free points, so a trader can't go negative: a
+property test over 300 random bet/settle sequences fails on the pre-#86 sizing. The Contrarian's old −181 was that
+bug.
 
 **Q6.3 Is "which data has alpha" actually measured? With what sample?** *(ok)*
 On one day, against the house, out of sample after 17:00 (n = 43–84 per series). After #86, Tube Crowd on City Pulse
@@ -423,7 +426,7 @@ cooling-off design.
 | Restart bypassed the position cap and dropped the hourly market; pending bets could bypass confirm | #81 | 17 new tests; `edge.py` 28/28 |
 | Fading the Heathrow stack beat the house (+66% / +47%) | Poisson count around a mean-reverting level, line on the futures' median, in-round readings re-run the model (#86) | After 17:00: −7.6% (CI −28% to +14%) |
 | Hub "top riser since open" beat the house (+76% in replay; 6/10, +202% in the live re-run) | Every future re-simulated from the first in-round TfL publish, untempered (#86) | After 17:00: +6% (CI −25% to +42%). Full day still +48%, so narrowed, not proven closed; not re-run live |
-| The Contrarian showed −181 points | Stakes are 10% of (points − open stakes), at decision and at fill; a negative record loads as 0 (#86) | Can't go below 0; new tests in `test_live_fixes.py` |
+| The Contrarian showed −181 points | Stakes sized on points − open stakes (#86), now quarter-Kelly on free points; a negative record loads as 0 | Can't go below 0; new tests in `test_live_fixes.py` |
 | House lost 1,408 to bots in the first live test | Pricing fixes #72, #77 | Live re-run: house −177 vs players, ledger audit clean |
 | Every vs-usual market voided after the midnight profile refresh, until a restart | Profile re-read on mtime or size change, merged per station and weekday, a cut or corrupt gzip retried next tick (#87) | New `test_rerun_fixes.py` fails or errors on the old code |
 | POST /bet stalled 2–10 s at round opens | Round markets built off the lock, time-band lookup cached, lock holds over 500 ms logged (#87) | Round-open lock hold 100–124 ms → about 1 ms (scratch servers) |
@@ -496,6 +499,6 @@ python3 -m unittest discover -s recorder               # 16
 ```
 
 The replay runs the real `Exchange` in-process with an in-memory ledger: no network and no writes to the recorder
-data. AI trader P&L there uses each trader's real stake rule (min(100, 10% of unstaked points)) at the real quotes,
+data. AI trader P&L there uses each trader's real stake rule (quarter-Kelly on unstaked points) at the real quotes,
 so it shows how a copycat would have done against the house. The live re-run is reproduced in
 `analysis/live_trading/RERUN.md`.

@@ -68,6 +68,7 @@ class Exchange:
         self.series_calibration: dict[str, list[tuple[float, bool]]] = {s: [] for s in mk.SERIES}
         self.sat_out: dict[str, tuple[int, str]] = {}
         self.sim_views: dict[str, tuple[int, dict | None]] = {}
+        self.ai_beliefs: dict[tuple[str, int, str], float] = {}
         self.integrity = integrity.Integrity()
         self.tops = tops.Tops(self.ledger)
         self.local = local.LocalMarkets(self)
@@ -368,11 +369,20 @@ class Exchange:
                 continue
             option, why = pick
             open_stakes = self.ai_open_stakes(tid)
-            stake = traders.stake_for(self.record[tid]["points"], open_stakes)
+            belief = traders.belief(tid, m, ctx, self.tops, option)
+            price = m.prices()[option]
+            stake = traders.stake_for(self.record[tid]["points"], open_stakes, belief, price)
             if not stake:
-                self.sat_out[tid] = (m.settles_at, f"Sitting out: W{self.record[tid]['points']} left, "
-                                                   f"W{open_stakes:g} of it on unsettled bets, so a 10% stake of the "
-                                                   f"rest is under the W{traders.MIN_STAKE} minimum")
+                busted = self.record[tid]["points"] - open_stakes < traders.MIN_STAKE
+                if not busted and (belief is None or belief * (1 - pricing.FEE) <= price):
+                    seen = "has no read on it" if belief is None else f"rates it {traders.pct(belief)}"
+                    self.sat_out[tid] = (m.settles_at, f"Sitting out: no edge on {m.label(option)}; it {seen} "
+                                                       f"against a {traders.pct(price)} price and the "
+                                                       f"{pricing.FEE:.0%} fee")
+                else:
+                    self.sat_out[tid] = (m.settles_at, f"Sitting out: W{self.record[tid]['points']} left, "
+                                                       f"W{open_stakes:g} of it on unsettled bets, so a quarter-Kelly "
+                                                       f"stake is under the W{traders.MIN_STAKE} minimum")
                 continue
             cap_pct = self.integrity.cap(m.sub)
             cap = cap_pct * max(0, self.record[tid]["points"])
@@ -382,6 +392,7 @@ class Exchange:
                 self.sat_out[tid] = (m.settles_at, f"Sitting out: position cap W{cap:g} per market "
                                                    f"({cap_pct:.0%} of its W{self.record[tid]['points']})")
                 continue
+            self.ai_beliefs[(m.id, m.settles_at, tid)] = belief
             if self.integrity.delay_ms(m.sub):
                 self.integrity.accept_ai(tid, m, option, why, now)
             else:
@@ -392,7 +403,9 @@ class Exchange:
         return sum(b["stake"] for m in self.active() for b in m.ai_bets if b["trader"] == tid)
 
     def ai_fill(self, m: mk.Market, tid: str, option: str, why: str) -> None:
-        stake = traders.stake_for(self.record[tid]["points"], self.ai_open_stakes(tid))
+        belief = self.ai_beliefs.pop((m.id, m.settles_at, tid), None)
+        price = m.prices()[option]
+        stake = traders.stake_for(self.record[tid]["points"], self.ai_open_stakes(tid), belief, price)
         if not stake:
             return
         try:

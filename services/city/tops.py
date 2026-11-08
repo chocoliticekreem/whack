@@ -7,16 +7,22 @@ Here the brokers are the seven rule-based traders (traders.py). Per market:
    its forecast (sim_view). The others only pick a side, so the pick gets a calibrated probability from that
    trader's own past picks in the series (the futures prior plus its shrunk excess hit rate) and the other options
    keep their prior shares of the rest. With no history the view equals the prior, so it moves nothing.
-2. At settle, each view is scored: log p_view(winner) - log p_prior(winner), its skill against the futures prior.
-   Scores are kept per trader per series as an exponentially decayed mean (half-life HALF_LIFE settled markets),
-   shrunk toward 0 for small samples: shrunk = sum(w s) / (sum(w) + K_SHRINK).
-3. Trust weights per series: softmax(shrunk / TEMP), mixed with a FLOOR so no trader is ignored, then capped at CAP
-   so none dominates; what the cap cuts stays with the futures (weight FUTURES).
-4. The opening prior is (1 - lam) * futures + lam * (sum_i w_i view_i + w_futures * futures), with
-   lam = LAMBDA_MAX * S / (S + S_HALF) and S the summed positive shrunk skill of the traders with a view: no proven
-   skill, lam = 0, the price is the futures. The blend is kept as a fixed tilt (blended / prior) on the futures as
-   they learn in-round, held in the same [3%, 97%] band the futures use; the LMSR, the odds floor and SIM_WEIGHT are
-   untouched.
+2. At settle, each view is scored: x = log p_view(winner) - log p_prior(winner), its skill against the futures
+   prior. Skill model, per trader per series: x ~ N(theta, sigma^2), theta ~ N(0, tau^2), with an exponentially
+   discounted likelihood (each older market counts DECAY times as much; half-life HALF_LIFE settled markets). The
+   posterior is theta ~ N(sum(w x) / (sum(w) + K), sigma^2 / (sum(w) + K)) with K = sigma^2 / tau^2. sigma^2 is the
+   series' pooled second moment of the scores; K comes from the data (empirical Bayes: the spread of the traders'
+   mean scores beyond what noise explains), never more than K_MAX, the decayed window itself.
+3. Trust weights per series: proportional to P(theta > 0) under that posterior (no temperature to tune), mixed with
+   a FLOOR so no trader is ignored, then capped at CAP so none dominates; what the cap cuts stays with the futures
+   (weight FUTURES).
+4. The opening prior is (1 - lam) * futures + lam * pool, pool = sum_i w_i view_i + w_futures * futures. lam is
+   estimated from the evidence: at every settle where the pool differed from the futures, r = pool(winner) /
+   futures(winner) - 1 is recorded per series; the log-likelihood sum log(1 + lam r) is maximised to second order
+   (lam = sum r / sum r^2), shrunk by n / (n + K_SHRINK) and held in [0, LAMBDA_MAX]. A pool that has not improved
+   log loss gets lam = 0, and the price is the futures. The blend is kept as a fixed tilt (blended / prior) on the
+   futures as they learn in-round, held in the same [3%, 97%] band the futures use; the LMSR, the odds floor and
+   SIM_WEIGHT are untouched.
 
 The baseline is the futures prior, not the blended price: scored against a price it had already moved, a right
 trader would look less skilled the more it was trusted, and its weight would oscillate.
@@ -35,12 +41,11 @@ import pricing
 HALF_LIFE = 20
 DECAY = 0.5 ** (1 / HALF_LIFE)
 K_SHRINK = 10.0
+K_MAX = 1 / (1 - DECAY)
 K_CAL = 5.0
-TEMP = 0.01
 FLOOR = 0.05
 CAP = 0.40
 LAMBDA_MAX = 0.30
-S_HALF = 0.05
 P_LO, P_HI = pricing.P_FLOOR, pricing.P_CEIL
 HISTORY_SHOWN = 200
 FUTURES = "futures"
@@ -65,14 +70,15 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS tops_markets (
 
 
 def new_record() -> dict:
-    """Decayed sums for one trader on one series: s = sum(w score), n = sum(w), e = sum(w (hit - prior of the pick))
-    and c = sum(w) over its side picks (calibration)."""
-    return {"s": 0.0, "n": 0.0, "e": 0.0, "c": 0.0, "count": 0}
+    """Decayed sums for one trader on one series: s = sum(w score), q = sum(w score^2), n = sum(w),
+    e = sum(w (hit - prior of the pick)) and c = sum(w) over its side picks (calibration)."""
+    return {"s": 0.0, "q": 0.0, "n": 0.0, "e": 0.0, "c": 0.0, "count": 0}
 
 
 def update(rec: dict, score: float, excess: float | None) -> None:
     """One more settled view: every older one counts DECAY times as much as before."""
     rec["s"] = rec["s"] * DECAY + score
+    rec["q"] = rec["q"] * DECAY + score * score
     rec["n"] = rec["n"] * DECAY + 1.0
     rec["count"] += 1
     if excess is not None:
@@ -80,9 +86,39 @@ def update(rec: dict, score: float, excess: float | None) -> None:
         rec["c"] = rec["c"] * DECAY + 1.0
 
 
-def shrunk(rec: dict | None) -> float:
-    """Decayed mean skill shrunk toward 0: a normal prior at 0 worth K_SHRINK markets."""
-    return rec["s"] / (rec["n"] + K_SHRINK) if rec else 0.0
+def sigma2(recs) -> float:
+    """The series' score variance: the pooled decayed second moment about 0 (no skill), so a trader's own lucky
+    streak cannot shrink its noise estimate."""
+    n = sum(r["n"] for r in recs)
+    return sum(r["q"] for r in recs) / n if n > 0 else 0.0
+
+
+def prior_k(groups) -> float:
+    """Empirical-Bayes prior strength K = sigma^2 / tau^2 from every trader-series record; groups holds one list of
+    records per series. Method of moments on standardised means: E[m^2 / sigma^2] = tau^2 / sigma^2 + E[1/n], so
+    tau^2 / sigma^2 is the spread of the mean scores beyond what noise explains. At most K_MAX, the decayed window:
+    with no spread to explain, a full record still counts half."""
+    z, inv = [], []
+    for recs in groups:
+        s2 = sigma2(recs)
+        for r in recs:
+            if r["n"] > 0 and s2 > 0:
+                z.append((r["s"] / r["n"]) ** 2 / s2)
+                inv.append(1 / r["n"])
+    rho = sum(z) / len(z) - sum(inv) / len(inv) if z else 0.0
+    return K_MAX if rho <= 1 / K_MAX else 1 / rho
+
+
+def posterior(rec: dict | None, s2: float, k: float) -> tuple[float, float]:
+    """(mean, sd) of the trader's skill theta: normal prior N(0, s2 / k), discounted normal likelihood."""
+    if not rec or s2 <= 0:
+        return 0.0, 0.0
+    return rec["s"] / (rec["n"] + k), (s2 / (rec["n"] + k)) ** 0.5
+
+
+def p_skill(mean: float, sd: float) -> float:
+    """P(theta > 0) under N(mean, sd^2); one half with no information."""
+    return 0.5 if sd <= 0 else 0.5 * (1 + math.erf(mean / (sd * math.sqrt(2))))
 
 
 def normalise(p: dict[str, float]) -> dict[str, float]:
@@ -124,34 +160,54 @@ def score(view: dict[str, float], prior: dict[str, float], winner: str) -> float
     return math.log(view[winner]) - math.log(prior[winner])
 
 
-def weights(skill: dict[str, float]) -> dict[str, float]:
-    """Trust weights over the traders plus the futures' own share (key FUTURES), summing to 1: softmax(skill / TEMP)
-    mixed with a floor of min(FLOOR, 1/m) each, then each trader capped at CAP. What the cap cuts goes to the futures,
-    not to the other traders: with two or three traders, spreading it would hand the best one's excess to the worst."""
-    if not skill:
+def weights(p: dict[str, float]) -> dict[str, float]:
+    """Trust weights over the traders plus the futures' own share (key FUTURES), summing to 1: proportional to each
+    trader's P(skill > 0), mixed with a floor of min(FLOOR, 1/m) each, then each trader capped at CAP. What the cap
+    cuts goes to the futures, not to the other traders: with two or three traders, spreading it would hand the best
+    one's excess to the worst."""
+    if not p:
         return {FUTURES: 1.0}
-    m = len(skill)
+    m = len(p)
     lo = min(FLOOR, 1 / m)
-    top = max(skill.values())
-    soft = normalise({k: math.exp((v - top) / TEMP) for k, v in skill.items()})
-    w = {k: min(CAP, lo + (1 - m * lo) * v) for k, v in soft.items()}
+    total = sum(p.values())
+    share = {k: v / total for k, v in p.items()} if total > 0 else {k: 1 / m for k in p}
+    w = {k: min(CAP, lo + (1 - m * lo) * v) for k, v in share.items()}
     return w | {FUTURES: max(0.0, 1 - sum(w.values()))}
 
 
-def lam_of(skill: dict[str, float]) -> float:
-    """How far the price leans on the traders: grows with their summed positive skill, 0 without any, at most
-    LAMBDA_MAX."""
-    total = sum(max(0.0, v) for v in skill.values())
-    return LAMBDA_MAX * total / (total + S_HALF)
+def new_pool_record() -> dict:
+    """Decayed sums of r = pool(winner) / prior(winner) - 1 over a series' settles where the pool moved off the
+    prior: r1 = sum(w r), r2 = sum(w r^2), n = sum(w)."""
+    return {"r1": 0.0, "r2": 0.0, "n": 0.0, "count": 0}
+
+
+def update_pool(rec: dict, r: float) -> None:
+    rec["r1"] = rec["r1"] * DECAY + r
+    rec["r2"] = rec["r2"] * DECAY + r * r
+    rec["n"] = rec["n"] * DECAY + 1.0
+    rec["count"] += 1
+
+
+def lam_of(rec: dict | None) -> float:
+    """How far the price leans on the pool, from the evidence: the lam maximising sum w log(1 + lam r), to second
+    order sum(w r) / sum(w r^2), shrunk by n / (n + K_SHRINK) and held in [0, LAMBDA_MAX]. 0 with no record, and 0
+    when the pool has not beaten the futures on log loss."""
+    if not rec or rec["r2"] <= 0:
+        return 0.0
+    return min(LAMBDA_MAX, max(0.0, rec["r1"] / rec["r2"] * rec["n"] / (rec["n"] + K_SHRINK)))
+
+
+def pool_of(prior: dict[str, float], views: dict[str, dict[str, float]], w: dict[str, float]) -> dict[str, float]:
+    """The weighted views plus the futures' share on the prior: a convex mix of distributions, so still one."""
+    return {o: sum(w[t] * v[o] for t, v in views.items()) + w.get(FUTURES, 0.0) * prior[o] for o in prior}
 
 
 def blend(prior: dict[str, float], views: dict[str, dict[str, float]], w: dict[str, float],
           lam: float) -> dict[str, float]:
-    """(1 - lam) * prior + lam * (the weighted views + the futures' share on the prior): a convex mix of
-    distributions, so still one."""
+    """(1 - lam) * prior + lam * pool."""
     if not views or lam <= 0:
         return dict(prior)
-    pool = {o: sum(w[t] * v[o] for t, v in views.items()) + w.get(FUTURES, 0.0) * prior[o] for o in prior}
+    pool = pool_of(prior, views, w)
     return {o: (1 - lam) * prior[o] + lam * pool[o] for o in prior}
 
 
@@ -197,22 +253,46 @@ class Tops:
         self.records: dict[tuple[str, str], dict] = {}
         self.history: dict[str, list[dict]] = {}
         self.open_rows: dict[tuple[str, int], dict] = {}
+        self.pools: dict[str, dict] = {}
         with ledger.lock:
             ledger.db.execute(SCHEMA)
-            rows = ledger.db.execute("SELECT market, settles_at, series, prior, views, winner, settled_at FROM "
-                                     "tops_markets ORDER BY COALESCE(settled_at, 0), opened_at, market").fetchall()
-        for mid, at, series, prior, views, winner, settled_at in rows:
-            row = {"series": series, "prior": json.loads(prior), "views": json.loads(views)}
+            rows = ledger.db.execute("SELECT market, settles_at, series, prior, views, weights, winner, settled_at "
+                                     "FROM tops_markets ORDER BY COALESCE(settled_at, 0), opened_at, market"
+                                     ).fetchall()
+        for mid, at, series, prior, views, w, winner, settled_at in rows:
+            row = {"series": series, "prior": json.loads(prior), "views": json.loads(views), "weights": json.loads(w)}
             if settled_at is None:
                 self.open_rows[(mid, at)] = row
             elif winner is not None:
                 self.learn(row, winner, settled_at)
 
+    def posteriors(self, series: str, tids) -> dict[str, tuple[float, float]]:
+        """{trader: (posterior mean, sd)} of its skill on the series."""
+        groups = self.groups()
+        k = prior_k(groups.values())
+        s2 = sigma2(groups.get(series, []))
+        return {t: posterior(self.records.get((t, series)), s2, k) for t in tids}
+
+    def groups(self) -> dict[str, list[dict]]:
+        out: dict[str, list[dict]] = {}
+        for (_, s), rec in self.records.items():
+            out.setdefault(s, []).append(rec)
+        return out
+
     def skill(self, tid: str, series: str) -> float:
-        return shrunk(self.records.get((tid, series)))
+        return self.posteriors(series, [tid])[tid][0]
+
+    def lean(self, series: str, tids) -> tuple[dict[str, float], float]:
+        """(trust weights, lam) for a market of the series whose views come from tids."""
+        post = self.posteriors(series, tids)
+        return weights({t: p_skill(*post[t]) for t in tids}), lam_of(self.pools.get(series))
 
     def series_weights(self, series: str, tids) -> dict[str, float]:
-        return weights({t: self.skill(t, series) for t in tids})
+        return self.lean(series, tids)[0]
+
+    def belief(self, tid: str, series: str, probs: dict[str, float], pick: str) -> float:
+        """The trader's probability that its side pick wins: its calibrated view (pick_view) on these prices."""
+        return pick_view(clamp(probs), pick, self.records.get((tid, series)))[pick]
 
     def open(self, m, stances: dict[str, tuple], now: int) -> None:
         """Turn the stances into views, blend them into the market's opening price and record the open."""
@@ -220,9 +300,8 @@ class Tops:
         views = {}
         for tid, (kind, val) in stances.items():
             views[tid] = clamp(val) if kind == "probs" else pick_view(prior, val, self.records.get((tid, m.sub)))
-        skill = {t: self.skill(t, m.sub) for t in views}
-        w = weights(skill)
-        lam = lam_of(skill)
+        w, lam = self.lean(m.sub, list(views))
+        lam = lam if views else 0.0
         blended = blend(prior, views, w, lam)
         tilt = {o: blended[o] / prior[o] for o in prior}
         self.attach(m, prior, views, w, lam, tilt)
@@ -233,7 +312,7 @@ class Tops:
                                    "views, lam, weights, tilt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                                    (m.id, m.settles_at, m.sub, now, json.dumps(prior), json.dumps(stored), lam,
                                     json.dumps(w), json.dumps(tilt)))
-        self.open_rows[(m.id, m.settles_at)] = {"series": m.sub, "prior": prior, "views": stored}
+        self.open_rows[(m.id, m.settles_at)] = {"series": m.sub, "prior": prior, "views": stored, "weights": w}
 
     @staticmethod
     def attach(m, prior, views, w, lam, tilt) -> None:
@@ -270,15 +349,21 @@ class Tops:
 
     def learn(self, row: dict, winner: str, at: int) -> None:
         series, prior = row["series"], row["prior"]
+        views = {t: v["probs"] for t, v in row["views"].items()}
+        if views:
+            pool = pool_of(prior, views, {t: row["weights"].get(t, 0.0) for t in views}
+                           | {FUTURES: row["weights"].get(FUTURES, 0.0)})
+            if max(abs(pool[o] - prior[o]) for o in prior) > 1e-9:
+                update_pool(self.pools.setdefault(series, new_pool_record()), pool[winner] / prior[winner] - 1)
         for tid, v in row["views"].items():
             rec = self.records.setdefault((tid, series), new_record())
             pick = v.get("pick")
             update(rec, score(v["probs"], prior, winner), None if pick is None else (pick == winner) - prior[pick])
         tids = self.tids(series)
         w = self.series_weights(series, tids)
+        post = self.posteriors(series, tids)
         self.history.setdefault(series, []).append(
-            {"ts": at, "traders": {t: {"score": round(self.skill(t, series), 4), "weight": round(w[t], 4)}
-                                   for t in tids}})
+            {"ts": at, "traders": {t: {"score": round(post[t][0], 4), "weight": round(w[t], 4)} for t in tids}})
 
     # ------------------------------------------------------------ JSON views
 
@@ -292,18 +377,20 @@ class Tops:
         return round(sum(got) / len(got), 4) if got else 0.0
 
     def json(self) -> dict:
-        """GET /tops: per series, each trader's shrunk score, settled-view count (n), decayed sample size (nEff) and
-        trust weight now, the lean (lambda) those scores give, and the score and weight after every settle."""
+        """GET /tops: per series, each trader's posterior skill (score = mean, sd, pSkill = P(skill > 0)), settled-view
+        count (n), decayed sample size (nEff) and trust weight now, the lean (lambda) the pool's record gives, and the
+        score and weight after every settle. priorK is the empirical-Bayes prior strength, in markets."""
         out = {}
         for s in sorted({s for _, s in self.records}):
             tids = self.tids(s)
-            skill = {t: self.skill(t, s) for t in tids}
-            w = weights(skill)
-            out[s] = {"lambdaNow": round(lam_of(skill), 4),
-                      "traders": {t: {"score": round(skill[t], 4), "n": self.records[(t, s)]["count"],
+            post = self.posteriors(s, tids)
+            w, lam = self.lean(s, tids)
+            out[s] = {"lambdaNow": round(lam, 4),
+                      "traders": {t: {"score": round(post[t][0], 4), "sd": round(post[t][1], 4),
+                                      "pSkill": round(p_skill(*post[t]), 4), "n": self.records[(t, s)]["count"],
                                       "nEff": round(self.records[(t, s)]["n"], 2), "weight": round(w[t], 4)}
                                   for t in tids},
                       "futuresWeight": round(w[FUTURES], 4),
                       "history": self.history.get(s, [])[-HISTORY_SHOWN:]}
-        return {"halfLife": HALF_LIFE, "shrinkK": K_SHRINK, "temperature": TEMP, "floor": FLOOR, "cap": CAP,
-                "lambdaMax": LAMBDA_MAX, "series": out}
+        return {"halfLife": HALF_LIFE, "priorK": round(prior_k(self.groups().values()), 2), "lambdaShrinkK": K_SHRINK,
+                "floor": FLOOR, "cap": CAP, "lambdaMax": LAMBDA_MAX, "series": out}
