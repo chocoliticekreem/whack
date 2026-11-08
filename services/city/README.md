@@ -399,3 +399,17 @@ filling, and cap each player's position at 10% of balance. The existing Contrari
 traders do not receive invented strategies. Restart settlement uses the persisted frozen basket and opening values.
 
 Run `python3 -m unittest discover -s services/city -p test_urban.py` for the additional contract tests.
+
+## Verify what teammates actually receive
+
+Run `python3 scripts/check-backend-checkout.py` from the repository root. This exports **HEAD's tracked files only**
+to a temporary directory, starts both city and venue servers in isolated replay mode, checks their HTTP health and
+market/contract endpoints, and runs the full city test suite. It uses no local `.env`, untracked Python modules,
+recorded live data, or player ledger. Use `--skip-tests` for a quick startup check, or `--ref COMMIT` to verify a
+specific revision. Python 3.10+ is required; CI checks Python 3.10 and 3.12 on Linux and macOS.
+
+After pulling a fixed revision, restart both backend processes through the existing supervisor. A production
+checkout temporarily pinned to older tracked city files must first have that pin removed **after** checking that
+`git ls-files services/city/urban.py` includes the module. Do not delete `data/`, `.env`, or the SQLite ledger, and
+do not commit a temporary production rollback. The module and its contract tests must ship in the same repository
+as the registry that imports them.
