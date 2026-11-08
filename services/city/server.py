@@ -8,6 +8,7 @@ default; --replay-from <ISO> fakes "now" from recorded data at 12x, with a throw
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -36,7 +37,22 @@ WALLET_POST = {"/bet", "/limits", "/break", "/player/name"}
 LOOPBACK = {"127.0.0.1", "::1"}
 
 LOCK = threading.Lock()
+LOCK_WARN_S = 0.5
 EX: Exchange | None = None
+VIX_INBOX: deque = deque(maxlen=1)  # newest VIX history from the poller; only the ticker writes it into the store
+
+
+@contextlib.contextmanager
+def held(what: str):
+    """LOCK, with a stderr line whenever one holder keeps it past LOCK_WARN_S (every /bet waits that long)."""
+    with LOCK:
+        t0 = time.perf_counter()
+        try:
+            yield
+        finally:
+            took = time.perf_counter() - t0
+            if took > LOCK_WARN_S:
+                print(f"lock held {took * 1000:.0f} ms by {what}", file=sys.stderr)
 
 
 class RateLimit:
@@ -78,13 +94,28 @@ def open_ledger(replay: bool) -> Ledger:
     return Ledger(":memory:") if replay else Ledger.from_env()
 
 
+def step(ex: Exchange, now: int | None = None) -> None:
+    """One tick in three parts, so a round open never holds the lock: under it, read new data and settle; off it,
+    build the next round's markets (seconds on a loaded machine); under it again, list them and let the AI trade."""
+    now = ex.clock.now() if now is None else now
+    with held("tick: data and settlement"):
+        while VIX_INBOX:
+            ex.store.ingest_vix(VIX_INBOX.popleft())
+        ex.advance(now)
+        due = round_for(now) not in ex.rounds
+    plan = ex.build_round(now) if due else None
+    with held("tick: list round and AI trades"):
+        if plan:
+            ex.list_round(plan)
+        ex.trade(now)
+
+
 def ticker() -> None:
     while True:
-        with LOCK:
-            try:
-                EX.tick()
-            except Exception as exc:  # noqa: BLE001 - one bad tick must not stop the market
-                print(f"tick failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        try:
+            step(EX)
+        except Exception as exc:  # noqa: BLE001 - one bad tick must not stop the market
+            print(f"tick failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         time.sleep(TICK_S)
 
 
@@ -97,14 +128,27 @@ def prime_vix(store: Store, fetch=fetch_vix) -> bool:
     return bool(got)
 
 
+def boot(ex: Exchange, fetch=fetch_vix) -> tuple[Exchange, dict]:
+    """Recover open bets, then open the first round. Live, the VIX and the simulation are fetched after recover():
+    its first read of the day's recorder files takes 30-80 s, and a frame fetched before it was already past the
+    3-min staleness limit when the first round was built, so london_vix sat out the round after every restart."""
+    recovered = ex.recover()
+    if ex.clock.live:
+        if ex.store.sim_feed:
+            ex.store.sim_feed.poll()
+        prime_vix(ex.store, fetch)
+    ex.tick()
+    return ex, recovered
+
+
 def vix_poller() -> None:
-    """Live only: copy the multiverse's London VIX history into the store every VIX_POLL_S (fetched outside the
-    lock, so a slow engine never stalls the market)."""
+    """Live only: fetch the multiverse's London VIX history every VIX_POLL_S outside the lock, so a slow engine never
+    stalls the market. The ticker copies it into the store, which keeps every store write on the ticker thread
+    (build_round reads the store off the lock)."""
     while True:
         got = fetch_vix(MULTIVERSE_URL)
         if got:
-            with LOCK:
-                EX.store.ingest_vix(got)
+            VIX_INBOX.append(got)
         time.sleep(VIX_POLL_S)
 
 
@@ -165,7 +209,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def run(self, fn) -> None:
         try:
-            with LOCK:
+            with held(f"{self.command} {urllib.parse.urlparse(self.path).path}"):
                 status, data = 200, fn()
         except AuthError as exc:
             status, data = 401, {"ok": False, "error": str(exc)}
@@ -248,11 +292,7 @@ def main() -> None:
     store = Store(root, hotspots)
     if start is None:
         store.sim_feed = SimFeed()
-        store.sim_feed.poll()
-        prime_vix(store)
-    EX = Exchange(store, Clock(start), hotspots, ledger)
-    recovered = EX.recover()
-    EX.tick()
+    EX, recovered = boot(Exchange(store, Clock(start), hotspots, ledger))
     threading.Thread(target=ticker, daemon=True).start()
     if start is None:
         threading.Thread(target=vix_poller, daemon=True).start()
