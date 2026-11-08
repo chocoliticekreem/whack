@@ -358,7 +358,7 @@ export function MarketCard({
   const ended = phase === "settled" || phase === "void";
 
   return (
-    <article className="tl-market" data-phase={phase} data-selected={selected || undefined} onClick={onSelect}>
+    <article className="tl-market" data-market={m.id} data-phase={phase} data-selected={selected || undefined} onClick={onSelect}>
       <header className="tl-m-top">
         <span className="tl-m-clock" data-phase={phase}>
           {phase === "open" ? (

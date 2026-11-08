@@ -2358,6 +2358,114 @@
   font-weight: 650;
 }
 
+/* Session / Orders tabs in the earnings dropdown. */
+.ow-tabs {
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: flex;
+  gap: var(--s1);
+  padding: var(--s2) var(--s4) 0;
+  border-bottom: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.ow-tabs button {
+  padding: 6px var(--s2) 8px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  background: none;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ow-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--ink);
+  color: var(--ink);
+}
+
+.ow-tabs .tl-data {
+  margin-left: 2px;
+  font-weight: 500;
+}
+
+/* Orders: one compact row per bet, newest first. */
+.ow-orders {
+  margin: 0;
+  padding: 0 0 var(--s2);
+  list-style: none;
+}
+
+.ow-orders-empty {
+  padding: var(--s3) var(--s4) var(--s4);
+}
+
+.ow-order {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 2px var(--s3);
+  width: 100%;
+  padding: var(--s2) var(--s4);
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+}
+
+.ow-orders li:first-child .ow-order {
+  border-top: 0;
+}
+
+button.ow-order {
+  cursor: pointer;
+}
+
+button.ow-order:hover {
+  background: var(--surface-2);
+}
+
+.ow-order-q {
+  overflow: hidden;
+  font-weight: 500;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ow-order-st {
+  color: var(--ink-2);
+  font-size: 12.5px;
+  text-align: right;
+  white-space: nowrap;
+}
+
+.ow-order-st[data-wait] {
+  color: var(--warn);
+}
+
+.ow-order-st[data-muted] {
+  color: var(--muted);
+}
+
+.ow-order-pick {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ow-order-amt {
+  color: var(--muted);
+  font-size: 12px;
+  text-align: right;
+  white-space: nowrap;
+}
+
 .ow-confetti {
   position: fixed;
   z-index: 90;
