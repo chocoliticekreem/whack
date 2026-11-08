@@ -10,8 +10,7 @@ import { MarketClues, usualGhost } from "./Clues";
 import { FuturesFan } from "./FuturesFan";
 import { Tick } from "./Live";
 import { WhatIfLine, type WhatIfOdds } from "./Scenario";
-import { onHubPick } from "./CityMapGL";
-import { headlineOf, isRace, pausedText, plainLabel, plainResult, plainTitle, plainYes, resultEta } from "./plain";
+import { pausedText, plainLabel, plainResult, plainTitle, resultEta } from "./plain";
 
 export type Phase = "open" | "halted" | "locked" | "awaiting" | "settled" | "void";
 
@@ -357,19 +356,6 @@ export function MarketCard({
   const sideOf = (i: number) => (n === 2 && i === 1 ? "no" : "yes");
   const draftedSide = sideOf(m.options.findIndex((o) => o.id === draft));
   const ended = phase === "settled" || phase === "void";
-  const race = isRace(m);
-  const [asked, setAsked] = useState<string | null>(null);
-  const optionFor = (hub: string) => m.options.find((o) => (o.hotspot ?? o.id) === hub)?.id;
-  const ask = bet?.option ?? (draft && m.options.some((o) => o.id === draft) ? draft : null) ?? (asked && optionFor(asked) ? optionFor(asked)! : null) ?? headlineOf(m);
-  useEffect(() => (race ? onHubPick((hub) => setAsked(hub)) : undefined), [race]);
-  const asking = m.options.find((o) => o.id === ask);
-  // "Not this one" walks the areas in the headline's order: closest to 50% first, then outwards. It is not a bet.
-  const skip = () => {
-    const order = [...m.options].sort((a, b) => Math.abs(a.prob - 0.5) - Math.abs(b.prob - 0.5) || b.prob - a.prob);
-    const next = order[(order.findIndex((o) => o.id === ask) + 1) % order.length];
-    setAsked(next.hotspot ?? next.id);
-    if (draft) onCancel();
-  };
 
   return (
     <article className="tl-market" data-market={m.id} data-phase={phase} data-selected={selected || undefined} onClick={onSelect}>
@@ -396,7 +382,7 @@ export function MarketCard({
         </button>
       </header>
 
-      <h3 className="tl-q">{race && !ended ? plainYes(m, ask) : plainTitle(m)}</h3>
+      <h3 className="tl-q">{plainTitle(m)}</h3>
 
       {phase === "halted" && <p className="tl-paused">{pausedText(m.haltReason, now)}</p>}
 
@@ -406,71 +392,6 @@ export function MarketCard({
         <p className="tl-outcome" data-void={phase === "void" || undefined}>
           {phase === "settled" && result ? plainResult(m, result) : "No result: every stake refunded"}
         </p>
-      ) : race && asking ? (
-        <div className="tl-race">
-          <div className="tl-race-row">
-            <button
-            type="button"
-            className="tl-opt tl-race-yes"
-            data-state={draft === asking.id || bet?.option === asking.id ? "picked" : "idle"}
-            data-side="yes"
-            disabled={!canBet}
-            onClick={(e) => {
-              e.stopPropagation();
-              onPick(asking.id);
-            }}
-          >
-            <span className="tl-opt-label">
-              {(draft === asking.id || bet?.option === asking.id) && <Check size={15} strokeWidth={3} aria-label="Your pick" />}
-              Yes
-            </span>
-            <span className="tl-opt-meta">
-              <span className="tl-opt-pct">
-                <Tick value={Math.round(asking.prob * 100)} className="tl-opt-big tl-data">
-                  {Math.round(asking.prob * 100)}%
-                </Tick>{" "}
-                chance
-              </span>
-              <span className="tl-opt-pay">
-                Bet <span className="tl-data">{fmtW(REF_STAKE)}</span> · win <b className="tl-data">{fmtW(REF_STAKE * asking.odds)}</b>
-              </span>
-            </span>
-          </button>
-            {!bet && (
-              <button
-                type="button"
-                className="tl-race-skip"
-                disabled={phase !== "open"}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  skip();
-                }}
-              >
-                Not this one
-              </button>
-            )}
-          </div>
-          {!bet && (
-            <div className="tl-race-alts" onClick={(e) => e.stopPropagation()}>
-              <span className="tl-muted">Or pick an area, or tap one on the map:</span>
-              {m.options
-                .filter((o) => o.id !== asking.id)
-                .map((o) => (
-                  <button
-                    key={o.id}
-                    type="button"
-                    className="tl-race-chip"
-                    onClick={() => {
-                      setAsked(o.hotspot ?? o.id);
-                      if (draft) onCancel();
-                    }}
-                  >
-                    {plainLabel(m, o.id)} <span className="tl-data tl-muted">{Math.round(o.prob * 100)}%</span>
-                  </button>
-                ))}
-            </div>
-          )}
-        </div>
       ) : (
         <div className="tl-opts" data-n={n}>
           {m.options.map((o, i) => {
