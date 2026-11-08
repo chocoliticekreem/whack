@@ -225,6 +225,28 @@ def fit_relative_ou(grid: dict[int, dict[str, tuple[float, float]]], ids: list[s
     return -math.log(1 - k) / step_min, sds, corr, len(joint)
 
 
+PULSE_MOMENTUM = 0.30
+PULSE_TREND_MIN = 10
+STAMP_TOL_MS = 150_000
+
+
+def fit_pulse(devs: list[tuple[int, float]], t0: int, minutes: int) -> float | None:
+    """Per-minute drift of City Pulse around the usual day: PULSE_MOMENTUM x the change in log pulse vs usual over
+    the PULSE_TREND_MIN before the open reading, spread over the walk's `minutes`. devs = (TfL stamp, log pulse vs
+    usual) readings polled before the open; t0 = the open reading's stamp. None (the caller keeps the plain walk)
+    without a reading at t0 and one within STAMP_TOL_MS of 10 min before it.
+
+    TfL's readings trend: 0.30 of the last 10 min's move in vs usual carried on to the settle reading 15-20 min later
+    (fitted on markets opened 12:00-18:00 by analysis/judge/pulse_model.py). The plain walk's drift, half the last
+    hour's mean change capped at sigma/5, carried too little of it: the evening's slides ran past even-money lines."""
+    target = t0 - PULSE_TREND_MIN * MIN_MS
+    before = min(devs, key=lambda d: abs(d[0] - target), default=None)
+    last = dict(devs).get(t0)
+    if last is None or before is None or abs(before[0] - target) > STAMP_TOL_MS:
+        return None
+    return PULSE_MOMENTUM * (last - before[1]) / max(1, minutes)
+
+
 class ScalarSim:
     """Over/under on one positive number (City Pulse): a capped log walk from the last real reading.
     value_of(snapshot) reads the number from a feed snapshot (None = not enough data in it)."""

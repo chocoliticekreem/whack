@@ -147,8 +147,9 @@ rule it stands in for; a player who wants more room can raise it, which takes ef
 
 Each market runs 50 futures. Every future starts from the last real reading:
 - city_pulse: a log random walk of City Pulse from TfL's own stamp on the open reading to the expected settle
-  reading. Sigma and drift (half the last hour's trend, capped) are fitted on today's changes around TfL's usual day,
-  and the walk adds the usual day's slope (a smooth curve through the 15-min bands) over its horizon; without it,
+  reading. Sigma is fitted on today's changes around TfL's usual day; the drift carries 0.30 of the last 10 min's
+  change in City Pulse vs usual (`pricing.fit_pulse`, fitted out of sample by `analysis/judge/pulse_model.py`; half
+  the last hour's trend, capped, when the usual profile is missing). The walk adds the usual day's slope (a smooth curve through the 15-min bands) over its horizon; without it,
   copying the usual curve beat the house by 32-48% a bet. The line is the half point (x.0 or x.5) nearest the futures'
   median at the settle reading, so the market opens near 50/50 (the old line, open + the median 5-min change, ignored that slope and opened
   evening markets at a 94% favourite). Steps are capped at 2.5σ.
