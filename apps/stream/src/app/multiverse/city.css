@@ -2280,6 +2280,25 @@
   background: var(--line);
 }
 
+.ow-drop-foots {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+
+.ow-drop-foots .ow-drop-foot {
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.ow-drop-foots .ow-drop-foot + .ow-drop-foot {
+  border-left: 1px solid var(--line);
+}
+
+.tl-board li[data-gap] {
+  margin-top: var(--s3);
+  border-top: 1px dashed var(--line-strong);
+}
+
 .ow-drop [data-tone="up"] {
   color: var(--yes-ink);
 }

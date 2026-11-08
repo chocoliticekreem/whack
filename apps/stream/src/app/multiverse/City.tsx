@@ -114,6 +114,8 @@ function healthOf(feeds: MarketsResponse["feeds"], offline: boolean): Health {
   return bad === 0 ? "green" : bad === list.length ? "red" : "amber";
 }
 
+const BOARD_TOP = 10;
+
 export function City() {
   const now = useNow();
   const [mock, setMock] = useState(forcedMock);
@@ -549,7 +551,9 @@ export function City() {
     const myName = wallet.name ?? defaultName(wallet.player);
     const rows = (board ?? []).filter((r) => !(r.kind === "human" && r.name === myName));
     rows.push({ name: myName, points: server?.total ?? wallet.points, kind: "human" });
-    return rows.sort((a, b) => b.points - a.points);
+    const ranked = rows.sort((a, b) => b.points - a.points).map((r, i) => ({ ...r, rank: i + 1 }));
+    const mine = ranked.findIndex((r) => r.kind === "human" && r.name === myName);
+    return mine < BOARD_TOP ? ranked.slice(0, BOARD_TOP) : [...ranked.slice(0, BOARD_TOP), ranked[mine]];
   }, [board, wallet, server]);
 
   return (
@@ -899,17 +903,18 @@ export function City() {
             </div>
             <ol>
               {boardRows.map((r, i) => {
+                const gap = i > 0 && r.rank > boardRows[i - 1].rank + 1;
                 const t = r.kind === "ai" ? traders.find((x) => x.name === r.name) : undefined;
                 const me = r.kind === "human" && r.name === (wallet.name ?? defaultName(wallet.player));
                 return (
-                  <li key={`${r.kind}-${r.name}`} data-me={me || undefined} data-kind={r.kind}>
-                    <span className="tl-rank tl-data">{i + 1}</span>
+                  <li key={`${r.kind}-${r.name}`} data-me={me || undefined} data-kind={r.kind} data-gap={gap || undefined}>
+                    <span className="tl-rank tl-data">{r.rank}</span>
                     <Badge id={t?.id ?? r.name} name={r.name} kind={r.kind === "ai" ? "ai" : me ? "me" : "human"} />
                     <span className="tl-board-name">
                       {r.name}
                       {me && " (you)"}
                     </span>
-                    <span className="tl-kind">{r.kind === "ai" ? "Computer trader" : "Player"}</span>
+                    <span className="tl-kind">{r.kind === "ai" ? "AI trader" : "Player"}</span>
                     <b className="tl-data">{fmtW(r.points)}</b>
                   </li>
                 );

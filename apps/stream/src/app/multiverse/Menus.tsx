@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { ChevronDown, Workflow } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { countdown, fmtW, londonClock, type MyBet, type Settled } from "./city-store";
@@ -41,7 +43,7 @@ export function TradersMenu({
           ))}
         </span>
         <span className="tl-desk">
-          {n} <span className="ow-long">computer </span>traders
+          {n} <span className="ow-long">AI </span>traders
         </span>
         <ChevronDown size={14} className="ow-chev" aria-hidden />
       </button>
@@ -50,9 +52,9 @@ export function TradersMenu({
           <div className="ow-sheet-scrim" aria-hidden />
           <div ref={panel} className="ow-drop ow-traders" role="dialog" aria-label="Computer traders">
             <p className="ow-drop-head">
-              <b>{n} computer traders.</b> Each one watches one live London data feed and bets against you.
+              <b>{n} AI traders</b>, each reading one live London feed and betting on the same markets as you.
             </p>
-            <p className="ow-drop-head ow-trust-head">The market leans on traders who&apos;ve been right.</p>
+            <p className="ow-drop-head ow-trust-head">Trust is earned by calls that beat our model. The odds lean on the trusted ones.</p>
             <ol className="ow-trader-list">
               {ranked.map((t, i) => (
                 <li key={t.id}>
@@ -89,16 +91,21 @@ export function TradersMenu({
                 </li>
               ))}
             </ol>
-            <button
-              type="button"
-              className="ow-drop-foot"
-              onClick={() => {
-                setOpen(false);
-                onBoard();
-              }}
-            >
-              Leaderboard
-            </button>
+            <div className="ow-drop-foots">
+              <button
+                type="button"
+                className="ow-drop-foot"
+                onClick={() => {
+                  setOpen(false);
+                  onBoard();
+                }}
+              >
+                Leaderboard
+              </button>
+              <Link href="/multiverse/exchange" className="ow-drop-foot">
+                Exchange →
+              </Link>
+            </div>
           </div>
         </>
       )}
