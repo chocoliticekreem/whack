@@ -13,11 +13,11 @@ buses and disruptions (see [build.md](build.md)). This doc covers *what we make 
 ## ★ The pitch (current, as shipped through #81)
 **OverWatch: a live stock exchange on London's next five minutes.** Every 5 minutes it lists plain-language markets
 on the city ("Will London's Tube get busier or quieter by 21:10?"). Each price comes from 50 futures fitted to today's
-data and TfL's usual Saturday; each new reading reweights them. You trade against seven computer traders that each read
-one stream of alternative data and build a public track record, and the market leans on the ones who've been right:
+data and TfL's usual Saturday; each new reading reweights them. Seven AI traders, each reading
+one stream of alternative data and building a public track record, bet on the same markets as you; the market leans on the ones who've been right:
 TOPS pointed at a city. Each opening price blends in the traders' views by their decayed, shrunk track record, and
-only proven skill counts (services/city/README.md "TOPS loop"). Click anywhere on the map to trade the nearest real sensor, or ask "what if this street closed?"
-and our central-London agent simulation shows how the odds would move.
+only proven skill counts (services/city/README.md "TOPS loop"). Click anywhere on the map to trade that area's nearest real sensor.
+The same markets also trade on a no-house order book, the Exchange, against 2,196 AI accounts.
 
 Live at https://overwatchcapital.vercel.app/multiverse. Points only, never real money.
 
@@ -26,7 +26,7 @@ Live at https://overwatchcapital.vercel.app/multiverse. Points only, never real 
 | **1. The futures** (engine) | 50 futures per market from the latest real reading at TfL's own stamp. City Pulse walks follow the usual-Saturday curve; the hub race mean-reverts toward the five-hub average (#72, #77). The central sim can supply a share (`SIM_WEIGHT`), set to 0 live because it loses to persistence. The London VIX comes from the agent simulation of Oxford Circus (50 worlds, common random numbers) | *The new world*: futures that don't exist yet |
 | **2. The market** (exchange) | City-wide 5-minute rounds on the London clock, plus click-anywhere local markets on 33 real sensors (#71). Each reading reweights the futures; LMSR turns them and the bets into prices. Kalshi-style rules: a source and rule on every market, close before settle, settlement on TfL's own timestamp, void and refund, a frozen reading, bet delays against courtsiding (#61, #72, #81) | *The interaction*: you bet, reality settles it |
 | **3. The traders** (the first half of TOPS) | 7 computer traders, each reading one live feed: Tube Crowd (station crowding), Camera Eye (the VIX), Line Watcher (Tube status), Rain Radar (rain), Plane Spotter (Heathrow holding stacks), The Contrarian (where the points are going), Simulation (the central sim's forecast). Each bets through the same LMSR, gives a reason citing a real number, and keeps a record that survives restarts. The TOPS loop scores every view against the futures and blends the proven ones into the opening price (at most 30%, no trader over 40% of that); with no proven skill the price is the futures | *The MW hook*: their founding idea, pointed at a city |
-| **4. The scenario room** | "What if…": click a street or station, close it or add a crowd; the central sim runs on copies and the cards show the odds it implies (#66) | *Why simulate*: answers what data can't |
+| **4. The Exchange** | The same markets on order books, no house: 12 AI market makers, 184 funds, 2,000 retail (#90–#123). On known-truth markets its prices end 52% closer to the truth than our forecast | *Where it goes*: from bookmaker to exchange |
 | **Output: the London VIX** | The price-weighted spread of predicted crowds across the simulated worlds of Oxford Circus, as one index. An uncertainty gauge, not a fear index | *The new data* |
 
 **Every round lists:**
@@ -46,14 +46,14 @@ Station markets settle on the first reading TfL stamped after betting closed, ab
 point.
 
 **10 s:** "A live stock exchange on London's next five minutes. Every price comes from 50 futures, reweighted by real
-TfL data as it arrives. You trade against seven computer traders, each reading one live feed."
+TfL data as it arrives. Seven AI traders, each reading one live feed, trade it with you."
 
 **30 s:** "Every five minutes OverWatch lists new markets on London: which of five hubs grows most against a usual
 Saturday, whether the Tube gets busier or quieter, whether London gets more unpredictable *(creativity)*. Each price
 comes from 50 futures fitted to today's data and TfL's usual day, reweighted by every new reading, and an LMSR market
-maker prices them. We settle only on numbers TfL stamped after betting closed *(technical)*. Seven computer traders,
-each reading one feed, bet against you, say why and build a public track record. Click anywhere to trade the nearest
-sensor, or close a street and watch the odds move *(presentation)*. It's Marshall Wace's TOPS idea
+maker prices them. We settle only on numbers TfL stamped after betting closed *(technical)*. Seven AI traders,
+each reading one feed, bet on the same markets, say why and build a public track record. Click anywhere to trade that
+area, or open the Exchange to trade the same markets on an order book *(presentation)*. It's Marshall Wace's TOPS idea
 pointed at a city: the opening price leans on the traders who've been right, and only as far as their record earns."
 
 **100 words:**
@@ -62,7 +62,7 @@ pointed at a city: the opening price leans on the traders who've been right, and
 >
 > Every five minutes it lists plain-language markets on central London: which hub grows most, whether the Tube gets
 > busier, whether the city gets more unpredictable. Each price comes from 50 futures that real TfL data reweights as
-> it arrives. Seven computer traders, each reading one stream of alternative data, bet against you, explain why and
+> it arrives. Seven AI traders, each reading one stream of alternative data, bet on the same markets, explain why and
 > build a public track record. Real readings settle every market under published rules, on a double-entry ledger.
 >
 > Nobody knows the outcome in advance. The edge is reading the data better. Our own Tube Crowd trader proved the house
@@ -79,8 +79,8 @@ city best."
 - *"Did your own trader beat the house?"* Yes: copying Tube Crowd made +32–48% a bet. We put the usual-Saturday curve
   into the futures; out of sample it's now about +13%, with a 95% CI of −27% to +55%. Not proven gone.
 - *"Real betting?"* No. Points only. The ledger is real-money grade; a house-banked LMSR is bookmaking. The order
-  book (exchange-design.md) is built as a prototype beside the live site, not live; taking it live and licensing are
-  the work left.
+  book (exchange-design.md) is live at /multiverse/exchange beside the house-priced main screen; real money and
+  licensing are the work left.
 - *"Can someone know the answer?"* Station markets settle on TfL's own post-close stamp, so nobody sees it early.
   Clean sheet is the one single-event market: bets fill 45 s later, any line change pauses it, a 10% cap, and betting
   closes with its first round. A head start under 44 s gains nothing (#61).
@@ -103,25 +103,26 @@ inside the 3-minute slot.
 3. **0:50, a station market's fair wait.** A closed hub card: "Betting closed · result about 23:50, when TfL
    publishes". We settle only on numbers TfL stamped after close.
 4. **1:20, the traders dropdown.** Tube Crowd's record and reason. The TOPS line, with the honest leak number.
-5. **1:50, scenario mode.** "What if…", click Regent Street, "Close this street": the odds move on the cards.
+5. **1:50, the Exchange.** Top bar, Exchange: the same markets on an order book, no house, 2,196 AI accounts.
 6. **2:20, settle.** The fast market settles; the earnings dropdown updates and, on a win, confetti with the profit.
 7. **2:40 close:** the TOPS line.
 
 ## Why simulate, not just read data
 Owner's direction: the digital twin and the agent simulation must earn their place beyond looks, with no
 special-cased scenarios, and the scope is central London, not one junction. **Status: the Oxford Circus simulation
-produces the London VIX; the central-London simulation (#54) powers scenario mode (#66) and trades as the Simulation
-trader (#55). It loses to persistence, so it's out of the price (`SIM_WEIGHT=0`).**
+produces the London VIX; the central-London simulation (#54) trades as the Simulation trader (#55) and powers scenario
+mode (#66), which is off the trading screen (#120). It loses to persistence, so it's out of the price (`SIM_WEIGHT=0`).**
 
 **Data looks backwards; simulation looks forwards.** Sensors (13 cameras, 20 stations) show what already happened,
 and statistical futures only extend trends. The agent simulation on the real street graph can:
 1. **Price shocks before sensors see them** (built, no skill yet): events from the feeds (line disruptions, road
    closures, fixtures, crowding surges) become simulation inputs by general rules (#49, #60). Measured against a
    no-event control, they don't predict station busyness yet.
-2. **Answer what-ifs with no data** (shipped, #66): close a street, add a crowd or shut a station and see the odds the
-   sim implies. It runs on copies; live state is untouched.
-3. **Fill gaps between sensors** (partly): a click with no sensor within 400 m shows the sim's people forecast on the
-   nearest streets, with no bet (#71). Settlement still uses real sensors only.
+2. **Answer what-ifs with no data** (built, #66, off the trading screen since #120): close a street, add a crowd or
+   shut a station and see what the sim implies. A public what-if either repeats the price or is a free edge against
+   the house, so its use is planning (TfL, retailers, event operators), not betting.
+3. **Fill gaps between sensors** (partly): a click with no sensor within 400 m opens the nearest sensor's market,
+   labelled "Detected area" (#124). Settlement still uses real sensors only.
 4. **Check the data** (not built): a sensor reading the model says is impossible flags and halts the market.
 5. **Explain prices** (partly): the 3D map draws arcs between hubs from the hub_surge futures, labelled as a stand-in
    until sim flows are exposed (#68).

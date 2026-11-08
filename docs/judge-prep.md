@@ -97,12 +97,14 @@ A demo room of 20 strangers can't sustain a two-sided book every 5 minutes. LMSR
 for a fixed prior, and lets the model set the opening price. The cost: a player moves a price about 9 points at most,
 so there's little price discovery. The live site is house-banked: a bookmaker with a published model.
 
-The exchange in `docs/exchange-design.md` (#67) is built as a prototype that runs beside it (#90, #94,
+The exchange in `docs/exchange-design.md` (#67) runs beside it (#90, #94,
 `services/city/venue_server.py` on :8062): one order book per binary contract, no house, 12 AI market makers quoting
 both sides (designated ones held to a 6-point spread and 90% uptime for a share of fees), 184 hedge funds, 2,000
 retail, and the same speed bumps, position limits, halts and settlement sources as the live exchange. Since #98 its
 fees are off by default (a points game has no exchange to fund); `--fees kalshi` turns on Kalshi's taker fee
-ceil(0.07·C·P·(1−P)) with makers free. Since #112 it is live at `/multiverse/exchange` (Vercel `VENUE_URL` → :8062).
+ceil(0.07·C·P·(1−P)) with makers free. Since #112 it is live at `/multiverse/exchange` (Vercel `VENUE_URL` → :8062),
+one click from the main screen's top bar (#120); #121/#123 gave it a trading-terminal page (markets, price chart vs
+model, book, trades, ticket with order status and positions) and an account on arrival.
 
 What we can say: on 25 minutes of Saturday's recorded data (`venue_demo.py --replay-from 2026-11-07T15:00:00Z`) every
 structural check passed (no crossed books, no trade after close, ledger audit clean), the median quoted spread was
@@ -332,7 +334,7 @@ traded on a dry day. That's a measurement design, not a result.
 - **US:** the CFTC designated-contract-market route Kalshi took.
 - **Business hedging:** possibly FCA-regulated derivatives, or an insurance partner (parametric cover).
 
-Not legally verified. The ledger is real-money grade; taking the order book from prototype to live, payments, ID
+Not legally verified. The ledger is real-money grade; the order book is live in points; real money, payments, ID
 checks and licensing are the work left.
 
 **Q7.2 Who pays?** *(weak)*
@@ -352,8 +354,9 @@ mispricings) with zero users. The cost is house risk, capped by the exposure lim
 
 **Q8.1 What runs where?** *(ok)*
 Everything runs on one laptop: recorder, YOLO, both sims and the exchange. The front end is on Vercel, reaching the
-laptop through a Cloudflare quick tunnel whose URL changes on restart. If the laptop sleeps, the site falls back to
-demo data. The order-book venue prototype is a separate process (:8062) with its books and ledger in memory; it reads
+laptop through Cloudflare quick tunnels (city :8051, sim :8449, exchange :8062) whose URLs change on restart; the
+ngrok static domain hit its monthly bandwidth cap on Sun 07:30. If the laptop sleeps, the site falls back to demo
+data. The order-book exchange is a separate process (:8062) with its books and ledger in memory; it reads
 the same recorder files and touches nothing the site uses.
 
 **Q8.2 Persistence and failure modes?** *(strong)*
@@ -425,7 +428,7 @@ cooling-off design.
 | "TOPS fixes the leak" | The blend shaves Tube Crowd's City Pulse pick from +19.3% to +16.8% after 17:00 (n=112); λ is capped at 0.3 | "The market leans on proven traders, a little and only where they're proven" |
 | "Tube Crowd is a skilled trader" | p = 0.015 is one of 10 tests; none survives Bonferroni or BH, and its posterior ends at P(skill > 0) = 0.37 | "Two of ten look skilled where chance gives about one half; none survives correction" |
 | "The London VIX is the city's fear index" | One area, 1 h burn-in | "An uncertainty gauge for Oxford Circus: the spread of 50 simulated worlds" |
-| "Points to pounds is a licence, not a rewrite" | A house-banked LMSR is bookmaking | "The ledger is real-money grade; the order book is a prototype beside the live site, and taking it live plus licensing are the work left" |
+| "Points to pounds is a licence, not a rewrite" | A house-banked LMSR is bookmaking | "The ledger is real-money grade; the order book is live beside the house in points; real money plus licensing are the work left" |
 | "City-scale aggregates one person can't move" | Untested; Bank sits at 5–6% of baseline | "Five busy hubs against their own baselines; low-traffic stations are the soft spot" |
 | "Kalshi-style integrity" (as a whole) | Kalshi runs surveillance | "Kalshi-style rules: source and rule on every market, close before settle, TfL's own timestamp, void and refund, bet delays" |
 | "Pruning tracks the data all round" | 73 of 275 markets still hit the 60% ruled-out cap; it's a heuristic, not resampling | "Each reading reweights the futures; pruning is capped at 60% rather than resampled" |
@@ -503,7 +506,7 @@ lags; never wait on the network in silence, say the line and move on.
   than ours. On the other side: an LMSR market maker over those 50 futures, and seven AI traders, each reading one live
   feed: TfL crowding, Tube status, street cameras counted by YOLO, planes stacking over Heathrow."
 - **If slow:** if the fill hangs, the bet still shows as pending in Orders: "the delay is the point; it fills or it's
-  cancelled, never half." If the VIX and Heathrow are both missing, click a camera spot on the map and bet on the local
+  cancelled, never half." If the VIX and Heathrow are both missing, click anywhere on the map ("Detected area: …") and bet on the local
   market it opens.
 
 **0:50 A market settling on real TfL data, and why it's fair (40 s).**

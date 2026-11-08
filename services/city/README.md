@@ -317,7 +317,8 @@ bets live in memory, so a restart forgets them (no points move).
 The Kalshi-style exchange in `docs/exchange-design.md`, running beside this server: no house, one order book per
 binary contract, and about 2,200 AI accounts (12 market makers, 184 hedge funds in three tiers, 2,000 retail) trading
 against players. It reads the same recorder files read-only and keeps its books, ledger and accounts in memory, so
-the live LMSR exchange is untouched and a restart starts it clean.
+the live LMSR exchange is untouched and a restart starts it clean. On the site it is the **Exchange** page
+(`/multiverse/exchange`, top-bar button), proxied through `/api/venue/*` to `VENUE_URL`.
 
 ```bash
 python3 services/city/venue_server.py                                    # live, beside server.py
