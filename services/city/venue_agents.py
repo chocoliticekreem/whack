@@ -5,7 +5,8 @@ public snapshot (venue.Venue.snapshot) and its own account, and trades only thro
 checks, speed bump, fees and limits as a player. Each carries a typical human network latency.
 
 - Market makers quote both sides around the public forecast, earn the spread, skew their quotes against their
-  inventory (Avellaneda & Stoikov), move their fair value after being filled (Glosten & Milgrom), widen when the
+  inventory (Avellaneda & Stoikov), move their fair value after being filled (Glosten & Milgrom) and towards where
+  the book has traded in the last minute (TRADE_WEIGHT), widen when the
   forecast jumps and before close, and stop quoting a side at their inventory limit. A new quote goes in before the
   old one comes off; a quote that has gone stale is pulled at once. They widen as the flow against them turns
   one-sided, because one-sided flow is what informed traders look like (Glosten & Milgrom). Designated market makers
@@ -39,11 +40,16 @@ TOXICITY = 6.0             # points of extra half-spread at fully one-sided flow
 TOXIC_FROM = 0.7           #   must grow with the share of informed flow); none below 70% imbalance, where noise
                            #   traders' flow alone set it off (analysis/exchange: 7-13% tighter spreads, same accuracy)
 PICK_TTL_MS = 30_000
+TRADE_WEIGHT = 0.3         # market makers' fair value: this share from the last minute's traded price, rest forecast
+                           #   (analysis/exchange: prices ~50% closer to the truth than the forecast, not ~33%)
+TRADE_MIN_VOLUME = 10      #   (only once at least this many contracts traded)
 # Measured hit rate of each rule when it picks an outcome. None: no measured edge, so no view.
 HIT = {("tube", "hub_surge"): 0.36, ("tube", "hub_hour"): 0.56, ("tube", "city_pulse"): 0.55,
        ("cams", "london_vix"): 0.65, ("bus", "heathrow_stack"): 0.60, ("rain", "city_pulse"): 0.55,
        ("contrarian", None): 0.45}
-STRATEGIES = ("tube", "cams", "bus", "lines", "rain", "contrarian", "sim", "model")
+# No "model" (trade the forecast) by default: such funds take the other side of better information and pull prices
+# back to the forecast (analysis/exchange). Fund.belief still supports it.
+STRATEGIES = ("tube", "cams", "bus", "lines", "rain", "contrarian", "sim")
 BIASES = ("random", "longshot", "favourite", "herd", "momentum", "home")
 
 
@@ -110,6 +116,8 @@ class MarketMaker(Agent):
             half += TOXICITY * max(0.0, imbalance - TOXIC_FROM) / (1 - TOXIC_FROM)
         if self.designated:  # floor/ceil can add a point, so (limit - 1) / 2 keeps the spread within the obligation
             half = min(half, ((MAX_SPREAD_FAST if c.get("fast") else MAX_SPREAD) - 1) / 2)
+        if TRADE_WEIGHT and c.get("vwap") is not None and c["volume"] >= TRADE_MIN_VOLUME:
+            f = (1 - TRADE_WEIGHT) * f + TRADE_WEIGHT * c["vwap"]
         fair = f + self.flow.get(cid, 0.0) - self.skew * inv
         bid = max(1, min(98, math.floor(fair - half)))
         ask = max(bid + 1, min(99, math.ceil(fair + half)))

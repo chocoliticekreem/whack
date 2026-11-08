@@ -123,6 +123,7 @@ SCENARIOS = {
                               note="no expert, but 40 funds that each read the truth badly (noise 0.20-0.30)"),
 }
 GROUPS = ("mm", "informed", "crowd", "model", "noisy", "retail", "random")
+MODEL_FUNDS = 0       # forecast-only funds: off, as in the venue's default population (10 in the first runs)
 
 
 def build(v: Venue, rng: random.Random, informed: int, noisy: int, crowd: int) -> dict[str, list[str]]:
@@ -144,7 +145,7 @@ def build(v: Venue, rng: random.Random, informed: int, noisy: int, crowd: int) -
 
     fund("informed", informed, "signal", (0.02, 0.04))     # the truth, read well
     fund("crowd", crowd, "signal", (0.20, 0.30))           # the truth, read badly
-    fund("model", 10, "model", (0.0, 0.0))                 # the public forecast, nothing more
+    fund("model", MODEL_FUNDS, "model", (0.0, 0.0))        # the public forecast, nothing more
     fund("noisy", noisy, "model", (0.20, 0.30))            # the forecast plus noise: no information at all
     for k in range(300):
         bias = ("longshot", "favourite", "herd", "momentum", "random")[k % 5]

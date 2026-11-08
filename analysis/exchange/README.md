@@ -22,41 +22,63 @@ Outputs go to `out/` (gitignored): `results.json` and `summary.md`.
 - **Expected P&L** marks every fill to the truth (a YES bought at x is worth 100·p\* − x), minus fees plus rebates.
   Realised P&L is mostly luck at this sample size, since each contract settles at 0 or 100.
 
-## Results (216 contracts per scenario; fees off and market makers widening from 70% one-sided flow, the defaults)
+## Results (216 contracts per scenario; the venue's defaults)
+
+Defaults: fees off, market makers widening from 70% one-sided flow and taking 30% of their fair value from the last
+minute's traded price, and no forecast-only funds.
 
 | Scenario | Contracts | Error vs truth at close: forecast → price (points) | Price closer than forecast | Quoted spread (points) | Expected P&L per contract traded (points): informed / crowd / uninformed / market makers / random taker | Informed + crowd share of fund capital |
 |---|---|---|---|---|---|---|
-| baseline (20 informed, 20 uninformed) | 216 | 4.1 → 2.7 (-33.0%) | 85% | 7.2 | +4.0 / — / -2.5 / -0.4 / -2.7 | 40% → 74% |
-| no informed funds | 216 | 4.1 → 4.0 (-2.3%) | 51% | 5.2 | — / — / -2.0 / +1.9 / -1.3 | 0% → 0% |
-| few informed funds (4) | 216 | 4.1 → 3.2 (-21.9%) | 75% | 6.2 | +5.2 / — / -2.3 / +0.3 / -1.9 | 12% → 44% |
-| unpriced edge (half the forecasts 10 points low) | 216 | 3.4 → 2.2 (-34.3%) | 87% | 6.7 | +2.9 / — / -2.3 / +0.1 / -2.8 | 40% → 62% |
-| noise traders only (60 uninformed) | 216 | 4.1 → 4.0 (-1.2%) | 50% | 4.7 | — / — / -1.8 / +1.8 / -1.2 | 0% → 0% |
-| wisdom of a crowd (40 weak readers, no expert) | 216 | 4.1 → 3.1 (-24.4%) | 74% | 4.7 | — / -1.0 / — / +1.0 / -1.8 | 80% → 54% |
+| baseline (20 informed, 20 uninformed) | 216 | 4.1 → 2.0 (-51.6%) | 88% | 6.9 | +3.5 / — / -2.5 / -0.2 / -2.7 | 50% → 97% |
+| no informed funds | 216 | 4.1 → 4.1 (+1.4%) | 42% | 5.1 | — / — / -1.9 / +1.9 / -1.1 | 0% → 0% |
+| few informed funds (4) | 216 | 4.1 → 2.9 (-28.6%) | 71% | 6.2 | +4.7 / — / -2.2 / +0.5 / -2.3 | 17% → 90% |
+| unpriced edge (half the forecasts 10 points low) | 216 | 3.4 → 1.7 (-51.2%) | 86% | 6.5 | +2.7 / — / -2.3 / +0.3 / -2.8 | 50% → 96% |
+| noise traders only (60 uninformed) | 216 | 4.1 → 4.2 (+2.0%) | 45% | 4.6 | — / — / -1.8 / +1.8 / -1.2 | 0% → 0% |
+| wisdom of a crowd (40 weak readers, no expert) | 216 | 4.1 → 3.0 (-26.0%) | 70% | 4.6 | — / -1.1 / — / +1.1 / -1.9 | 100% → 100% |
 
-On the biased contracts in "unpriced edge", the forecast ended 4.8 points below the truth and the traded price 3.1
-below: about a third of the edge was traded away. The ledger audit was clean in every run.
+On the biased contracts in "unpriced edge", the forecast ended 4.8 points below the truth and the traded price 2.1
+below: more than half of the edge was traded away. The ledger audit was clean in every run.
 
 ## What it shows
 
 Scored as a market (accuracy, liquidity, orderliness, sustainability), not by any AI group's P&L:
 
 **Working:**
-1. **Accuracy: informed money makes prices more accurate.** A third closer to the truth than the forecast with 20
-   informed funds, on 85% of contracts; 22% with only four; 24% from a crowd of weak readers with no expert.
-2. **Accuracy: uninformed money does no harm.** With no informed funds, or 60 noise traders, prices stay as accurate as
-   the forecast: market makers anchored on it absorb the noise.
-3. **Liquidity: two-sided books with 4.7-7.2-point quoted spreads,** tightest when flow is uninformed and widest when
-   informed money is trading, as on a real exchange.
-4. **Sustainability: market makers break even or better in every scenario** (−0.4 to +1.9 points per contract), so
-   liquidity provision is viable. Before the fix below they lost 1.9 points per contract to informed funds.
-5. **Capital moves to the funds that know more** (market selection): informed funds go from 40% to 74% of fund capital.
-6. **Orderliness:** no crossed books, no trades after close, clean ledger audits (the venue's own checks and tests).
+1. **Accuracy: informed money makes prices much more accurate.** Half as far from the truth as the forecast with 20
+   informed funds (closer on 88% of contracts); 29% better with only four; 26% from a crowd of weak readers.
+2. **Accuracy: uninformed money does almost no harm.** With no informed funds, or 60 noise traders, prices end within
+   2% of the forecast's accuracy (0.1 points).
+3. **Liquidity: two-sided books with 4.6-6.9-point quoted spreads,** tightest when flow is uninformed.
+4. **Sustainability: market makers break even or better in every scenario** (−0.2 to +1.9 points per contract).
+5. **Capital moves to the funds that know more:** informed funds go from 50% to 97% of fund capital.
+6. **Orderliness:** no crossed books, no trades after close, clean ledger audits.
 
 **Still open:**
-1. **Edges are only partly closed** (about a third of a 10-point bias). Informed capital is limited by fractional Kelly and
-   the 25% position limit, and market makers anchored on the forecast lean against the informed flow.
-2. **Funds that just trade the forecast lose 3-8 points per contract** in every scenario: they take the other side of
-   better information. They shouldn't be a default participant.
+1. **Edges are only partly closed** (a little over half of a 10-point bias). Informed capital is limited by fractional
+   Kelly and the 25% position limit.
+2. **With no information in the market at all, prices are 1-2% less accurate than the forecast**, because noise
+   trades now move market makers' quotes a little (the cost of anchoring on trades; about 0.1 points).
+
+## Accuracy levers
+
+Tested against the previous defaults (fees off, 3 seeds each; error cut vs forecast: baseline / unpriced edge / no
+informed funds, then the baseline's quoted spread and market makers per contract):
+
+| Setup | Error cut | Spread | Market makers |
+|---|---|---|---|
+| previous defaults | 33% / 34% / +2% | 7.23 | −0.43 |
+| no forecast-only funds | 35% / 37% / +2% | 7.05 | −0.61 |
+| market makers anchor 30% on trades | 45% / 46% / −1% | 6.64 | 0.00 |
+| capital allocator (TOPS-style rebalancing every 5 min) | 33% / 31% / +3% | 7.31 | −0.51 |
+| **no forecast-only funds + 30% anchor (now the default)** | **52% / 51% / −1%** | **6.90** | **−0.19** |
+| no forecast-only funds + 20% anchor | 46% / 48% / +1% | 7.09 | −0.31 |
+
+- **Forecast-only funds** took the other side of better information and pulled prices back to the forecast; they're
+  out of the default population.
+- **Anchoring on trades** lets market makers learn from where informed money has pushed the book, which is the
+  biggest single gain. 30% beats 20% everywhere information exists; its cost when there's none is about 0.06 points.
+- **The capital allocator didn't help:** five minutes of realised P&L is mostly luck, so it moved capital almost at
+  random. It isn't in the code.
 
 ## The market-maker fix
 
