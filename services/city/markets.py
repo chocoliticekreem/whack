@@ -57,7 +57,11 @@ CLEAN_MAX_GAP_MS = 5 * MIN_MS
 STACK_MEAN_MS = 30 * MIN_MS
 STACK_KAPPA = 0.472
 HUB_KAPPA = 0.0161
-HUB_POWER = 0.5
+HUB_POWER = 0.7
+HUB_LOOKBACK_MS = 12 * 3_600_000
+HUB_LEVEL_PRIOR = 36
+HUB_SD_FLOOR = 0.002
+HUB_MIN_HUBS = 3
 HUB_CORR = {"oxford-circus": {"kings-cross": 0.15, "piccadilly": 0.30, "waterloo": 0.33, "bank": -0.08},
             "kings-cross": {"piccadilly": 0.25, "waterloo": 0.18, "bank": -0.18},
             "piccadilly": {"waterloo": 0.12, "bank": 0.30},
@@ -471,43 +475,95 @@ def hub_corr(ids: list[str]) -> list[list[float]]:
     return [[rho(a, b) for b in ids] for a in ids]
 
 
-def build_hub_surge(mid: str, store: Store, spots: list[dict], now: int, settles_at: int) -> Market | None:
-    """5-way race: the hub whose vs-usual rises most from the reading at open to the first reading after close.
+def hub_grid(store: Store, spots: list[dict], start: int, now: int) -> dict[int, dict[str, tuple[float, float]]]:
+    """{TfL 5-min slot: {hub id: (log live %, log usual %)}} from the readings polled in [start, now], each at the
+    slot of its own TfL stamp, first poll wins."""
+    grid: dict[int, dict[str, tuple[float, float]]] = {}
+    for ts, snap in store.between("crowding", start, now):
+        for h in spots:
+            nap = h["naptan"]
+            stamp = store.tfl_stamp(ts, nap) or ts
+            usual = store.usual(nap, stamp) if nap in snap else None
+            if usual:
+                grid.setdefault(stamp // pricing.HUB_STEP_MS, {}).setdefault(h["id"], (math.log(snap[nap]),
+                                                                                       math.log(usual)))
+    return grid
 
-    Each hub's futures follow its usual-day slope, get pulled toward the five hubs' mean vs usual and share
-    correlated shocks (pricing.RelativeRaceSim); the futures' shares are tempered by HUB_POWER. The hub furthest below
-    its usual won 37% of rounds (19/52 on 12:40-17:00) at a price of 28-30% under the previous walk, whose momentum
-    drift made its other favourites overconfident (README "Pricing").
-    debt: HUB_KAPPA, HUB_CORR and HUB_POWER are fitted on one Saturday, 12:00-17:00 (analysis/judge/fit_hub_ou.py:
-    kappa 0.0161 per min from 197 hub-steps, correlation from 30 joint 5-min steps; power = Platt fit p ∝ p^a of the
-    open prices on 52 races, a = 0.44-0.56 over 5 seeds). ceiling: one afternoon. upgrade: refit per weekday once the
-    recorder holds a week."""
+
+def hub_prior(stations: list, k: int, ids: list[str]) -> pricing.HubFit:
+    """The fit to fall back on when today's history holds too few k-step pairs (the first hour after a cold start):
+    HUB_KAPPA compounded over k steps, no hub levels, HUB_CORR, each station's walk sd over 5k minutes."""
+    return pricing.HubFit(1 - math.exp(-HUB_KAPPA * 5 * k), [0.0] * len(ids), hub_corr(ids),
+                          [s[4] * math.sqrt(5 * k) for s in stations], 0)
+
+
+def hub_fits(store: Store, spots: list[dict], stations: list, now: int, steps: int) -> dict[int, pricing.HubFit]:
+    """{k: HubFit} for k = 1..steps, fitted on today's readings up to now (no look-ahead: only polls at or before
+    now, so each round is fitted walk-forward)."""
+    ids = [h["id"] for h in spots]
+    grid = hub_grid(store, spots, now - HUB_LOOKBACK_MS, now)
+    recent = (now - HISTORY_MS) // pricing.HUB_STEP_MS
+    out = {}
+    for k in range(1, steps + 1):
+        floor = HUB_SD_FLOOR * math.sqrt(5 * k)
+        out[k] = (pricing.fit_relative_ou(grid, ids, k, recent, HUB_LEVEL_PRIOR, floor)
+                  or hub_prior(stations, k, ids))
+    return out
+
+
+def build_hub_surge(mid: str, store: Store, spots: list[dict], now: int, settles_at: int) -> Market | None:
+    """Race between the hubs: the one whose vs-usual rises most from the reading at open to the first reading after
+    close.
+
+    Each hub's settle reading is drawn from a model fitted on today's readings up to now (pricing.HubFit,
+    pricing.RelativeRaceSim): its usual-day slope, a pull toward its own level against the other hubs at the race's
+    horizon, and correlated shocks. The futures' shares are tempered by HUB_POWER. Out of sample (fitted walk-forward,
+    133 races 15:00-02:10 on 2026-11-07/08) it beat the previous model by 0.039 ± 0.024 log loss and 0.017 ± 0.011
+    Brier (analysis/judge/hub_model.py, docs/markets.md "hub_surge: the model").
+
+    A hub without a reading or a usual-day value at open is dropped from the race (at least HUB_MIN_HUBS stay):
+    settlement needs every listed hub's first reading after close, so a hub already missing would most likely void the
+    whole market for everyone; a widened guess on it would still price it at 3% or more.
+    debt: HUB_POWER = 0.7 is the walk-forward Platt power at the end of one recorded day (0.25-0.75 through it), and
+    HUB_KAPPA / HUB_CORR are the cold-start prior. ceiling: one Saturday 12:00 to Sunday 02:35. upgrade: refit when
+    the recorder holds a week."""
     last = store.latest("crowding", now)
-    if not last or vs_usual(store, spots, last[0], last[1]) is None:
+    if not last:
         return None
     ts0, snap = last
+    stamp_of = {h["id"]: store.tfl_stamp(ts0, h["naptan"]) or ts0 for h in spots}
+    live = [h for h in spots if h["naptan"] in snap and typical_at(store, h["naptan"], ts0)
+            and store.usual(h["naptan"], stamp_of[h["id"]])]
+    if len(live) < HUB_MIN_HUBS:
+        return None
     m0 = store.measured_at(ts0)
     t_end, minutes = crowd_walk(m0, settles_at, now)
-    stations = []
-    for h in spots:
-        oid, nap, x0, _, sd = crowd_station(store, h, snap, now)
-        slope = pricing.usual_drift(store.usual(nap, m0), store.usual(nap, t_end), minutes)
-        stations.append((oid, nap, x0, slope, sd))
-    typ0 = [typical_at(store, h["naptan"], ts0) for h in spots]
-    typ_t = [store.typical(h["naptan"], t_end) or t0 for h, t0 in zip(spots, typ0)]
-    chol = pricing.cholesky(hub_corr([h["id"] for h in spots]))
-    sim = pricing.RelativeRaceSim(stations, m0, minutes, random.Random(seed_of(mid)), typ0, typ_t, HUB_KAPPA, chol,
-                                  HUB_POWER)
-    blend_hubs(sim, store, spots, now, t_end, mid)
-    spec = hub_spec(store, spots, stations, ts0, snap)
+    stations = [crowd_station(store, h, snap, now) for h in live]
+    stamps = [stamp_of[h["id"]] for h in live]
+    step = pricing.HUB_STEP_MS
+    latest = max(stamps)
+    settle_ms = latest + max(1, math.floor((settles_at - CLOSE_MS - latest) / step) + 1) * step
+    settle_slot = settle_ms // step
+    slots = [s // step for s in stamps]
+    phase = latest % step
+    log_usual = [{s: math.log(store.usual(h["naptan"], s * step + phase) or store.usual(h["naptan"], st))
+                  for s in range(min(slots), settle_slot + 1)} for h, st in zip(live, stamps)]
+    fits = hub_fits(store, live, stations, now, settle_slot - min(slots))
+    typ0 = [typical_at(store, h["naptan"], ts0) for h in live]
+    typ_t = [store.typical(h["naptan"], settle_ms) or t0 for h, t0 in zip(live, typ0)]
+    sim = pricing.RelativeRaceSim(stations, m0, minutes, random.Random(seed_of(mid)), typ0, typ_t, fits, slots,
+                                  settle_slot, log_usual, HUB_POWER)
+    blend_hubs(sim, store, live, now, t_end, mid)
+    spec = hub_spec(store, live, stations, ts0, snap)
     day = spec["day"]
+    order = ", ".join(h["short"] for h in live)
     rule = (f"Each hub's vs usual = its live TfL busyness ÷ its typical {day} for that 15-min band (TfL Crowding "
             f"profile). The winner is the hub whose vs usual rises most from the reading at open "
             f"({local_time(ts0)}) to {crowd_settle_rule(settles_at)}. A tie for the top goes to the first in the "
-            f"order {HUB_ORDER}. If no hub moved, the market is void and stakes are refunded.")
+            f"order {order}. If no hub moved, the market is void and stakes are refunded.")
     return Market(mid, "hub_surge", "versus", f"Which hub surges most by {local_time(settles_at)}?",
-                  [h["id"] for h in spots], now, settles_at, hub_options(spots), sim,
-                  f"TfL Crowding API · 5 hubs vs a usual {day} · {settle_stamp(settles_at)}", rule, spec)
+                  [h["id"] for h in live], now, settles_at, hub_options(live), sim,
+                  f"TfL Crowding API · {len(live)} hubs vs a usual {day} · {settle_stamp(settles_at)}", rule, spec)
 
 
 def settle_hub_surge(m: Market, store: Store, now: int):

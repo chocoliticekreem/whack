@@ -10,6 +10,7 @@ import math
 import os
 import random
 import statistics
+from dataclasses import dataclass
 from decimal import ROUND_FLOOR, Decimal
 
 N_FUTURES = 50
@@ -188,84 +189,180 @@ def race_level_probs(sim: RaceSim, xs: list[float], k: int) -> dict[str, float]:
 
 
 def cholesky(corr: list[list[float]]) -> list[list[float]]:
-    """Lower-triangular L with L·Lᵀ = corr (a positive-definite correlation matrix)."""
+    """Lower-triangular L with L·Lᵀ = corr for a positive semi-definite matrix. A singular matrix (a hub that moves
+    exactly with others, or fewer joint steps than hubs) has zero pivots: rounding can push one just below 0, so a
+    pivot is clipped at 0 and its column below it set to 0. L stays finite, and L·Lᵀ = corr up to rounding."""
     n = len(corr)
     low = [[0.0] * n for _ in range(n)]
     for i in range(n):
         for j in range(i + 1):
             s = sum(low[i][k] * low[j][k] for k in range(j))
-            low[i][j] = math.sqrt(corr[i][i] - s) if i == j else (corr[i][j] - s) / low[j][j]
+            if i == j:
+                low[i][j] = math.sqrt(max(0.0, corr[i][i] - s))
+            else:
+                low[i][j] = (corr[i][j] - s) / low[j][j] if low[j][j] > 1e-12 else 0.0
     return low
 
 
+def sample_corr(rows: list[list[float]]) -> list[list[float]]:
+    """Sample correlation of `rows` (T observations of n variables). It is a Gram matrix of standardised columns, so
+    positive semi-definite for any T (singular when T <= n); a variable that never moves gets correlation 0."""
+    t, n = len(rows), len(rows[0])
+    mean = [sum(r[i] for r in rows) / t for i in range(n)]
+    y = [[r[i] - mean[i] for i in range(n)] for r in rows]
+    sd = [math.sqrt(sum(v[i] ** 2 for v in y)) for i in range(n)]
+    return [[1.0 if i == j else (sum(v[i] * v[j] for v in y) / (sd[i] * sd[j]) if sd[i] > 1e-12 and sd[j] > 1e-12
+             else 0.0) for j in range(n)] for i in range(n)]
+
+
+def shrink_to_mean(values: list[float], ses: list[float]) -> list[float]:
+    """Empirical-Bayes (James-Stein style) partial pooling: each value pulled toward the values' mean by its own
+    noise, se², against the spread between groups, tau² = var(values) - mean(se²) (at least a tiny positive)."""
+    mean = statistics.fmean(values)
+    tau2 = max(1e-12, statistics.pvariance(values) - statistics.fmean([e * e for e in ses]))
+    return [(mean / tau2 + v / (e * e)) / (1 / tau2 + 1 / (e * e)) for v, e in zip(values, ses)]
+
+
+HUB_STEP_MS = 5 * MIN_MS  # TfL Crowding stamps every hub every 5 minutes
+
+
+@dataclass
+class HubFit:
+    """hub_surge over k TfL steps: each hub's log live busyness, net of its usual-day slope, moves by
+    -b·(dev_i - level_i) plus a shock with sd sds[i] and correlation corr. dev_i = log vs usual minus the hubs'
+    mean; level_i = where hub i sits against the others on average (its fixed effect)."""
+    b: float
+    levels: list[float]
+    corr: list[list[float]]
+    sds: list[float]
+    pairs: int
+
+
+def fit_relative_ou(grid: dict[int, dict[str, tuple[float, float]]], ids: list[str], k: int, recent_from: int,
+                    level_prior: float, sd_floor: float, min_pairs: int = 8) -> HubFit | None:
+    """Fit HubFit for k-step moves on readings binned by TfL stamp into 5-min slots: {slot: {hub: (log live,
+    log usual)}}. None with fewer than min_pairs slot pairs k apart where every hub read.
+
+    level_i: the mean dev_i over every full slot, shrunk toward 0 with a prior worth `level_prior` slots (Bank sat
+    0.15 below the others all of 2026-11-07 and did not catch up; the pooled pull toward the mean priced it as if
+    it would). b: pooled least squares of the hubs' k-step moves (net of the usual curve, minus their mean) on
+    dev_i - level_i, fitted at the race's own horizon instead of compounding a 1-step rate. sds: each hub's residual
+    sd over the slots from `recent_from` on (all of them if under 4), partially pooled across hubs in logs and
+    floored at sd_floor. corr: the residuals' sample correlation over every pair (Ledoit-Wolf shrinkage toward
+    constant correlation lost out of sample: residual variance triples at night, which breaks its iid intensity, and
+    it shrank all the way to the constant at 01:00 with 90 pairs)."""
+    full = sorted(s for s, row in grid.items() if all(h in row for h in ids))
+    if not full:
+        return None
+
+    def dev(row: dict) -> list[float]:
+        v = [row[h][0] - row[h][1] for h in ids]
+        mean = sum(v) / len(v)
+        return [x - mean for x in v]
+
+    devs = {s: dev(grid[s]) for s in full}
+    levels = [sum(d[i] for d in devs.values()) / (len(devs) + level_prior) for i in range(len(ids))]
+    pairs = []
+    for s in full:
+        if s + k not in devs:
+            continue
+        a, z = grid[s], grid[s + k]
+        moves = [(z[h][0] - a[h][0]) - (z[h][1] - a[h][1]) for h in ids]
+        pairs.append((s, [d - lv for d, lv in zip(devs[s], levels)], moves))
+    if len(pairs) < min_pairs:
+        return None
+    num = den = 0.0
+    for _, d, mv in pairs:
+        mean = sum(mv) / len(mv)
+        num += sum(x * (y - mean) for x, y in zip(d, mv))
+        den += sum(x * x for x in d)
+    b = -num / den if den > 0 else 0.0
+    resid = [(s, [y + b * x for x, y in zip(d, mv)]) for s, d, mv in pairs]
+    recent = [e for s, e in resid if s >= recent_from]
+    recent = recent if len(recent) >= 4 else [e for _, e in resid]
+    logs = [math.log(max(sd_floor, statistics.pstdev([e[i] for e in recent]))) for i in range(len(ids))]
+    se = [1 / math.sqrt(2 * len(recent))] * len(ids)
+    sds = [max(sd_floor, math.exp(v)) for v in shrink_to_mean(logs, se)]
+    return HubFit(b, levels, sample_corr([e for _, e in resid]), sds, len(pairs))
+
+
 class RelativeRaceSim(RaceSim):
-    """hub_surge: each hub's log live busyness moves by its usual-day slope (station drift), is pulled toward the five
-    hubs' mean log vs usual (at the open band's typicals) at `kappa` per minute, and takes shocks correlated across hubs
-    through `chol` (Cholesky factor of their correlation). `power` tempers the futures' shares in Futures.probs
-    (p ∝ share^power). Settles like RaceSim "gain": vs usual at the settle band minus vs usual at open."""
+    """hub_surge on TfL's 5-minute publish grid. Hub j was last stamped in slot slots[j] and settles on its first
+    stamp after close, in slot settle_slot, k_j = settle_slot - slots[j] steps on (3 or 4: TfL publishes a reading
+    about 7 minutes after it measures it). Its final log live busyness is drawn in one step from fits[k_j]:
+    x_j + (log usual at settle - log usual now) - b·(dev_j - level_j) + sd_j·z_j, z ~ N(0, corr) (corr from the most
+    common k). Settles like RaceSim "gain": vs usual at the settle band minus vs usual at open.
+
+    The 50 futures are a stratified sample of DRAWS_PER_FUTURE·50 draws: each winner gets its share of the 50
+    (largest remainder), filled by draws that end with that winner. 50 plain draws put ±0.06 of sampling noise on a
+    0.2 price and lost 0.04-0.08 of out-of-sample log loss to 4,000 draws in the walk-forward study. Paths are bridges
+    from the reading to each final, so the particle filter can still score them. `power` tempers the open shares
+    (Futures.probs, p ∝ share^power)."""
+
+    DRAWS_PER_FUTURE = 40
 
     def __init__(self, stations, t0: int, minutes: int, rng: random.Random, typ0: list[float], typ_t: list[float],
-                 kappa: float, chol: list[list[float]], power: float):
+                 fits: dict[int, HubFit], slots: list[int], settle_slot: int, log_usual: list[dict[int, float]],
+                 power: float):
         self.stations, self.t0, self.m = stations, t0, minutes
         self.typ0, self.typ_t, self.mode, self.power = typ0, typ_t, "gain", power
-        self.kappa, self.chol, self.rng, self.seen = kappa, chol, rng, t0
-        self.paths = [self.walk_all(kappa, chol, rng) for _ in range(N_FUTURES)]
+        self.fits, self.settle_slot, self.log_usual, self.rng, self.seen = fits, settle_slot, log_usual, rng, t0
+        self.draw_futures([s[2] for s in stations], slots, 0)
+
+    def fit_for(self, k: int) -> HubFit:
+        return self.fits[min(self.fits, key=lambda f: (abs(f - k), f))]
+
+    def draw_futures(self, xs: list[float], slots: list[int], k0: int) -> None:
+        n = len(xs)
+        ks = [max(0, self.settle_slot - s) for s in slots]
+        fits = [self.fit_for(k) for k in ks]
+        common = self.fit_for(max(set(ks), key=ks.count))
+        low = cholesky(common.corr)
+        devs = [x - self.log_usual[j][s] for j, (x, s) in enumerate(zip(xs, slots))]
+        mean = sum(devs) / n
+        mus, sds = [], []
+        for j in range(n):
+            if ks[j] == 0:
+                mus.append(xs[j])
+                sds.append(0.0)
+                continue
+            f = fits[j]
+            slope = self.log_usual[j][self.settle_slot] - self.log_usual[j][slots[j]]
+            mus.append(xs[j] + slope - f.b * (devs[j] - mean - f.levels[j]))
+            sds.append(f.sds[j])
+        base = [math.exp(s[2]) / t for s, t in zip(self.stations, self.typ0)]
+        by_winner: dict[int, list[list[float]]] = {}
+        for _ in range(self.DRAWS_PER_FUTURE * N_FUTURES):
+            e = [self.rng.gauss(0.0, 1.0) for _ in range(n)]
+            final = [mus[j] + sds[j] * sum(low[j][i] * e[i] for i in range(j + 1)) for j in range(n)]
+            gains = [math.exp(f) / t - b for f, t, b in zip(final, self.typ_t, base)]
+            by_winner.setdefault(gains.index(max(gains)), []).append(final)
+        total = self.DRAWS_PER_FUTURE * N_FUTURES
+        quota = {w: len(v) * N_FUTURES // total for w, v in by_winner.items()}
+        rest = sorted(by_winner, key=lambda w: (-(len(by_winner[w]) * N_FUTURES % total), w))
+        for w in rest[:N_FUTURES - sum(quota.values())]:
+            quota[w] += 1
+        finals = [f for w in sorted(by_winner) for f in by_winner[w][:quota[w]]]
+        x_open = [s[2] for s in self.stations]
+        self.paths = [[self.path(a, x, f, s[4], k0) for a, x, f, s in zip(x_open, xs, final, self.stations)]
+                      for final in finals]
+
+    def path(self, x_open: float, x_now: float, final: float, sd: float, k0: int) -> list[float]:
+        head = [x_open + (x_now - x_open) * i / k0 for i in range(k0)] if k0 else []
+        return head + bridge(x_now, final, max(1, self.m - k0), sd, self.rng)
 
     def restart(self, ts: int, snap: dict) -> bool:
-        """A TfL reading stamped after the last one: walk every future again from it for the minutes left (the open
+        """A TfL reading stamped after the last one: draw every future again from it for the steps left (the open
         values still anchor each hub's gain). Pruning fixed paths on it priced the hub leading since open at 0.27
-        while it won 46% of the time (analysis/judge/fit_crowd.py). The tempering power is Platt-fitted on open
-        prices only; after a restart the shares stand untempered (better in-round Brier and log loss, both windows)."""
+        while it won 46% of the time (analysis/judge/fit_crowd.py). The tempering power is fitted on open prices
+        only; after a restart the shares stand untempered."""
         if ts <= self.seen or any(nap not in snap for _, nap, *_ in self.stations):
             return False
         self.seen, self.power = ts, 1.0
-        k = max(0, min(self.m, round((ts - self.t0) / MIN_MS)))
-        now = [math.log(snap[nap]) for _, nap, *_ in self.stations]
-        self.paths = [self.walk_all(self.kappa, self.chol, self.rng, now, k) for _ in range(N_FUTURES)]
+        k0 = max(0, min(self.m, round((ts - self.t0) / MIN_MS)))
+        slot = min(self.settle_slot, ts // HUB_STEP_MS)
+        self.draw_futures([math.log(snap[nap]) for _, nap, *_ in self.stations], [slot] * len(self.stations), k0)
         return True
-
-    def walk_all(self, kappa: float, chol: list[list[float]], rng: random.Random, start: list[float] | None = None,
-                 k0: int = 0) -> list[list[float]]:
-        log_typ = [math.log(t) for t in self.typ0]
-        x_open = [s[2] for s in self.stations]
-        xs = start or x_open
-        paths = [[a + (b - a) * i / k0 for i in range(k0)] + [b] for a, b in zip(x_open, xs)]
-        for _ in range(self.m - k0):
-            dev = [x - lt for x, lt in zip(xs, log_typ)]
-            mean = sum(dev) / len(dev)
-            e = [capped_gauss(rng) for _ in xs]
-            xs = [x + mu - kappa * (d - mean) + sd * sum(c * v for c, v in zip(row, e))
-                  for x, d, (_, _, _, mu, sd), row in zip(xs, dev, self.stations, chol)]
-            for path, x in zip(paths, xs):
-                path.append(x)
-        return paths
-
-
-def fit_relative_ou(grid: dict[int, dict[str, tuple[float, float]]], ids: list[str], step_min: float = 5.0):
-    """Fit RelativeRaceSim on readings binned into consecutive slots step_min apart: {slot: {hub: (log live,
-    log vs usual)}}. From every slot where all hubs read, d log live_i to the next slot = -k * dev_i + e_i, dev_i =
-    log vs usual_i minus the hubs' mean. Returns (kappa per minute, {hub: innovation sd per minute},
-    innovation correlation in `ids` order, joint steps used)."""
-    xs, ys, joint = [], [], []
-    for t, row in sorted(grid.items()):
-        nxt = grid.get(t + 1, {})
-        if any(h not in row for h in ids) or not nxt:
-            continue
-        mean = sum(row[h][1] for h in ids) / len(ids)
-        step = {h: (row[h][1] - mean, nxt[h][0] - row[h][0]) for h in ids if h in nxt}
-        for h, (d, dx) in step.items():
-            xs.append((h, d))
-            ys.append(dx)
-        if len(step) == len(ids):
-            joint.append(step)
-    k = -sum(d * dx for (_, d), dx in zip(xs, ys)) / sum(d * d for _, d in xs)
-    resid = {h: [] for h in ids}
-    for (h, d), dx in zip(xs, ys):
-        resid[h].append(dx + k * d)
-    sds = {h: statistics.pstdev(r) / math.sqrt(step_min) for h, r in resid.items()}
-    e = {h: [s[h][1] + k * s[h][0] for s in joint] for h in ids}
-    corr = [[statistics.correlation(e[a], e[b]) if a != b else 1.0 for b in ids] for a in ids]
-    return -math.log(1 - k) / step_min, sds, corr, len(joint)
 
 
 PULSE_MOMENTUM = 0.30

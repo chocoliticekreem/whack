@@ -153,15 +153,15 @@ Each market runs 50 futures. Every future starts from the last real reading:
   copying the usual curve beat the house by 32-48% a bet. The line is the half point (x.0 or x.5) nearest the futures'
   median at the settle reading, so the market opens near 50/50 (the old line, open + the median 5-min change, ignored that slope and opened
   evening markets at a 94% favourite). Steps are capped at 2.5σ.
-- hub_surge: each hub's log live busyness follows its usual-day slope (no trend drift), is pulled toward the five
-  hubs' mean log vs usual at 0.0161 per min, and takes shocks correlated across hubs (`pricing.RelativeRaceSim`);
-  sigma per hub is fitted on today's changes as above. The futures' shares are tempered, p ∝ share^0.5. Reversion
-  rate and correlation come from `analysis/judge/fit_hub_ou.py` on 12:00–17:00, the 0.5 from a Platt fit of the open
-  prices on the 52 races in that window. The old walk's trend drift made its favourites overconfident (priced 36% on
-  average, won 13/52 = 25%) while the hub furthest below its usual won 37% at a 29% price. A TfL publish stamped
-  after the open restarts every future from that reading for the minutes left, untempered: pruning fixed paths on it
-  left the hub that had risen most since open at a 0.27 price while it won 46% (replay, 17:00–00:05). Relative gains
-  revert in both windows (correlation −0.04 to −0.29 between consecutive 5-min gains), so the reversion sign stays.
+- hub_surge: refitted every round on today's readings up to the open, binned by TfL stamp (`markets.hub_fits`,
+  `pricing.fit_relative_ou`). Each hub runs 3-4 TfL steps from its open reading to the settle reading (TfL publishes
+  ~7 min after it measures). Its settle value is drawn in one step at that horizon: its usual-day slope, a pull of
+  b_k toward its own level against the other hubs (Bank sits 0.15 below them and does not catch up), and correlated
+  shocks with each hub's last-3-h residual sd. The 50 futures are a stratified sample of 2,000 draws; open shares are
+  tempered, p ∝ share^0.7. A TfL publish stamped after the open re-draws every future from that reading for the steps
+  left, untempered. Out of sample (133 races, 15:00–02:10) log loss 1.458 vs 1.498 for the previous per-minute walk
+  (−0.039 ± 0.024), Brier 0.738 vs 0.756. A hub without a reading at open is dropped from the race (3 needed).
+  Details, rejected candidates and leak ROIs: docs/markets.md "hub_surge: the model", `analysis/judge/hub_model.py`.
 - hub_hour: the same walk and usual slope with sigma fitted on 60-min changes, widened until the favourite at open is
   ≤ 70% (the 5-min fit priced it at 89% against a real 56%).
 - london_vix: a bootstrap of today's own h-minute changes (post-warm-up frames only).
