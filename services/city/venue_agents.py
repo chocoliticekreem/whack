@@ -36,7 +36,8 @@ FLOW_ALPHA, FLOW_DECAY, FLOW_CAP = 0.05, 0.9, 5.0
 REQUOTE_PENDING = 2        # points a pending quote must be off before it's replaced
 STALE = 3                  # points: a quote this far on the wrong side of fair value is pulled at once
 TOXICITY = 6.0             # points of extra half-spread at fully one-sided flow (Glosten & Milgrom: the spread
-TOXIC_FROM = 0.3           #   must grow with the share of informed flow); none below 30% imbalance
+TOXIC_FROM = 0.7           #   must grow with the share of informed flow); none below 70% imbalance, where noise
+                           #   traders' flow alone set it off (analysis/exchange: 7-13% tighter spreads, same accuracy)
 PICK_TTL_MS = 30_000
 # Measured hit rate of each rule when it picks an outcome. None: no measured edge, so no view.
 HIT = {("tube", "hub_surge"): 0.36, ("tube", "hub_hour"): 0.56, ("tube", "city_pulse"): 0.55,

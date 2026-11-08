@@ -163,8 +163,14 @@ def run(name: str, spec: dict, seed: int, rounds: int, step: int = 2_000) -> dic
     fund_ids = ids["informed"] + ids["crowd"] + ids["model"] + ids["noisy"]
     start_share = (sum(v.clearing.equity_at_cost(a) for a in ids["informed"] + ids["crowd"]) /
                    max(1, sum(v.clearing.equity_at_cost(a) for a in fund_ids)))
+    spreads = []
     for now in range(T0, T0 + rounds * ROUND_MS + ROUND_MS, step):
         v.tick(now)
+        if (now - T0) % 10_000 == 0:  # liquidity: the quoted spread on every open, two-sided book
+            for cid, c in v.contracts.items():
+                b = v.books[cid]
+                if not c.done and src.status(c.market, now) == "open" and b.bid() is not None and b.ask() is not None:
+                    spreads.append(b.ask() - b.bid())
     truth = {m.id: m for m in src.markets}
     rows = []
     for r in v.settled:
@@ -201,6 +207,7 @@ def run(name: str, spec: dict, seed: int, rounds: int, step: int = 2_000) -> dic
             "mmMarkoutPerContract": groups["mm"]["expectedPerContract"],
             "randomPnlPerContract": groups["random"]["expectedPerContract"],
             "informedShare": [start_share, end_share], "trades": sum(len(b.tape) for b in v.books.values()),
+            "spread": statistics.mean(spreads) if spreads else None,
             "audit": v.clearing.audit(v.gateway.live_orders()) or "ok"}
 
 
@@ -233,6 +240,7 @@ def summarise(runs: list[dict], spec: dict) -> dict:
         "informedShare": [statistics.mean(r["informedShare"][0] for r in runs),
                           statistics.mean(r["informedShare"][1] for r in runs)],
         "trades": sum(r["trades"] for r in runs), "audit": sorted({str(r["audit"]) for r in runs}),
+        "spread": statistics.mean(r["spread"] for r in runs if r["spread"] is not None),
         "note": spec["note"],
     }
     if out["maeForecast"]:
@@ -245,13 +253,14 @@ def table(results: dict) -> str:
     pts = lambda x: "—" if x is None else f"{100 * x:.1f}"  # noqa: E731
     per = lambda g: "—" if g["expectedPerContract"] is None else f"{g['expectedPerContract']:+.1f}"  # noqa: E731
     lines = ["| Scenario | Contracts | Error vs truth at close: forecast → price (points) | Price closer than forecast |"
+             " Quoted spread (points) |"
              " Expected P&L per contract traded (points): informed / crowd / uninformed / market makers / random taker |"
-             " Informed + crowd share of fund capital |", "|" + "---|" * 6]
+             " Informed + crowd share of fund capital |", "|" + "---|" * 7]
     for name, s in results.items():
         g = s["groups"]
         lines.append(
             f"| {name} | {s['contracts']} | {pts(s['maeForecast'])} → {pts(s['maePrice'])} ({pct(-s['errorCut'])}) | "
-            f"{s['closerToTruth']:.0%} | {per(g['informed'])} / {per(g['crowd'])} / {per(g['noisy'])} / "
+            f"{s['closerToTruth']:.0%} | {s['spread']:.1f} | {per(g['informed'])} / {per(g['crowd'])} / {per(g['noisy'])} / "
             f"{per(g['mm'])} / {per(g['random'])} | {s['informedShare'][0]:.0%} → {s['informedShare'][1]:.0%} |")
     return "\n".join(lines)
 
