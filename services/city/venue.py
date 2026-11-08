@@ -160,6 +160,16 @@ class Venue:
             volume += f.qty
         return flow, volume
 
+    def vwap(self, cid: str, now: int) -> float | None:
+        """Volume-weighted YES price over the last minute, or None if nothing traded."""
+        value = volume = 0
+        for f in reversed(self.books[cid].tape):
+            if now - f.at > FLOW_WINDOW_MS:
+                break
+            value += f.yes_price * f.qty
+            volume += f.qty
+        return value / volume if volume else None
+
     def note_forecast(self, c: Contract, now: int) -> None:
         c.forecasts.append((now, self.forecast(c.id)))
         while c.forecasts and now - c.forecasts[0][0] > FLOW_WINDOW_MS:
@@ -312,7 +322,8 @@ class Venue:
                         "outcomes": len(c.market.options), "forecast": self.forecast(cid), "bid": bid, "ask": ask,
                         "bidSize": book.size_at("yes", bid) if bid is not None else 0,
                         "askSize": book.size_at("no", PAYOUT - ask) if ask is not None else 0,
-                        "last": book.last, "flow": flow, "volume": volume, "fast": self.fast(cid, now),
+                        "last": book.last, "flow": flow, "volume": volume, "vwap": self.vwap(cid, now),
+                        "fast": self.fast(cid, now),
                         "closesAt": c.market.closes_at,
                         "openedAt": c.market.opened_at}
         return {"now": now, "contracts": out, "store": self.src.store}
