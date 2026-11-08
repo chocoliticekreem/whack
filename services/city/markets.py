@@ -723,7 +723,7 @@ def build_heathrow_stack(mid: str, store: Store, spots: list[dict], now: int, se
     minutes = max(1, round((settles_at - now) / MIN_MS))
     sim = pricing.CountSim(float(n0), recent, STACK_KAPPA, now, minutes, random.Random(seed_of(mid)),
                            lambda s: float(s["total"]), n0 + 0.5)
-    line = sim.strike = pricing.count_line(sim.finals)
+    line = sim.strike = pricing.poisson_line(sim.lam)
     vix = vix_state(store, now)
     hhmm = local_time(settles_at)
     rule = (f"adsb.lol holding_total (aircraft in the BNN, LAM, BIG and OCK stacks over Heathrow) in the last reading "

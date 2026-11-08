@@ -37,6 +37,18 @@ def capped_gauss(rng: random.Random) -> float:
     return max(-STEP_CAP, min(STEP_CAP, rng.gauss(0.0, 1.0)))
 
 
+def norm_cdf(x: float) -> float:
+    return 0.5 * math.erfc(-x / math.sqrt(2))
+
+
+def _capped_var(c: float) -> float:
+    tail = 1 - norm_cdf(c)
+    return 1 - 2 * c * math.exp(-c * c / 2) / math.sqrt(2 * math.pi) - 2 * tail + 2 * c * c * tail
+
+
+CAPPED_SD = math.sqrt(_capped_var(STEP_CAP))  # sd of one capped_gauss step: 0.9887 at 2.5
+
+
 def smooth(counts: dict[str, int]) -> dict[str, float]:
     """Share of futures per option, with a half-future prior and a [3%, 97%] clamp so no side is ever free."""
     total = sum(counts.values()) + 0.5 * len(counts)
@@ -142,6 +154,37 @@ class RaceSim(CrowdSim):
     def outcome(self, i: int) -> str:
         scores = [self.score(i, j) for j in range(len(self.stations))]
         return self.stations[scores.index(max(scores))][0]
+
+
+Z_STEP = 0.25
+Z_GRID = [k * Z_STEP for k in range(-24, 25)]
+Z_PDF = [math.exp(-z * z / 2) / math.sqrt(2 * math.pi) * Z_STEP for z in Z_GRID]
+
+
+def race_level_probs(sim: RaceSim, xs: list[float], k: int) -> dict[str, float]:
+    """P(each hub wins) given every hub's log live % at minute k, with the m - k steps left integrated out (Rao-
+    Blackwellised): each hub's log vs usual at settle is Gaussian, mean x_k + mu·r - log typ_t, sd sd·CAPPED_SD·√r, the
+    hubs independent (CrowdSim walks them independently). P(j) = ∫ φ(z) Π_{l≠j} Φ((a_j + s_j z - a_l) / s_l) dz by the
+    trapezoid rule on a 0.25 grid over ±6 (exponentially accurate on a Gaussian-weighted smooth integrand: under 1e-9
+    off a 0.01 grid). With no minutes left the highest vs usual wins, ties to the first."""
+    r = sim.m - k
+    a = [x + mu * r - math.log(t) for x, (_, _, _, mu, _), t in zip(xs, sim.stations, sim.typ_t)]
+    if r <= 0:
+        return {sim.stations[a.index(max(a))][0]: 1.0}
+    sd = [s * CAPPED_SD * math.sqrt(r) for *_, s in sim.stations]
+    out = {}
+    for j, (oid, *_) in enumerate(sim.stations):
+        acc = 0.0
+        for z, w in zip(Z_GRID, Z_PDF):
+            y = a[j] + sd[j] * z
+            prod = w
+            for l in range(len(a)):
+                if l != j:
+                    prod *= norm_cdf((y - a[l]) / sd[l])
+            acc += prod
+        out[oid] = acc
+    total = sum(out.values())
+    return {o: p / total for o, p in out.items()}
 
 
 def cholesky(corr: list[list[float]]) -> list[list[float]]:
@@ -327,6 +370,8 @@ class CountSim(DeltaSim):
         self.x0, self.t0, self.m, self.value_of, self.strike = x0, t0, minutes, value_of, strike
         self.kappa, self.level_sum, self.level_n = kappa_5min, sum(recent), len(recent)
         self.lam = self.mean_after(x0, sum(recent) / len(recent), minutes)
+        self.lam_now: float | None = self.lam  # None once the settle reading is in: the count is then known
+        self.known: float | None = None
         self.finals = [float(poisson(rng, self.lam)) for _ in range(N_FUTURES)]
         self.prior = [poisson_pmf(self.lam, f) for f in self.finals]
         self.sd = max(math.sqrt(self.lam), 0.5)
@@ -343,9 +388,19 @@ class CountSim(DeltaSim):
         self.level_sum, self.level_n = self.level_sum + v, self.level_n + 1
         left = (self.t0 + self.m * MIN_MS - ts) / MIN_MS
         if left <= 0:
+            self.lam_now, self.known = None, v
             return [1.0 if f == v else 1e-9 for f in self.finals]
-        lam = self.mean_after(v, self.level_sum / self.level_n, left)
+        lam = self.lam_now = self.mean_after(v, self.level_sum / self.level_n, left)
         return [poisson_pmf(lam, f) / q for f, q in zip(self.finals, self.prior)]
+
+    def exact(self, seen) -> dict[str, float]:
+        """P(over) = P(Poisson(λ) > strike) under the current λ, in closed form: what the importance-weighted futures
+        estimate, without their sampling error."""
+        if self.lam_now is None:
+            over = float(self.known > self.strike)
+        else:
+            over = 1 - sum(poisson_pmf(self.lam_now, n) for n in range(int(math.floor(self.strike)) + 1))
+        return {"over": over, "under": 1 - over}
 
 
 def poisson_pmf(lam: float, k: float) -> float:
@@ -363,6 +418,20 @@ def count_line(finals: list[float]) -> float:
     return min((c for c in (med - 0.5, med + 0.5) if c >= 0.5), key=miss)
 
 
+def poisson_line(lam: float) -> float:
+    """count_line on the exact Poisson(λ) the futures are drawn from: the half point, never under 0.5, whose
+    P(over) is nearest 50% (ties to the lower). Placing it on the 50 draws moved it with the seed, and the opening
+    price with it (9 points at worst on the recorded day, analysis/judge/mc_error.py)."""
+    cdf, n, best = 0.0, 0, None
+    while n <= lam + 10 * math.sqrt(lam) + 2:
+        cdf += poisson_pmf(lam, n)
+        miss = abs(1 - cdf - 0.5)
+        if best is None or miss < best[0]:
+            best = (miss, n + 0.5)
+        n += 1
+    return best[1]
+
+
 class BreakSim:
     """Clean sheet: every future draws when the first Good line breaks (exponential, P(break by T) = p_break).
     A reading that shows every Good line still Good rules out the futures that had already broken by then
@@ -371,7 +440,7 @@ class BreakSim:
     tol = 0.5
 
     def __init__(self, p_break: float, good: list[str], t0: int, minutes: int, rng: random.Random):
-        lam = -math.log(max(1e-6, 1 - p_break)) / max(1, minutes)
+        lam = self.lam = -math.log(max(1e-6, 1 - p_break)) / max(1, minutes)
         self.good, self.t0, self.m = good, t0, minutes
         self.break_at = [rng.expovariate(lam) for _ in range(N_FUTURES)]
 
@@ -384,6 +453,18 @@ class BreakSim:
             return None
         broke = any(s != GOOD_SEVERITY for s in seen)
         return 0.0 if broke == (self.break_at[i] <= (ts - self.t0) / MIN_MS) else 9.0
+
+    def exact(self, seen: tuple[int, dict] | None) -> dict[str, float]:
+        """The exponential break time is memoryless: with every Good line still Good at the newest reading,
+        P(no) = 1 - exp(-λ · minutes left); a break already seen makes it 1."""
+        elapsed = 0.0
+        if seen is not None:
+            ts, snap = seen
+            if any(snap[l]["sev"] != GOOD_SEVERITY for l in self.good if l in snap):
+                return {"yes": 0.0, "no": 1.0}
+            elapsed = (ts - self.t0) / MIN_MS
+        no = 1 - math.exp(-self.lam * max(0.0, self.m - elapsed))
+        return {"yes": 1 - no, "no": no}
 
 
 GOOD_SEVERITY = 10
@@ -581,6 +662,8 @@ class Futures:
         self.weights = [1.0] * N_FUTURES
         self.ruled_out = 0
         self.origins: list[str] = getattr(sim, "origins", None) or ["stat"] * N_FUTURES
+        self.seen: tuple[int, dict] | None = None  # the newest reading that told the futures anything
+        self.predicted: dict[tuple, dict[str, float]] = {}
 
     @property
     def from_sim(self) -> int:
@@ -597,6 +680,8 @@ class Futures:
                 self.weights = [w * scale for w in weights]
             return 0
         errs = [(self.sim.error(i, ts, snap), i) for i in range(N_FUTURES) if self.alive[i]]
+        if any(e is not None for e, _ in errs) and (self.seen is None or ts >= self.seen[0]):
+            self.seen = (ts, snap)
         self.reweight([(e, i) for e, i in errs if e is not None])
         bad = sorted(((e, i) for e, i in errs if e is not None and e > self.sim.tol), reverse=True)
         room = int(RULED_OUT_CAP * N_FUTURES) - self.ruled_out
@@ -619,12 +704,59 @@ class Futures:
         for i, w in new.items():
             self.weights[i] = w * scale
 
+    def race_state(self) -> tuple[int, list[float]] | None:
+        """hub_hour's state where it is known: every hub's log live % at the open, or at the newest reading that has
+        all of them (TfL readings carry no measurable noise: the lag-1 autocovariance of their changes puts it at
+        0-2%, analysis/judge/pf_audit.py). None when the newest reading misses a hub."""
+        sim = self.sim
+        if self.seen is None:
+            return 0, [x for _, _, x, _, _ in sim.stations]
+        ts, snap = self.seen
+        if any(nap not in snap for _, nap, *_ in sim.stations):
+            return None
+        return max(0, min(sim.m, round((ts - sim.t0) / MIN_MS))), [math.log(snap[nap]) for _, nap, *_ in sim.stations]
+
+    def race_probs(self, i: int, k: int) -> dict[str, float]:
+        key = (k, tuple(p[k] for p in self.sim.paths[i]))
+        if key not in self.predicted:
+            self.predicted[key] = race_level_probs(self.sim, list(key[1]), k)
+        return self.predicted[key]
+
+    def exact(self) -> dict[str, float] | None:
+        """The closed-form probabilities where the model has them: the sim's own posterior (CountSim, BreakSim), or
+        hub_hour's race from its known state. Futures sampled from the city sim are bridges with other dynamics, so
+        a market with any keeps the futures' shares."""
+        if self.from_sim:
+            return None
+        if hasattr(self.sim, "exact"):
+            return self.sim.exact(self.seen)
+        if type(self.sim) is RaceSim and self.sim.mode == "level" and (state := self.race_state()):
+            key = (state[0], tuple(state[1]))
+            if key not in self.predicted:
+                self.predicted[key] = race_level_probs(self.sim, state[1], state[0])
+            return {o: self.predicted[key].get(o, 0.0) for o in self.option_ids}
+        return None
+
     def probs(self) -> dict[str, float]:
-        counts = {o: 0.0 for o in self.option_ids}
-        alive = [i for i in range(N_FUTURES) if self.alive[i]]
-        total = sum(self.weights[i] for i in alive)
-        for i in alive:
-            counts[self.sim.outcome(i)] += self.weights[i] * len(alive) / total if total > 0 else 1.0
+        """Weighted share of the surviving futures per option, through `smooth`, or the exact probabilities as
+        N_FUTURES futures' worth where the model has them (`exact`, zero Monte Carlo error). hub_hour after a reading
+        that misses a hub counts each future with its Rao-Blackwellised win probabilities from its own walk."""
+        exact = self.exact()
+        if exact is not None:
+            counts = {o: exact[o] * N_FUTURES for o in self.option_ids}
+        else:
+            counts = {o: 0.0 for o in self.option_ids}
+            alive = [i for i in range(N_FUTURES) if self.alive[i]]
+            total = sum(self.weights[i] for i in alive)
+            race = type(self.sim) is RaceSim and self.sim.mode == "level" and not self.from_sim
+            k = max(0, min(self.sim.m, round((self.seen[0] - self.sim.t0) / MIN_MS))) if race else 0
+            for i in alive:
+                share = self.weights[i] * len(alive) / total if total > 0 else 1.0
+                if race:
+                    for o, p in self.race_probs(i, k).items():
+                        counts[o] += share * p
+                else:
+                    counts[self.sim.outcome(i)] += share
         probs = smooth(counts)
         power = getattr(self.sim, "power", 1.0)
         if power == 1.0:
@@ -634,25 +766,44 @@ class Futures:
         return {o: p / s for o, p in tempered.items()}
 
 
+def log_sum_exp(xs) -> float:
+    xs = list(xs)
+    top = max(xs)
+    return top + math.log(sum(math.exp(x - top) for x in xs))
+
+
 class Book:
-    """LMSR on top of the model price: prob_i ∝ model_i · exp(q_i / b). A winning share pays 1 point."""
+    """LMSR on top of the model price: prob_i ∝ model_i · exp(q_i / b), the price of Hanson's cost function
+    C(q) = b · ln Σ model_i · exp(q_i / b). A winning share pays 1 point. Everything runs in log space, so no position
+    overflows (exp(q/b) did past q ≈ 850,000 shares)."""
 
     def __init__(self, option_ids: list[str], b: float = LMSR_B):
         self.b = b
         self.q = {o: 0.0 for o in option_ids}
 
+    def log_weights(self, model: dict[str, float]) -> dict[str, float]:
+        return {o: (math.log(model[o]) if model[o] > 0 else -math.inf) + self.q[o] / self.b for o in self.q}
+
+    def cost(self, model: dict[str, float]) -> float:
+        """C(q) under `model`: what the shares sold so far have cost, net of fees, plus the house's subsidy C(0) = 0."""
+        return self.b * log_sum_exp(self.log_weights(model).values())
+
     def prices(self, model: dict[str, float]) -> dict[str, float]:
-        w = {o: model[o] * math.exp(self.q[o] / self.b) for o in self.q}
-        s = sum(w.values())
-        return {o: v / s for o, v in w.items()}
+        lw = self.log_weights(model)
+        lse = log_sum_exp(lw.values())
+        return {o: math.exp(v - lse) for o, v in lw.items()}
 
     def quote(self, model: dict[str, float], option: str, stake: float) -> float:
-        """Shares that `stake` (5% house fee) buys on `option`. Does not touch the book; `commit` books them."""
-        spend = stake * (1 - FEE)
-        w = {o: model[o] * math.exp(self.q[o] / self.b) for o in self.q}
-        s = sum(w.values())
-        new_wi = w[option] + s * (math.exp(spend / self.b) - 1)
-        return self.b * math.log(new_wi / w[option])
+        """Shares that `stake` (5% house fee) buys on `option`. Does not touch the book; `commit` books them.
+        Solves C(q + δ·e_i) − C(q) = spend: δ = b · ln(1 + (e^(spend/b) − 1) / p_i), as
+        b · (logaddexp(ln(e^x − 1), ln p_i) − ln p_i) with x = spend/b, which holds for any x and any p_i > 0."""
+        x = stake * (1 - FEE) / self.b
+        if x <= 0:
+            return 0.0
+        lw = self.log_weights(model)
+        log_p = lw[option] - log_sum_exp(lw.values())
+        log_em1 = math.log(math.expm1(x)) if x < 30 else x + math.log1p(-math.exp(-x))
+        return self.b * (log_sum_exp((log_em1, log_p)) - log_p)
 
     def commit(self, option: str, shares: float) -> None:
         self.q[option] += shares
