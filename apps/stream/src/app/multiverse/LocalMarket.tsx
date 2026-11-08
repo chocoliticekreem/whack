@@ -50,10 +50,6 @@ function pinElement(className: string, label: string): HTMLDivElement {
   return el;
 }
 
-function sensorWord(s: LocalSensor) {
-  return s.kind === "cam" ? "JamCam" : "Tube station";
-}
-
 /** Click anywhere on the map: a magenta pin drops there and a compact card opens on the nearest real sensor's
  * market for this round, or on the simulation's street forecast when no sensor can settle a bet there. */
 export function LocalMarket({
@@ -125,19 +121,28 @@ export function LocalMarket({
       }
       setView({ kind: "loading" });
       try {
-        const res = await fetch("/api/city/local", {
-          method: "POST",
-          headers: { "content-type": "application/json", "x-player-token": token },
-          body: JSON.stringify({ player, lat, lon }),
-          cache: "no-store",
-        });
-        const data = (await res.json()) as { market?: LocalMarketJson; forecastOnly?: ForecastOnly; error?: string };
+        const ask = async (la: number, lo: number) => {
+          const res = await fetch("/api/city/local", {
+            method: "POST",
+            headers: { "content-type": "application/json", "x-player-token": token },
+            body: JSON.stringify({ player, lat: la, lon: lo }),
+            cache: "no-store",
+          });
+          return { status: res.status, data: (await res.json()) as { market?: LocalMarketJson; forecastOnly?: ForecastOnly; error?: string } };
+        };
+        let { status, data } = await ask(lat, lon);
+        let snapped: number | undefined;
+        // Why: most of the map has no sensor within 400 m; trade the area's nearest one rather than a dead end.
+        if (!data.market && data.forecastOnly?.nearest) {
+          snapped = data.forecastOnly.nearest.distanceM;
+          ({ status, data } = await ask(data.forecastOnly.nearest.lat, data.forecastOnly.nearest.lon));
+        }
         if (mine !== seq.current) return;
         if (data.market) {
           onMarket(data.market);
-          setView({ kind: "market", id: data.market.id, sensor: data.market.local.sensor, distanceM: data.market.local.distanceM });
+          setView({ kind: "market", id: data.market.id, sensor: data.market.local.sensor, distanceM: snapped ?? data.market.local.distanceM });
         } else if (data.forecastOnly) setView({ kind: "forecast", data: data.forecastOnly });
-        else setView({ kind: "error", text: data.error ?? `The exchange said no (HTTP ${res.status})` });
+        else setView({ kind: "error", text: data.error ?? `The exchange said no (HTTP ${status})` });
       } catch {
         if (mine === seq.current) setView({ kind: "error", text: "Could not reach the exchange" });
       }
@@ -247,8 +252,8 @@ export function LocalMarket({
         <span className="lm-head-text">
           {view.kind === "market" && (
             <>
-              {sensorWord(view.sensor)} <b>{view.sensor.name}</b>
-              {view.distanceM ? <span className="tl-muted"> · {view.distanceM} m away</span> : null}
+              Detected area: <b>{view.sensor.name}</b>
+              {view.distanceM ? <span className="tl-muted"> · {view.distanceM.toLocaleString("en-GB")} m</span> : null}
             </>
           )}
           {view.kind === "forecast" && <b>{view.data.label}</b>}
