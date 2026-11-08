@@ -4,7 +4,7 @@ import { X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Coin } from "./Coin";
 import { PinInput } from "./PinInput";
-import { fmtPts, fmtW, londonClock, signedW } from "./city-store";
+import { countdown, fmtPts, fmtW, londonClock, signedW } from "./city-store";
 import "./wallet.css";
 
 /** Shapes served by services/city/ledger.py (GET /wallet /positions /history, POST /limits /break). */
@@ -187,10 +187,10 @@ function whenLabel(ms: number) {
 function PnlChart({ series }: { series: [number, number][] }) {
   const [hover, setHover] = useState<number | null>(null);
   const W = 520;
-  const H = 120;
-  const pad = { l: 4, r: 4, t: 10, b: 10 };
+  const H = 64;
+  const pad = { l: 2, r: 2, t: 6, b: 6 };
   const pts: [number, number][] = series.length ? [[series[0][0] - 1, 0], ...series] : [];
-  if (pts.length < 2) return <div className="wl-chart-empty">The chart starts with your first settled bet.</div>;
+  if (pts.length < 2) return null;
   const ys = pts.map((p) => p[1]);
   const lo = Math.min(0, ...ys);
   const hi = Math.max(0, ...ys);
@@ -222,13 +222,6 @@ function PnlChart({ series }: { series: [number, number][] }) {
           <span>{whenLabel(pts[hover][0])}</span>
         </div>
       )}
-      <figcaption className="wl-axis tl-num">
-        <span>Bet 1</span>
-        <span>
-          Range {signedW(lo)} to {signedW(hi)}
-        </span>
-        <span>Bet {pts.length - 1}</span>
-      </figcaption>
     </figure>
   );
 }
@@ -263,6 +256,7 @@ function SessionReminder({ wallet }: { wallet: ServerWallet | null }) {
   );
 }
 
+
 function Limits({ wallet, player, token, onChange }: { wallet: ServerWallet; player: string; token: string | null; onChange: () => void }) {
   const [value, setValue] = useState(String(wallet.limits.dailyLoss));
   const [msg, setMsg] = useState<string | null>(null);
@@ -278,8 +272,7 @@ function Limits({ wallet, player, token, onChange }: { wallet: ServerWallet; pla
   const raising = n > wallet.limits.dailyLoss;
   const used = wallet.limits.dailyLoss - wallet.limits.remainingToday;
   return (
-    <section className="wl-section">
-      <h3>Limits</h3>
+    <div className="wl-fold-body">
       <dl className="wl-kv tl-num">
         <dt>Daily loss limit</dt>
         <dd>{fmtW(wallet.limits.dailyLoss)}</dd>
@@ -301,7 +294,7 @@ function Limits({ wallet, player, token, onChange }: { wallet: ServerWallet; pla
         </p>
       )}
       <form
-        className="wl-limit-form"
+        className="wl-form"
         onSubmit={(e) => {
           e.preventDefault();
           if (!Number.isInteger(n) || n <= 0) return setMsg("Enter a whole number");
@@ -310,22 +303,15 @@ function Limits({ wallet, player, token, onChange }: { wallet: ServerWallet; pla
       >
         <label htmlFor="wl-limit">New daily loss limit</label>
         <div className="wl-row">
-          <input id="wl-limit" className="tl-num" inputMode="numeric" value={value} onChange={(e) => setValue(e.target.value.replace(/\D/g, ""))} />
+          <input id="wl-limit" className="wl-input tl-num" inputMode="numeric" value={value} onChange={(e) => setValue(e.target.value.replace(/\D/g, ""))} />
           <button type="submit" className="wl-btn" disabled={busy}>
             {raising ? "Request raise" : "Lower now"}
           </button>
         </div>
-        <span className="wl-note">Lowering applies immediately. Raising waits 24 hours.</span>
+        <span className="wl-note">Lowering applies now. Raising waits 24 hours.</span>
       </form>
-      <div className="wl-break">
-        <div>
-          <b>Take a break</b>
-          <span className="wl-note">
-            {wallet.break.active && wallet.break.until
-              ? `Betting paused until ${whenLabel(wallet.break.until)}. A break cannot be cancelled.`
-              : "Pauses all betting. A break cannot be cancelled early."}
-          </span>
-        </div>
+      <div className="wl-form">
+        <span className="wl-form-label">Take a break</span>
         <div className="wl-row">
           <button type="button" className="wl-btn" disabled={busy} onClick={() => void run("break", { hours: 1 }, "Break started for 1 hour.")}>
             1 hour
@@ -334,9 +320,14 @@ function Limits({ wallet, player, token, onChange }: { wallet: ServerWallet; pla
             24 hours
           </button>
         </div>
+        <span className="wl-note">
+          {wallet.break.active && wallet.break.until
+            ? `Betting paused until ${whenLabel(wallet.break.until)}. A break cannot be cancelled.`
+            : "Pauses all betting. A break cannot be cancelled early."}
+        </span>
       </div>
       {msg && <p className="wl-msg">{msg}</p>}
-    </section>
+    </div>
   );
 }
 
@@ -355,36 +346,48 @@ function Devices({ wallet, player, token, onChange, onSignIn }: { wallet: Server
     onChange();
   };
   return (
-    <section className="wl-section">
-      <h3>Play on another device</h3>
-      <p className="wl-note">
-        {has ? (
-          <>
-            Sign in there with <b>{wallet.player.nickname}</b> and your PIN.
-          </>
-        ) : (
-          "Set a 4-digit PIN, then sign in there with your name and PIN."
-        )}
-      </p>
+    <div className="wl-fold-body">
+      <dl className="wl-kv">
+        <dt>Name</dt>
+        <dd>
+          <b>{wallet.player.nickname ?? player}</b>
+        </dd>
+        <dt>PIN</dt>
+        <dd>{has ? "Set" : "Not set"}</dd>
+        <dt>Account</dt>
+        <dd>{wallet.player.kycStatus}</dd>
+      </dl>
       <form
-        className="wl-pin-form"
+        className="wl-form"
         onSubmit={(e) => {
           e.preventDefault();
           void save();
         }}
       >
-        <PinInput value={pin} onChange={setPinValue} label={has ? "New PIN" : "PIN"} />
-        <button type="submit" className="wl-btn" disabled={busy || pin.length !== 4}>
-          {has ? "Change PIN" : "Set PIN"}
-        </button>
+        <span className="wl-form-label">{has ? "New PIN" : "Choose a 4-digit PIN"}</span>
+        <div className="wl-row">
+          <PinInput value={pin} onChange={setPinValue} label={has ? "New PIN" : "PIN"} />
+          <button type="submit" className="wl-btn" disabled={busy || pin.length !== 4}>
+            {has ? "Change PIN" : "Set PIN"}
+          </button>
+        </div>
+        <span className="wl-note">Use your name + PIN to play on another device.</span>
       </form>
       {msg && <p className="wl-msg">{msg}</p>}
       <button type="button" className="wl-link" onClick={onSignIn}>
         Already playing on another device? Sign in
       </button>
-    </section>
+    </div>
   );
 }
+
+function timeToResult(settlesAt: number, now: number) {
+  const left = settlesAt - now;
+  if (left <= 0) return "Settling";
+  return left < 60 * 60_000 ? countdown(left) : londonClock(settlesAt);
+}
+
+const resultText = (h: HistoryRow) => (h.result === "void" ? "Void" : signedW(h.pnl));
 
 export function WalletPanel({
   player,
@@ -406,6 +409,7 @@ export function WalletPanel({
   const [positions, setPositions] = useState<Position[]>([]);
   const [history, setHistory] = useState<HistoryRow[]>([]);
   const [series, setSeries] = useState<[number, number][]>([]);
+  const [now, setNow] = useState(() => Date.now());
   const lastAsOf = useRef(0);
 
   const load = useCallback(async () => {
@@ -430,12 +434,19 @@ export function WalletPanel({
 
   useEffect(() => {
     if (!open) return;
+    const id = window.setInterval(() => setNow(Date.now()), 1000);
+    return () => window.clearInterval(id);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
 
   const record = useMemo(() => (wallet ? `${wallet.totals.won} won · ${wallet.totals.lost} lost · ${wallet.totals.void} void` : ""), [wallet]);
+  const recent = history.slice(0, 5);
 
   return (
     <>
@@ -446,10 +457,7 @@ export function WalletPanel({
             <header className="wl-head">
               <div>
                 <h2>Wallet</h2>
-                <span className="wl-note">
-                  {wallet?.player.nickname ?? player} · W are play money, no real value.
-                </span>
-                <a className="wl-note" href="/multiverse/portfolio">Full portfolio and history</a>
+                <span className="wl-note">Play money, no real value.</span>
               </div>
               <button type="button" className="wl-x" aria-label="Close wallet" onClick={onClose}>
                 <X size={18} />
@@ -461,130 +469,114 @@ export function WalletPanel({
             ) : (
               <>
                 {wallet.break.active && wallet.break.until && (
-                  <p className="wl-banner tl-num">You are on a break until {whenLabel(wallet.break.until)}. Betting is paused.</p>
+                  <p className="wl-banner tl-num">On a break until {whenLabel(wallet.break.until)}. Betting is paused.</p>
                 )}
-                <section className="wl-balance tl-num">
-                  <div className="wl-big">
-                    <span className="wl-label">Available</span>
-                    <b>
-                      <Coin size={22} />
+
+                <section className="wl-hero tl-num" aria-label="Balance">
+                  <div className="wl-hero-top">
+                    <b className="wl-big">
+                      <Coin size={30} />
                       {fmtPts(wallet.cash)}
                     </b>
+                    <span className="wl-today" data-tone={tone(wallet.pnl.today)}>
+                      {signedW(wallet.pnl.today)} <span>today</span>
+                    </span>
                   </div>
-                  <dl className="wl-kv">
-                    <dt>In play</dt>
-                    <dd>{fmtW(wallet.escrow)}</dd>
-                    <dt>Total</dt>
-                    <dd>{fmtW(wallet.total)}</dd>
-                  </dl>
-                </section>
-
-                <Devices wallet={wallet} player={player} token={token} onChange={refresh} onSignIn={onSignIn} />
-
-                <section className="wl-section">
-                  <div className="wl-stats tl-num">
-                    <div>
-                      <span className="wl-label">Today</span>
-                      <b data-tone={tone(wallet.pnl.today)}>{signedW(wallet.pnl.today)}</b>
-                    </div>
-                    <div>
-                      <span className="wl-label">All time</span>
-                      <b data-tone={tone(wallet.pnl.allTime)}>{signedW(wallet.pnl.allTime)}</b>
-                    </div>
-                    <div>
-                      <span className="wl-label">This session</span>
-                      <b data-tone={tone(wallet.pnl.session ?? 0)}>{signedW(wallet.pnl.session ?? 0)}</b>
-                    </div>
-                  </div>
-                  <PnlChart series={series} />
-                  <span className="wl-note tl-num">
-                    W won or lost, bet by bet · {record}
+                  <span className="wl-hero-sub">
+                    In play {fmtW(wallet.escrow)} · Total {fmtW(wallet.total)}
                   </span>
                 </section>
 
                 <section className="wl-section">
-                  <h3>
-                    Bets still running <span className="wl-count tl-num">{positions.length}</span>
-                  </h3>
+                  <div className="wl-sec-head">
+                    <h3>
+                      Open bets <span className="wl-count tl-num">{positions.length}</span>
+                    </h3>
+                    <a className="wl-more" href="/multiverse/portfolio">
+                      All orders
+                    </a>
+                  </div>
                   {positions.length === 0 ? (
-                    <p className="wl-empty">No open bets.</p>
+                    <p className="wl-empty">No open bets</p>
                   ) : (
-                    <div className="wl-scroll">
-                      <table className="wl-table tl-num">
-                        <thead>
-                          <tr>
-                            <th>Market</th>
-                            <th className="wl-r">Stake</th>
-                            <th className="wl-r">To win</th>
-                            <th className="wl-r">Settles</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {positions.map((p) => (
-                            <tr key={p.betId}>
-                              <td>
-                                <span className="wl-q">{p.question}</span>
-                                <span className="wl-side">{p.label}</span>
-                              </td>
-                              <td className="wl-r">{fmtW(p.stake)}</td>
-                              <td className="wl-r">{fmtW(p.toWin)}</td>
-                              <td className="wl-r">{londonClock(p.settlesAt)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <ul className="wl-list">
+                      {positions.map((p) => (
+                        <li key={p.betId} className="wl-item">
+                          <span className="wl-q" title={p.question}>
+                            {p.question}
+                          </span>
+                          <span className="wl-betline tl-num">
+                            <span className="wl-pick">{p.label}</span>
+                            <span>
+                              {fmtW(p.stake)} → <b>{fmtW(p.toWin)}</b>
+                            </span>
+                            <span className="wl-when">{timeToResult(p.settlesAt, now)}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </section>
 
                 <section className="wl-section">
-                  <h3>
-                    Finished bets <span className="wl-count tl-num">{wallet.totals.betsSettled}</span>
-                  </h3>
-                  {history.length === 0 ? (
-                    <p className="wl-empty">Settled bets appear here with the reading that settled them.</p>
+                  <div className="wl-sec-head">
+                    <h3>
+                      Recent results <span className="wl-count tl-num">{record}</span>
+                    </h3>
+                    <a className="wl-more" href="/multiverse/portfolio">
+                      Full history
+                    </a>
+                  </div>
+                  {recent.length === 0 ? (
+                    <p className="wl-empty">No results yet</p>
                   ) : (
-                    <div className="wl-scroll">
-                      <table className="wl-table tl-num">
-                        <thead>
-                          <tr>
-                            <th>Time</th>
-                            <th>Market</th>
-                            <th className="wl-r">Stake</th>
-                            <th>Result</th>
-                            <th className="wl-r">P&amp;L</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {history.map((h) => (
-                            <tr key={h.betId}>
-                              <td className="wl-time">{whenLabel(h.settledAt)}</td>
-                              <td>
-                                <span className="wl-q">{h.question}</span>
-                                <span className="wl-side">{h.label}</span>
-                                <span className="wl-reading">Settled on: {h.reading}</span>
-                              </td>
-                              <td className="wl-r">{fmtW(h.stake)}</td>
-                              <td className="wl-result" data-r={h.result}>
-                                {h.result === "won" ? "Won" : h.result === "lost" ? "Lost" : "Void"}
-                              </td>
-                              <td className="wl-r" data-tone={tone(h.pnl)}>
-                                {signedW(h.pnl)}
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <ul className="wl-list">
+                      {recent.map((h) => (
+                        <li key={h.betId} className="wl-item wl-result-row" title={`${h.question}. Settled on: ${h.reading}`}>
+                          <span className="wl-result-main">
+                            <span className="wl-pick">{h.label}</span>
+                            <span className="wl-q">{h.question}</span>
+                          </span>
+                          <span className="wl-result tl-num" data-tone={tone(h.pnl)}>
+                            {resultText(h)}
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
                   )}
                 </section>
 
-                <Limits key={wallet.limits.dailyLoss} wallet={wallet} player={player} token={token} onChange={refresh} />
+                <section className="wl-section">
+                  <div className="wl-sec-head">
+                    <h3>P&amp;L</h3>
+                    <span className="wl-pnl tl-num">
+                      Session <b data-tone={tone(wallet.pnl.session ?? 0)}>{signedW(wallet.pnl.session ?? 0)}</b> · All time{" "}
+                      <b data-tone={tone(wallet.pnl.allTime)}>{signedW(wallet.pnl.allTime)}</b>
+                    </span>
+                  </div>
+                  <PnlChart series={series} />
+                  <span className="wl-note tl-num">
+                    Granted {fmtW(wallet.totals.granted)} · staked {fmtW(wallet.totals.staked)} · returned {fmtW(wallet.totals.returned)}
+                  </span>
+                </section>
 
-                <footer className="wl-foot tl-num">
-                  Granted {fmtW(wallet.totals.granted)} · staked {fmtW(wallet.totals.staked)} · returned {fmtW(wallet.totals.returned)} ·
-                  account {wallet.player.kycStatus}
-                </footer>
+                <details className="wl-fold">
+                  <summary>
+                    <span>Limits &amp; breaks</span>
+                    <span className="wl-fold-meta tl-num">
+                      {wallet.break.active ? "On a break" : `${fmtW(wallet.limits.remainingToday)} left today`}
+                    </span>
+                  </summary>
+                  <Limits key={wallet.limits.dailyLoss} wallet={wallet} player={player} token={token} onChange={refresh} />
+                </details>
+
+                <details className="wl-fold">
+                  <summary>
+                    <span>This device</span>
+                    <span className="wl-fold-meta">{wallet.player.hasPin ? "Change PIN" : "Set PIN"}</span>
+                  </summary>
+                  <Devices wallet={wallet} player={player} token={token} onChange={refresh} onSignIn={onSignIn} />
+                </details>
               </>
             )}
           </aside>
