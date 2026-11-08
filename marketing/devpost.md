@@ -25,12 +25,14 @@ Team name: OverWatch.
 Members: add every teammate on Devpost.
 
 ## Tagline (≤ 200 chars)
-50 parallel Londons; reality picks one every 5 minutes. A live exchange on central London's next five minutes, priced on live TfL data and traded against seven AI traders.
+Polymarket bets on the news. We made the city itself tradeable: London's next five minutes, settled by TfL's own sensors, traded against AI that has to earn the market's trust.
 
 ## Inspiration
-**50 parallel Londons; reality picks one every 5 minutes.** The new world in the brief is the one nobody can see
-yet: the London of five minutes from now. OverWatch lists it as a market, prices it from 50 possible futures that
-live data reweights as it arrives, and lets reality settle every bet.
+**Polymarket bets on the news. We made the city itself tradeable.** The new world in the brief is the one nobody can
+see yet: the London of five minutes from now. OverWatch lists it as a live market every five minutes, settles it on
+TfL's own sensors rather than anyone's opinion, and lets AI traders and players fight over the price while the market
+learns which of them to trust. The result is a new kind of data: a live price on what a city does next. Starting with
+London; every city is next.
 
 It opens three doors:
 - **New data.** TfL station crowding against TfL's own usual Saturday, Tube line status, people counted by YOLO on 13
@@ -98,8 +100,9 @@ Six steps, each with the number that runs live (`services/city`, `docs/traders-a
    model clamped to 3–97%. W100 on a 50% answer moves it about 3.8 points. The house's worst-case loss over every
    open bet, AI stakes included, is capped on the ledger.
 4. **Fair settlement.** Station markets settle on the first reading TfL stamped after betting closed; a value
-   measured at or before the close voids. TfL rows reach us a median 7 minutes after their stamp, hence the 14-minute
-   wait. Bets fill after a delay (45 s on the single-event clean sheet and local markets, 5 s on hubs and the pulse,
+   measured at or before the close voids. TfL publishes a reading a median 2.5 minutes after its stamp and we poll every
+   30 s; a bet fills only after our next poll, so nobody can trade a reading we haven't seen (#110). Station results
+   still take about 14 minutes, because the settling reading is stamped after the close. Bets fill after a delay (45 s on the single-event clean sheet and local markets, 5 s on hubs and the pulse,
    2 s on the VIX and Heathrow), any big feed change pauses the market, and positions are capped at 25% of your
    balance (10% on clean sheet and local markets).
 5. **Kelly-sized AI traders.** Each stake is quarter-Kelly on the LMSR: the stake that maximises expected log
@@ -111,7 +114,7 @@ Six steps, each with the number that runs live (`services/city`, `docs/traders-a
    per series is a posterior N(Σw·x/(Σw+K), σ²/(Σw+K)), decayed with a half-life of 20 settled markets (about 100
    minutes), with K set by empirical Bayes (22.5 at the end of the replay). Trust is proportional to P(skill > 0), with
    a 5% floor and a 40% cap. The opening price is (1 − λ)·futures + λ·pool, where λ comes from how much the pool has
-   improved past log loss, shrunk n/(n+10) and capped at 0.3. With no proven skill, λ = 0 and the price is the futures.
+   improved past log loss, shrunk by its own t-statistic (λ̂·max(0, 1 − 1/t²), #109) and capped at 0.3. With no proven skill, λ = 0 and the price is the futures.
 
 Beside the live site we also built **a real exchange, live at `/multiverse/exchange`** (#67, #90, #94, #98, #111–#113).
 The main site is a bookmaker: the house sets the price and takes the other side of every bet. The exchange has no
