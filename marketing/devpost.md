@@ -111,10 +111,21 @@ Six steps, each with the number that runs live (`services/city`, `docs/traders-a
    a 5% floor and a 40% cap. The opening price is (1 − λ)·futures + λ·pool, where λ comes from how much the pool has
    improved past log loss, shrunk n/(n+10) and capped at 0.3. With no proven skill, λ = 0 and the price is the futures.
 
-Beside the live site we also built a **Kalshi-style order-book venue as a prototype** (#90, #94, #98): no house, 12 AI
-market makers, 184 hedge-fund and 2,000 retail agents, the same integrity rules. On synthetic markets where the true
-probability is known, informed money moved prices a third closer to the truth than the forecast they started from, on
-89% of contracts in the baseline scenario (#98). It is not live, and we haven't measured whether it prices London better than the LMSR.
+Beside the live site we also built **a real exchange, live at `/multiverse/exchange`** (#67, #90, #94, #98, #111–#113).
+The main site is a bookmaker: the house sets the price and takes the other side of every bet. The exchange has no
+house. Every question becomes YES/NO contracts paying 100 points, one order book per contract, and every trade has a
+buyer and a seller. 2,196 AI accounts trade it around the clock: 12 market makers quoting both sides, 184 hedge funds
+in three tiers trading when their data says the price is wrong, and 2,000 retail accounts with realistic biases. Same
+speed bump, position limits and settlement sources as the live site, and no Claude API calls: every agent is rules.
+
+To test whether an exchange like this finds the truth, we ran it on synthetic contracts whose true probability we set
+in advance (6 scenarios × 3 seeds, 216 contracts each, `analysis/exchange/`). With informed funds trading, the price
+ends **52% closer to the truth than the forecast it started from**, and more than half of a planted mispricing gets
+traded away. That took three fixes the test itself found: market makers were losing to informed money, so they now
+widen their spread once at least 70% of the last minute's trades go one way (#98, #111); they set 30% of their price
+from recent trades; and funds that only copied our forecast were removed, because they dragged prices back to it
+(#113). This is a simulation, not London: we haven't yet replayed recorded data to show it prices the city better than
+the house.
 
 ## What we measured
 One Saturday of recorded data (7 Nov 2026), run through the real exchange code. Models were fitted before 17:00, so
@@ -227,7 +238,7 @@ The technical challenges:
   per camera against 1.54 for persistence. Anchoring every world to the last real count and adding rain, crowding and
   bike likelihoods brought it to a tie.
 - **Market makers lost to informed money** in the order-book prototype (−1.9 points per contract) on known-truth
-  markets. Widening quotes when flow turns one-sided, as real venues do, took them to about break-even (−0.26 points per contract in the baseline, #98).
+  markets. Widening quotes when flow turns one-sided, as real venues do, took them to about break-even (−0.2 points per contract in the baseline after #98, #111 and #113).
 - **Frozen counts, frozen prices.** YOLO was asked to count 83 cameras on 2 workers, so counts were hours old; we count
   only the 13 the markets read. Prices also stopped moving once 30 of 50 futures were ruled out; weighting the
   survivors fixed it, and on current code none stall in the full-day replay.
