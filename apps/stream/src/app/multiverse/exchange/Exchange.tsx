@@ -74,6 +74,15 @@ interface Account {
 }
 
 const KEY = "overwatch-venue-account";
+const DEPTH = 5;
+const GROUP_LABEL: Record<string, string> = {
+  "AI market maker": "Market makers",
+  "AI fund · tier 1": "Large funds",
+  "AI fund · tier 2": "Mid funds",
+  "AI fund · tier 3": "Small funds",
+  "AI retail": "Retail traders",
+  Player: "Players",
+};
 const GROUP_ORDER = ["AI market maker", "AI fund · tier 1", "AI fund · tier 2", "AI fund · tier 3", "AI retail", "Player"];
 
 function loadAccount(): Account | null {
@@ -132,7 +141,8 @@ const pct = (p: number) => `${Math.round(100 * p)}%`;
 const price = (p: number | null | undefined) => (p == null ? "–" : `${p}`);
 
 function Ladder({ depth }: { depth: Depth }) {
-  const asks = [...depth.asks].reverse();
+  const asks = depth.asks.slice(0, DEPTH).reverse();
+  const bids = depth.bids.slice(0, DEPTH);
   const most = Math.max(1, ...depth.bids.map((l) => l[1]), ...depth.asks.map((l) => l[1]));
   const row = (side: "ask" | "bid", [p, q]: Level) => (
     <div key={`${side}${p}`} className="ex-level" data-side={side}>
@@ -148,12 +158,12 @@ function Ladder({ depth }: { depth: Depth }) {
         <span>YES price</span>
         <span>Contracts</span>
       </div>
-      {asks.length ? asks.map((l) => row("ask", l)) : <div className="ex-empty">No offers</div>}
+      <div className="ex-asks">{asks.length ? asks.map((l) => row("ask", l)) : <div className="ex-empty">No offers</div>}</div>
       <div className="ex-spread tl-num">
         <b className="tl-data">{depth.last ?? "–"}</b>
         <span>{spread == null ? "no two-sided market" : `spread ${spread}`}</span>
       </div>
-      {depth.bids.length ? depth.bids.map((l) => row("bid", l)) : <div className="ex-empty">No bids</div>}
+      <div className="ex-bids">{bids.length ? bids.map((l) => row("bid", l)) : <div className="ex-empty">No bids</div>}</div>
     </div>
   );
 }
@@ -361,6 +371,7 @@ export function Exchange() {
         </main>
       ) : (
         <main className="ex-main">
+          <div className="ex-left">
           <section className="ex-card ex-list" aria-label="Markets">
             <h2>Markets</h2>
             {markets.length === 0 && <p className="tl-muted">No market is open right now.</p>}
@@ -397,6 +408,20 @@ export function Exchange() {
             ))}
           </section>
 
+          {stats && (
+            <section className="ex-card ex-who" aria-label="Who is trading">
+              <h2>On the other side</h2>
+              {GROUP_ORDER.filter((g) => stats.groups[g]).map((g) => (
+                <div key={g} className="ex-group tl-num">
+                  <span>{GROUP_LABEL[g] ?? g}</span>
+                  <b className="tl-data">{fmtPts(stats.groups[g].accounts)}</b>
+                </div>
+              ))}
+              <p className="tl-muted tl-num">{fmtPts(stats.trades)} trades so far · no house</p>
+            </section>
+          )}
+          </div>
+
           {chosen && (
             <section className="ex-center" aria-label="Selected market">
               <div className="ex-card ex-hero">
@@ -417,14 +442,19 @@ export function Exchange() {
                 </div>
                 <Chart points={history[chosen.id] ?? []} model={chosen.forecast} />
               </div>
-              <div className="ex-split">
-                <div className="ex-card">
+              <div className="ex-card ex-split">
+                <div>
                   <h3>Order book</h3>
                   <Ladder depth={book ?? chosen.depth} />
                 </div>
-                <div className="ex-card ex-tape" aria-label="Recent trades">
+                <div className="ex-tape" aria-label="Recent trades">
                   <h3>Trades</h3>
-                  {(book?.tape ?? []).slice(-12).reverse().map((t, i) => (
+                  <div className="ex-tape-head" aria-hidden>
+                    <span>Price</span>
+                    <span>Qty</span>
+                    <span>Time</span>
+                  </div>
+                  {(book?.tape ?? []).slice(-11).reverse().map((t, i) => (
                     <div key={`${t.at}${i}`} className="ex-print tl-num">
                       <span className="tl-data" data-tone={t.aggressor === "yes" ? "up" : "down"}>
                         {t.yesPrice}
@@ -489,20 +519,6 @@ export function Exchange() {
             </aside>
           )}
 
-          {stats && (
-            <section className="ex-card ex-who" aria-label="Who is trading">
-              <h2>On the other side</h2>
-              <div className="ex-groups">
-                {GROUP_ORDER.filter((g) => stats.groups[g]).map((g) => (
-                  <div key={g} className="ex-group tl-num">
-                    <b>{fmtPts(stats.groups[g].accounts)}</b>
-                    <span>{g.replace("AI ", "").replace("fund · tier", "funds, tier")}</span>
-                  </div>
-                ))}
-              </div>
-              <p className="tl-muted tl-num">{fmtPts(stats.trades)} trades so far · no house</p>
-            </section>
-          )}
         </main>
       )}
       {toast && (
