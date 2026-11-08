@@ -57,7 +57,8 @@ def contracts_json(now: int) -> dict:
         book = V.books[cid]
         rows.append(c.public() | {"status": V.contract_status(cid, now), "forecast": round(V.forecast(cid), 4),
                                   "bid": book.bid(), "ask": book.ask(), "last": book.last,
-                                  "depth": book.depth(5), "outcome": c.outcome})
+                                  "depth": book.depth(5), "outcome": c.outcome,
+                                  "fast": not c.done and V.contract_status(cid, now) == "open" and V.fast(cid, now)})
     return {"now": now, "live": CLOCK.live, "contracts": rows}
 
 

@@ -1,0 +1,356 @@
+/* Exchange: the order-book venue. City tokens only; green is YES and bids, red is NO and offers. */
+.ex {
+  height: 100dvh;
+  overflow-y: auto;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.ex button,
+.ex input {
+  font: inherit;
+  color: inherit;
+}
+
+.ex [data-tone="up"] {
+  color: var(--yes-ink);
+}
+
+.ex [data-tone="down"] {
+  color: var(--no-ink);
+}
+
+.ex-top {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3) var(--s4);
+  min-height: var(--bar-h);
+  padding: var(--s2) max(var(--s4), calc((100% - 1200px) / 2));
+  background: var(--surface);
+  border-bottom: 1px solid var(--line);
+}
+
+.ex-back {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+  font-weight: 600;
+  color: var(--ink-2);
+  text-decoration: none;
+}
+
+.ex-title {
+  display: flex;
+  flex: 1;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s1) var(--s3);
+  min-width: 0;
+}
+
+.ex-title h1 {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.ex-main {
+  box-sizing: border-box;
+  display: grid;
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
+  gap: var(--s4);
+  max-width: 1232px;
+  margin: 0 auto;
+  padding: var(--s5) var(--s4) 48px;
+}
+
+.ex-main > .ex-card:not(.ex-list):not(.ex-detail) {
+  grid-column: 1 / -1;
+}
+
+.ex-card {
+  box-sizing: border-box;
+  min-width: 0;
+  margin: 0;
+  padding: var(--s4);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+}
+
+.ex-card h2 {
+  margin: 0 0 var(--s2);
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.ex-card h3 {
+  margin: var(--s3) 0 var(--s1);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.ex-row {
+  display: grid;
+  grid-template-columns: 1fr 2.5em 2.5em auto auto;
+  align-items: center;
+  gap: var(--s2);
+  width: 100%;
+  padding: var(--s2);
+  text-align: left;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+
+.ex-row:hover {
+  background: var(--surface-2);
+}
+
+.ex-row[data-on] {
+  border-color: var(--line-strong);
+  background: var(--surface-2);
+}
+
+.ex-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ex-badge {
+  padding: 0 var(--s1);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  color: var(--on-ink);
+  background: var(--warn);
+  border-radius: var(--r-s);
+}
+
+.ex-badge[data-quiet] {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
+.ex-detail header p {
+  margin: 0 0 var(--s3);
+}
+
+.ex-cols {
+  display: grid;
+  grid-template-columns: minmax(180px, 260px) minmax(0, 1fr);
+  gap: var(--s4);
+}
+
+.ex-ladder-head,
+.ex-level {
+  display: flex;
+  justify-content: space-between;
+  padding: 2px var(--s2);
+}
+
+.ex-ladder-head {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ex-level {
+  position: relative;
+}
+
+.ex-level > span {
+  position: relative;
+}
+
+.ex-bar {
+  position: absolute !important;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  border-radius: var(--r-s);
+}
+
+.ex-level[data-side="bid"] .ex-bar {
+  background: var(--yes-soft);
+}
+
+.ex-level[data-side="ask"] .ex-bar {
+  background: var(--no-soft);
+}
+
+.ex-level[data-side="bid"] .tl-data:first-of-type {
+  color: var(--yes-ink);
+}
+
+.ex-level[data-side="ask"] .tl-data:first-of-type {
+  color: var(--no-ink);
+}
+
+.ex-spread,
+.ex-empty {
+  padding: var(--s1) var(--s2);
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.ex-spread {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.ex-side {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s4);
+}
+
+.ex-ticket {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.ex-seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+}
+
+.ex-seg button {
+  padding: var(--s2);
+  font-weight: 600;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  cursor: pointer;
+}
+
+.ex-seg button[data-on][data-tone="up"] {
+  background: var(--yes-soft);
+  border-color: var(--yes);
+}
+
+.ex-seg button[data-on][data-tone="down"] {
+  background: var(--no-soft);
+  border-color: var(--no);
+}
+
+.ex-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--s2);
+}
+
+.ex-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ex-fields input {
+  padding: var(--s2);
+  font-size: 14px;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+}
+
+.ex-note {
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ex-go,
+.ex-sell {
+  padding: var(--s2) var(--s3);
+  font-weight: 650;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+
+.ex-go {
+  color: var(--on-ink);
+  background: var(--ink);
+  border: 1px solid var(--ink);
+}
+
+.ex-sell {
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+}
+
+.ex-go:disabled,
+.ex-sell:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.ex-tape h3 {
+  margin-top: 0;
+}
+
+.ex-print {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+  padding: 2px 0;
+}
+
+.ex-link {
+  padding: 0;
+  color: var(--accent);
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+
+.ex-groups {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
+  gap: var(--s2);
+  margin: var(--s3) 0;
+}
+
+.ex-group {
+  display: flex;
+  flex-direction: column;
+  padding: var(--s2) var(--s3);
+  background: var(--surface-2);
+  border-radius: var(--r);
+}
+
+.ex-toast {
+  position: fixed;
+  z-index: 5;
+  bottom: var(--s5);
+  left: 50%;
+  max-width: calc(100% - 2 * var(--s4));
+  padding: var(--s2) var(--s4);
+  color: var(--on-ink);
+  background: var(--ink);
+  border-radius: var(--r);
+  transform: translateX(-50%);
+}
+
+@media (max-width: 760px) {
+  .ex-main,
+  .ex-cols {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
