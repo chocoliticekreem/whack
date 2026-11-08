@@ -272,8 +272,9 @@ export function Exchange() {
               </b>
             </>
           ) : (
-            <button type="button" className="ex-go" onClick={() => void join()}>
-              Join with 1,000 points
+            <button type="button" className="ex-join" onClick={() => void join()}>
+              <b>Get 1,000 free points</b>
+              <span>Join and start trading</span>
             </button>
           )}
         </div>
