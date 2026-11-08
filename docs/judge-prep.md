@@ -1,7 +1,7 @@
 ---
 title: Judge prep — a sceptical Marshall Wace panel vs OverWatch
 date: 2026-11-07
-status: prep for Sunday judging · replay numbers and tests re-run against main at bbfc214 (#87), Sun 00:55; live trading re-run (#84, #85) on code at #79, Sat 22:36–Sun 00:31
+status: prep for Sunday judging · replay numbers re-run against main at bbfc214 (#87), Sun 00:55; TOPS and sizing numbers from #102 (docs/traders-and-tops.md); tests re-run on 10c3486 (#102 + #98), Sun ~03:00; live trading re-run (#84, #85) on code at #79, Sat 22:36–Sun 00:31; demo script rewritten for #93–#102
 ---
 
 # Judge prep: what Marshall Wace will ask, and the true answers
@@ -48,7 +48,7 @@ the falling late evening).
 | Event layer | line_disruption vs control 4/15 (27%, base 47%), crowding_surge 8/26 (31%, base 53%), line_displacement 3/4. **No skill** | `services/multiverse/eval_events.py` (re-run, 12:06–23:42) |
 | Live trading test (#79, code before #72/#77/#81) | 75 min, 327 bot bets: 0 voids, 0 fills after close, 120/120 wallet reconciliations exact, 46/46 bets on halted markets refused | `analysis/live_trading/README.md` |
 | Live trading re-run (#84, #85; code at #79, before #81, #86, #87) | 65 min, 15 rounds, 280 bot + 34 reader bets. **30/30** crowding markets settled on TfL readings stamped after close (none seen by the recorder before close); City Pulse opened 0.50–0.66; **0** frozen prices; **0 of 229** fills after close; 26/26 bets on halted markets refused; ledger audit clean; house **−177** vs players (was −1,408). Open: hub_surge reader 6/10, +202% ± 108% (before #86's mid-round re-price); City Pulse Under won 14/15 in a falling evening; vs-usual markets void after the midnight profile refresh and one 54 s server stall (both fixed in #87) | `analysis/live_trading/RERUN.md` |
-| Tests | city 228, multiverse 132, recorder 16, all passing (re-run Sun 00:55 on #87) | `python3 -m unittest discover -s services/<x>` |
+| Tests | city 306, multiverse 132, recorder 16, all passing (re-run on 10c3486, after #102 and #98) | `python3 -m unittest discover -s services/<x>` |
 | Live, 23:45 | london_vix listed in 9 of 9 rounds since the last restart (heathrow_stack skipped: "the London VIX is live"); 0 voids; `fromSim: 0` on every market (`SIM_WEIGHT=0`). AI records survived the restart: Tube Crowd 24–18, 2,450 points, top of the board; Simulation 8–30, 78 points; The Contrarian −181 points (cause found and fixed in #86: see 6.2) | `GET /round`, `/stats`, `/markets`, `/traders` |
 
 ## 1. The 10 most likely, most dangerous questions
@@ -63,8 +63,8 @@ Memorise the one-liners. The full answers are in section 2.
 | 4 | "Someone on a train sees a line stop before TfL does. Isn't clean sheet an insider market?" | "It's the one single-event market, so it gets the strictest rules: bets fill 45 s after you place them, any line change pauses the market and cancels pending bets, a 10% cap, and betting closes with its first 5-minute round. A head start under 44 s gains nothing." | ok |
 | 5 | "You settle on the 'first reading after bets close'. Is that number already public?" | "No longer. We settle on the first reading TfL itself stamped after the close, and a value measured at or before the close voids. The cost is a 14-minute wait, which the card shows: 'result about 22:00'." | strong |
 | 6 | "What does the agent simulation actually add? Evidence, not adjectives." | "Nothing measurable yet. Oxford Circus ties persistence, central London loses by 9%, the event layer has no skill. So it's out of the price (`SIM_WEIGHT=0`) and trades as the Simulation trader, which is losing live. Its real use today is scenario mode." | weak |
-| 7 | "How is this TOPS? Where's the track-record weighting?" | "It's built. Every view a trader states at open is scored at settle against our own futures (log score, half-life 20 markets, shrunk toward zero for small samples). Trust weights come from those scores, capped at 40% each, and the opening price blends them in by up to 30%, scaled by proven skill: none proven, zero lean. On the replay it's honest and small: City Pulse Brier 0.4860 to 0.4833 after 17:00 (−0.0028 ± 0.0017, n=92), the rest within ±0.0005, and the Tube Crowd leak is shaved from +29.8% to +28.5%, not closed. It leans only where a record is proven." | ok |
-| 8 | "Why LMSR rather than an order book? Is this an exchange or a bookmaker?" | "The live site is a bookmaker with a published model: a thin market of strangers needs guaranteed liquidity. The exchange is built as a prototype beside it: an order book per contract, AI market makers quoting both sides, the Kalshi fee, the same integrity rules, no house. It isn't live, and we haven't measured whether it prices better than the LMSR." | ok |
+| 7 | "How is this TOPS? Where's the track-record weighting?" | "It's built. Every view a trader states at open is scored at settle against our own futures. Skill per trader per series is a Bayesian posterior (half-life 20 markets, empirical-Bayes prior). Trust is proportional to P(skill > 0), capped at 40% each, and the opening price blends the pool in by λ ≤ 0.3, learned from how much it improved past log loss: no proven skill, zero lean. Walk-forward over 509 markets it beats the futures by 0.0010 ± 0.0009 log loss, not significant. A permutation test says about 0.5 of 10 trader-series look skilled by chance; 2 do, none survives Bonferroni or BH. The City Pulse leak is shaved from +19.3% to +16.8%, not closed." | ok |
+| 8 | "Why LMSR rather than an order book? Is this an exchange or a bookmaker?" | "The live site is a bookmaker with a published model: a thin market of strangers needs guaranteed liquidity. The exchange is built as a prototype beside it: an order book per contract, AI market makers quoting both sides, the same integrity rules, no house. On synthetic markets with a known truth, informed money moved its prices a third closer to the truth. It isn't live, and we haven't measured whether it prices London better than the LMSR." | ok |
 | 9 | "What is the London VIX?" | "The spread of predicted crowds across 50 simulated worlds of Oxford Circus. It covers one area and needs an hour to burn in, so call it an uncertainty gauge, not a fear index. Camera Eye fades its moves, and that's 12–12 live." | ok |
 | 10 | "Real money: which regulator, and who on earth hedges footfall?" | "Consumers: the UK Gambling Commission, or the CFTC route Kalshi took. The first paying customer we'd test is a data buyer, not a hedger. Footfall hedging is a hypothesis with zero customer conversations." | ok |
 
@@ -100,14 +100,24 @@ so there's little price discovery. The live site is house-banked: a bookmaker wi
 The exchange in `docs/exchange-design.md` (#67) is built as a prototype that runs beside it (#90, #94,
 `services/city/venue_server.py` on :8062): one order book per binary contract, no house, 12 AI market makers quoting
 both sides (designated ones held to a 6-point spread and 90% uptime for a share of fees), 184 hedge funds, 2,000
-retail, Kalshi's taker fee ceil(0.07·C·P·(1−P)) with makers free, and the same speed bumps, position limits, halts
-and settlement sources as the live exchange. It is API only and not on the site.
+retail, and the same speed bumps, position limits, halts and settlement sources as the live exchange. Since #98 its
+fees are off by default (a points game has no exchange to fund); `--fees kalshi` turns on Kalshi's taker fee
+ceil(0.07·C·P·(1−P)) with makers free. It is API only and not on the site.
 
 What we can say: on 25 minutes of Saturday's recorded data (`venue_demo.py --replay-from 2026-11-07T15:00:00Z`) every
 structural check passed (no crossed books, no trade after close, ledger audit clean), the median quoted spread was
 4 points and designated market makers quoted 95–96% of the time. The closing price was no better calibrated than the
-forecast it quotes around (Brier 0.1256 vs 0.1255, n=16). What we can't say yet: whether it prices better than the
-LMSR, or whether the City Pulse leak survives on it. That comparison isn't measured.
+forecast it quotes around (Brier 0.1256 vs 0.1255, n=16).
+
+Since #98, a known-truth test (`analysis/exchange/simulate.py`: synthetic contracts whose true probability is known,
+6 scenarios × 3 seeds, 216 contracts each, the venue's own agents and rules). Baseline (20 informed funds): the price
+ends 33% closer to the truth than the forecast (4.1 → 2.7 points), on 89% of contracts. With no informed money or only
+noise traders it stays as accurate as the forecast. It found market makers losing to informed flow (−1.24 points per
+contract in the baseline); widening quotes on one-sided flow, plus a public fast-market flag that lets designated makers
+quote up to 12 points, took that to −0.26. Edges are only partly traded away (about 40% of a 10-point bias).
+
+What we can't say yet: whether it prices London better than the LMSR, or whether the City Pulse leak survives on it.
+That comparison isn't measured.
 
 **Q1.5 Fees?** *(strong)*
 5% of every stake comes off before shares are bought (`Book.quote`). Locked odds round down and never exceed the shares
@@ -346,9 +356,10 @@ the same recorder files and touches nothing the site uses.
   from fresh data, so City Pulse may get a new line under the same id.
 
 **Q8.3 Test coverage?** *(strong)*
-228 city, 132 multiverse and 16 recorder tests, all passing (re-run Sun 00:55 on #87): a randomised 1000-bet ledger
+306 city, 132 multiverse and 16 recorder tests, all passing (re-run on 10c3486): a randomised 1000-bet ledger
 invariant, an 8-thread hammer, idempotency, exactly-once settlement, halts and voids, courtsiding, and 40 regression
-tests from the two live trading runs (26 in `test_live_fixes.py`, 14 in `test_rerun_fixes.py`). The edge-case suite
+tests from the two live trading runs (26 in `test_live_fixes.py`, 14 in `test_rerun_fixes.py`), the TOPS no-look-ahead
+test and the 300-sequence Kelly property test (#102). The edge-case suite
 (`edge.py`) passed 28/28 against a scratch server.
 
 **Q8.4 How did you test it under real trading?** *(ok)*
@@ -401,7 +412,8 @@ cooling-off design.
 | "The sim makes the prices better" | It loses to persistence by 9% and is out of the price | "The sim powers what-ifs and trades as one trader; the market scores it" |
 | "The Tube Crowd leak is fixed" | On City Pulse it made +42% after 17:00 (CI +23% to +61%) | "Fixed on hubs; on City Pulse it still wins in a falling evening, and the leaderboard shows it" |
 | "No public rule beats the house" | Under on City Pulse in a falling evening made +42% | "One public rule still beats it on one day. The Heathrow fade and the hub riser were measured and priced in" |
-| "TOPS fixes the leak" | The blend shaves the City Pulse leak from +29.8% to +28.5%; λ is capped at 0.3 | "The market leans on proven traders, a little and only where they're proven" |
+| "TOPS fixes the leak" | The blend shaves Tube Crowd's City Pulse pick from +19.3% to +16.8% after 17:00 (n=112); λ is capped at 0.3 | "The market leans on proven traders, a little and only where they're proven" |
+| "Tube Crowd is a skilled trader" | p = 0.015 is one of 10 tests; none survives Bonferroni or BH, and its posterior ends at P(skill > 0) = 0.37 | "Two of ten look skilled where chance gives about one half; none survives correction" |
 | "The London VIX is the city's fear index" | One area, 1 h burn-in | "An uncertainty gauge for Oxford Circus: the spread of 50 simulated worlds" |
 | "Points to pounds is a licence, not a rewrite" | A house-banked LMSR is bookmaking | "The ledger is real-money grade; the order book is a prototype beside the live site, and taking it live plus licensing are the work left" |
 | "City-scale aggregates one person can't move" | Untested; Bank sits at 5–6% of baseline | "Five busy hubs against their own baselines; low-traffic stations are the soft spot" |
@@ -441,45 +453,95 @@ cooling-off design.
 3. The UI makes a new idempotency key when it retries after a client timeout, so a slow fill can look rejected (fix
    on a branch, not merged).
 4. The central sim and event layer have no measured skill.
-5. The TOPS blend is small by design (λ ≤ 0.3, 40% per trader) and has one evening of out-of-sample evidence.
+5. The TOPS blend is small by design (λ ≤ 0.3, 40% per trader), not significantly better than the old loop, and no
+   trader-series survives multiple-testing correction. λ counts markets, not information, so it can sit on its cap
+   where the pool barely differs from the futures (`docs/traders-and-tops.md` §7).
 6. Low-typical stations (Bank) and the `X-Forwarded-For` spoof. Minor: the daily loss limit counts gross losses, and
    AI traders are off the ledger.
 
 ## 5. 3-minute demo script
 
-**0:00 Hook, on a fast market.** "This is a live stock exchange on London's next five minutes." Open on the London VIX
-card ("Will London get more unpredictable or calmer by 23:45?") or click a camera spot on the map to open a local
-market. "You're trading against an automated market maker and seven computer traders, each reading one live feed."
-Bet 100: "Bet 100 · win 160". It fills after the bet delay.
+Six timed beats. **Say** is the exact line. **Show** is what's on screen. **If slow** is the fallback when live data
+lags; never wait on the network in silence, say the line and move on.
 
-**0:30 Who's on the other side. (Pre-empts Q1.)** "The house: an LMSR market maker over 50 futures fitted to today's
-data. Its worst case is capped on a double-entry ledger, and you're capped at a quarter of your points per market."
+**Before the slot (T−20 min):**
+- Place W100 on a City Pulse or hub card. Station markets settle about 14 minutes after betting closes, so this bet
+  settles on a real TfL reading during or just before the demo (beat 3).
+- Check `GET /round`: london_vix listed (if not, Heathrow stands in). Check `GET /tops`: note which series have
+  `lambdaNow` > 0. A fresh ledger needs about an hour of rounds before any lean (#93).
+- Check the live server runs #102 or later (trust bars, quarter-Kelly reasons) and #87 or later (no vs-usual voids
+  after the 00:03 profile refresh).
+- Don't restart the server in the 10 minutes before the slot: 5-minute markets rebuild from fresh data.
+- Open, in background tabs: `docs/traders-and-tops.md` and the Devpost section "How it works under the hood" (fallbacks
+  for beats 4 and 5).
 
-**0:50 A station market's fair wait. (Pre-empts Q5.)** Point at a closed hub card: "Betting closed · result about
-23:50, when TfL publishes." "We settle only on numbers TfL stamped after betting closed. That's 14 minutes of
-waiting, and it means nobody polling faster than us can see the answer."
+**0:00 Hook: parallel Londons (20 s).**
+- **Show:** the 3D map with the ticker running. Tap a City Pulse card, open Details, scroll to "Simulated futures":
+  "50 simulated futures · N ruled out by live data".
+- **Say:** "Right now there are 50 parallel Londons five minutes from now. Every five minutes, reality picks one. This
+  is OverWatch: a live exchange on the London nobody can see yet. Each future starts from TfL's latest reading; every
+  new reading reweights them and rules out the ones that are wrong. Those weights are the prices."
+- **If slow:** if the futures fan hasn't loaded, point at the answer buttons ("12 of 50 futures") in Details, or at the
+  odds on the card: "these odds are the share of 50 futures on each answer."
 
-**1:20 The traders. (Pre-empts Q3.)** Open the traders dropdown. "Tube Crowd reads TfL's usual-Saturday curve. It
-used to beat our market maker by 30–48% a bet. We priced that curve in, and on hubs copying it is now flat. On City
-Pulse in a falling evening it still wins, +42% after 17:00. That's TOPS pointed at a city: the leaderboard tells the
-market maker which data to listen to next."
+**0:20 Place a live bet (30 s).**
+- **Show:** the London VIX card ("Will the model become more uncertain by HH:MM?"), or Heathrow if the VIX is down.
+  Tap an answer, W100, confirm. Open the earnings dropdown, Orders tab: "Filling in 2s", then "Result in …".
+- **Say:** "I'll put W100 on it; the button shows what I'd win. It fills after a short delay so nobody can trade on a feed faster
+  than ours. On the other side: an LMSR market maker over those 50 futures, and seven AI traders, each reading one live
+  feed: TfL crowding, Tube status, street cameras counted by YOLO, planes stacking over Heathrow."
+- **If slow:** if the fill hangs, the bet still shows as pending in Orders: "the delay is the point; it fills or it's
+  cancelled, never half." If the VIX and Heathrow are both missing, click a camera spot on the map and bet on the local
+  market it opens.
 
-**1:50 What if.** Click "What if…", click Regent Street, "Close this street". "This runs our central-London agent
-simulation on copies, live state untouched. It doesn't beat 'nothing changes' as a forecast, so it isn't in the
-price. It answers what data can't: what happens if."
+**0:50 A market settling on real TfL data, and why it's fair (40 s).**
+- **Show:** Orders tab, the T−20 bet: "Won +W…", "Lost −W…", or "Waiting for TfL…". Then the portfolio page, bet
+  table, column "Settlement reading and source": the frozen TfL reading the market settled on. (Settled cards leave the
+  feed since #100, so the reading lives in the portfolio.)
+- **Say:** "This one settled on real TfL data. TfL stamps every crowding reading, then publishes it about seven
+  minutes later. We settle only on the first reading TfL stamped after betting closed, so nobody polling faster than us
+  can know the answer; a reading from before the close voids the market and refunds you. That's why the card waits
+  about 14 minutes. Fair beats fast."
+- **If slow:** if it still says "Waiting for TfL…", say "that's the fair wait in action: TfL hasn't published the
+  reading stamped after our close yet" and open the rule in Details. If there's no settled bet, open an open station
+  card's Details: "How it is decided" gives the rule and the source.
 
-**2:20 Settle.** The VIX market settles. Earnings dropdown: "+60"; on a win, confetti with the profit. "Source and
-rule on every market, the frozen reading, void and refund if there's no data."
+**1:30 The TOPS loop: the traders' trust (40 s).**
+- **Show:** the traders dropdown: "The market leans on traders who've been right", trust bars, sorted by trust. Then a
+  card's Details: "Computer traders moved … by +N points" (shown only when the move rounds to at least 1 point).
+- **Say:** "This is your TOPS, rebuilt on a city. Every AI trader states a view on every market. Reality scores it
+  against our own futures. A Bayesian model estimates each trader's skill, trust follows the chance that skill is real,
+  and the opening price leans on the proven ones, at most 30%. They size bets by quarter-Kelly, and with no edge they
+  sit out. We also tested it against luck: of ten trader-series, about one half should look skilled by chance. Two do,
+  and neither survives a multiple-testing correction, so the market leans very little. That's the loop working."
+- **If slow:** if every trust bar is 0 (fresh ledger), say "this ledger restarted, so nobody has a record yet and the
+  lean is exactly zero: no record, no trust" and show the permutation table in `docs/traders-and-tops.md` §6.
 
-**2:40 Close.** "Marshall Wace built TOPS to find out which brokers to trust. We built it to find out which data
-reads a city best, and it has already told us something our own model missed."
+**2:10 Under the hood (30 s).**
+- **Show:** the menu, "Under the hood".
+- **Say:** "Under the hood it's six steps. 50 futures from TfL's own timestamp. Each reading reweights them. An LMSR
+  turns them into prices with a capped worst case. Settlement only on readings stamped after the close. AI traders
+  sized by Kelly on the market maker's real slippage. And a Bayesian trust loop that only moves the price as far as a
+  trader's record earns."
+- **If slow:** if the panel isn't on the live build, open the Devpost section "How it works under the hood" or
+  `docs/traders-and-tops.md` and say the same six steps.
+
+**2:40 Honest limits, and close (20 s).**
+- **Show:** back to the map.
+- **Say:** "What it doesn't do yet: our crowd forecast ties 'nothing changes', it's one day of data, and one public
+  rule still beats us: bet Under on City Pulse when the city empties in the evening, +42% out of sample. We measured
+  it, and the leaderboard shows Tube Crowd taking it. Marshall Wace built TOPS to find out which brokers to trust. We
+  built it to find out which data reads a city best."
+- **If slow:** none needed. If over time, cut to the last two sentences.
 
 Rehearsal notes:
-- Check `GET /round` before going on: london_vix should be listed. If it isn't, open on Heathrow or a camera spot.
-- Don't restart the server in the 10 min before the slot: 5-minute markets rebuild from fresh data.
+- If the fast bet from 0:20 settles before 2:40, the earnings dropdown updates and a win shows confetti with the
+  profit; call it out in one line. Start the slot in the last 3 minutes of a round to make that likely.
 - The "+42%" line is n=82 on one evening (replay 17:00–00:05), CI +23% to +61%. If asked, say it.
-- Check the live server runs #87 or later. One started before it voids vs-usual markets from the 00:03 profile
-  refresh until it is restarted (RERUN #1).
+- The permutation numbers: 10 trader-series, 200 re-walks, 0.5 expected at p < 0.05, 2 observed under the shuffle
+  null (P(≥ 2 by chance) = 0.095), none survives Bonferroni (p < 0.005) or Benjamini–Hochberg.
+- Don't say "50 simulated futures of the city" as a technical claim (section 3). If pressed on "parallel Londons":
+  "statistical paths fitted to today's data and TfL's usual Saturday; the agent simulation is out of the price."
 
 ## Appendix: reproduce every number
 
@@ -488,12 +550,14 @@ RAW=/path/to/data/raw
 python3 analysis/judge/replay_score.py $RAW 2026-11-07T12:40:00Z 2026-11-07T20:10:00Z 30   # full day
 python3 analysis/judge/replay_score.py $RAW 2026-11-07T17:00:00Z 2026-11-07T21:30:00Z 30   # out of sample
 python3 analysis/judge/replay_score.py $RAW 2026-11-07T17:00:00Z 2026-11-08T00:05:00Z 30   # out of sample, #86's window
-python3 analysis/judge/tops_replay.py $RAW 2026-11-07T12:40:00Z 2026-11-08T00:55:00Z 30   # TOPS blend, out of sample
+python3 analysis/judge/tops_replay.py $RAW 2026-11-07T12:40:00Z 2026-11-08T02:35:00Z 30 2026-11-07T17:00:00Z 2026-11-08T00:55:00Z   # TOPS, walk-forward
+python3 analysis/judge/tops_permutation.py $RAW 2026-11-07T12:40:00Z 2026-11-08T02:35:00Z 200   # skill vs chance
+python3 analysis/exchange/simulate.py                                                      # venue on known-truth markets, ~12 min
 python3 analysis/judge/crowd_latency.py $RAW                                               # TfL publish lag
 python3 services/multiverse/eval_real.py --raw $RAW --windows 6                           # Oxford Circus vs persistence
 python3 services/multiverse/eval_events.py $RAW 2026-11-07                                 # event layer skill
 CITY_RAW=$RAW python3 services/city/venue_demo.py --replay-from 2026-11-07T15:00:00Z    # venue prototype, 25 min
-python3 -m unittest discover -s services/city          # 295 (venue included)
+python3 -m unittest discover -s services/city          # 306 (venue and TOPS included)
 python3 -m unittest discover -s services/multiverse    # 132
 python3 -m unittest discover -s recorder               # 16
 ```
