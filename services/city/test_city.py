@@ -436,16 +436,18 @@ class VixAndFallbackTest(CityCase):
                          ["hub_surge", "city_pulse", "london_vix", "hub_hour"])
         self.assertIn("London VIX is live", rnd["skipped"]["heathrow_stack"])
 
-    def test_heathrow_stack_line_is_the_count_plus_a_half_and_settles_on_the_last_reading(self):
+    def test_heathrow_stack_line_is_the_futures_median_on_a_half_and_settles_on_the_last_reading(self):
         store = self.raw.store(T0)
         m = mk.build_heathrow_stack("heathrow_stack-1505", store, SPOTS, T0, T0 + 5 * MIN)
-        n0 = store.latest("aircraft", T0)[1]["total"]
-        self.assertEqual(m.spec["line"], n0 + 0.5)
-        self.assertEqual(m.question, f"Planes holding over Heathrow at 15:05: over or under {n0 + 0.5:g}?")
+        line = m.spec["line"]
+        self.assertEqual(line, pricing.count_line(m.futures.sim.finals))
+        self.assertEqual(line % 1, 0.5)
+        self.assertEqual(m.question, f"Planes holding over Heathrow at 15:05: over or under {line:g}?")
+        self.assertIn(f"Over = {line + 0.5:g} or more", m.rule)
         now = m.settles_at + 40_000
         n_t = self.raw.store(now).latest("aircraft", m.settles_at)[1]["total"]
         got = mk.try_settle(m, self.raw.store(now), now)
-        self.assertEqual(got[1], "over" if n_t > n0 else "under")
+        self.assertEqual(got[1], "over" if n_t > line else "under")
         self.assertIn("holding", got[2])
 
     def test_heathrow_stack_voids_without_a_reading_in_the_last_two_minutes(self):
@@ -984,15 +986,16 @@ class SimTest(CityCase):
         ex.rounds[capped.settles_at] = {"markets": [capped.id], "skipped": {}}
         ex.markets[capped.id] = capped
         capped.decided |= others
-        capped.ai_bets.append({"trader": "sim", "option": "under", "why": "earlier", "stake": 60, "odds": 2.0})
+        capped.ai_bets.append({"trader": "sim", "option": "under", "why": "earlier", "stake": 70, "odds": 2.0})
         ex.ai_bets(capped, self.now)
         self.assertIn("position cap 75 points", ex.sat_out["sim"][1])
         self.assertEqual(len([b for b in capped.ai_bets if b["trader"] == "sim"]), 1)
         ex.record["sim"]["points"] = 1000
         again = mk.build_city_pulse("city_pulse-1530", store, SPOTS, self.now, self.at + 15 * MIN)
         again.decided |= others
+        want = traders.stake_for(1000, ex.ai_open_stakes("sim"))
         ex.ai_bets(again, self.now)
-        self.assertEqual([b["stake"] for b in again.ai_bets if b["trader"] == "sim"], [traders.STAKE])
+        self.assertEqual([b["stake"] for b in again.ai_bets if b["trader"] == "sim"], [want])
         self.assertIn("sim", pulse.decided)
 
     def test_the_sim_trader_sits_out_when_the_sim_is_down_and_traders_says_why(self):

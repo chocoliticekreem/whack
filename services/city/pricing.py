@@ -165,13 +165,29 @@ class RelativeRaceSim(RaceSim):
                  kappa: float, chol: list[list[float]], power: float):
         self.stations, self.t0, self.m = stations, t0, minutes
         self.typ0, self.typ_t, self.mode, self.power = typ0, typ_t, "gain", power
+        self.kappa, self.chol, self.rng, self.seen = kappa, chol, rng, t0
         self.paths = [self.walk_all(kappa, chol, rng) for _ in range(N_FUTURES)]
 
-    def walk_all(self, kappa: float, chol: list[list[float]], rng: random.Random) -> list[list[float]]:
+    def restart(self, ts: int, snap: dict) -> bool:
+        """A TfL reading stamped after the last one: walk every future again from it for the minutes left (the open
+        values still anchor each hub's gain). Pruning fixed paths on it priced the hub leading since open at 0.27
+        while it won 46% of the time (analysis/judge/fit_crowd.py). The tempering power is Platt-fitted on open
+        prices only; after a restart the shares stand untempered (better in-round Brier and log loss, both windows)."""
+        if ts <= self.seen or any(nap not in snap for _, nap, *_ in self.stations):
+            return False
+        self.seen, self.power = ts, 1.0
+        k = max(0, min(self.m, round((ts - self.t0) / MIN_MS)))
+        now = [math.log(snap[nap]) for _, nap, *_ in self.stations]
+        self.paths = [self.walk_all(self.kappa, self.chol, self.rng, now, k) for _ in range(N_FUTURES)]
+        return True
+
+    def walk_all(self, kappa: float, chol: list[list[float]], rng: random.Random, start: list[float] | None = None,
+                 k0: int = 0) -> list[list[float]]:
         log_typ = [math.log(t) for t in self.typ0]
-        xs = [s[2] for s in self.stations]
-        paths = [[x] for x in xs]
-        for _ in range(self.m):
+        x_open = [s[2] for s in self.stations]
+        xs = start or x_open
+        paths = [[a + (b - a) * i / k0 for i in range(k0)] + [b] for a, b in zip(x_open, xs)]
+        for _ in range(self.m - k0):
             dev = [x - lt for x, lt in zip(xs, log_typ)]
             mean = sum(dev) / len(dev)
             e = [capped_gauss(rng) for _ in xs]
@@ -260,6 +276,69 @@ class DeltaSim:
         frac = max(0.0, min(1.0, (ts - self.t0) / (self.m * MIN_MS)))
         expected = self.x0 + (self.finals[i] - self.x0) * frac
         return abs(v - expected) / (self.sd * max(0.5, math.sqrt(frac)))
+
+
+def poisson(rng: random.Random, lam: float) -> int:
+    """Knuth's method; fine for the small means a holding count has (under ~30)."""
+    limit, k, p = math.exp(-lam), 0, rng.random()
+    while p > limit:
+        k += 1
+        p *= rng.random()
+    return k
+
+
+class CountSim(DeltaSim):
+    """Over/under on a count that reverts to its recent level (Heathrow stacks). Each future's final count is a
+    Poisson draw around the open count pulled kappa of the way to the trailing mean per 5 minutes. A bootstrap of
+    raw changes ignored where the count stood against that mean, so a stack that had just built was priced as
+    likely to keep building as to drain, and fading it won (analysis/judge/fit_heathrow.py).
+
+    In-round readings set the weights to the same model restarted from that reading (posterior), not DeltaSim's
+    straight-line pruning: the count is close to a fresh Poisson draw every minute (unchanged minute to minute only
+    16-27% of the time today), so pruning on one reading put the halfway price at 3/97 and it was wrong a third of
+    the time."""
+
+    LAMBDA_FLOOR = 0.3
+
+    def __init__(self, x0: float, recent: list[float], kappa_5min: float, t0: int, minutes: int, rng: random.Random,
+                 value_of, strike: float):
+        self.x0, self.t0, self.m, self.value_of, self.strike = x0, t0, minutes, value_of, strike
+        self.kappa, self.level_sum, self.level_n = kappa_5min, sum(recent), len(recent)
+        self.lam = self.mean_after(x0, sum(recent) / len(recent), minutes)
+        self.finals = [float(poisson(rng, self.lam)) for _ in range(N_FUTURES)]
+        self.prior = [poisson_pmf(self.lam, f) for f in self.finals]
+        self.sd = max(math.sqrt(self.lam), 0.5)
+
+    def mean_after(self, x: float, level: float, minutes: float) -> float:
+        return max(self.LAMBDA_FLOOR, x - (1 - (1 - self.kappa) ** (minutes / 5)) * (x - level))
+
+    def posterior(self, ts: int, snap: dict) -> list[float] | None:
+        """Importance weights that turn the open's Poisson futures into the model's distribution given this reading:
+        the count reverting from it, toward the trailing mean with the round's readings added, for the minutes left."""
+        v = self.value_of(snap)
+        if v is None:
+            return None
+        self.level_sum, self.level_n = self.level_sum + v, self.level_n + 1
+        left = (self.t0 + self.m * MIN_MS - ts) / MIN_MS
+        if left <= 0:
+            return [1.0 if f == v else 1e-9 for f in self.finals]
+        lam = self.mean_after(v, self.level_sum / self.level_n, left)
+        return [poisson_pmf(lam, f) / q for f, q in zip(self.finals, self.prior)]
+
+
+def poisson_pmf(lam: float, k: float) -> float:
+    return math.exp(-lam + k * math.log(lam) - math.lgamma(k + 1))
+
+
+def count_line(finals: list[float]) -> float:
+    """The half point next to the futures' median count whose Over share is nearest 50%, never under 0.5: the market
+    opens near 50/50 and a whole-number count can never tie it."""
+    med = statistics.median_low(finals)
+
+    def miss(line: float) -> tuple[float, float]:
+        return abs(sum(f > line for f in finals) / len(finals) - 0.5), line
+
+    return min((c for c in (med - 0.5, med + 0.5) if c >= 0.5), key=miss)
 
 
 class BreakSim:
@@ -486,6 +565,15 @@ class Futures:
         return self.origins.count("sim")
 
     def observe(self, ts: int, snap: dict) -> int:
+        if hasattr(self.sim, "restart") and self.sim.restart(ts, snap):
+            self.alive, self.weights, self.ruled_out = [True] * N_FUTURES, [1.0] * N_FUTURES, 0
+            return 0
+        if hasattr(self.sim, "posterior"):
+            weights = self.sim.posterior(ts, snap)
+            if weights is not None:
+                scale = N_FUTURES / sum(weights)
+                self.weights = [w * scale for w in weights]
+            return 0
         errs = [(self.sim.error(i, ts, snap), i) for i in range(N_FUTURES) if self.alive[i]]
         self.reweight([(e, i) for e, i in errs if e is not None])
         bad = sorted(((e, i) for e, i in errs if e is not None and e > self.sim.tol), reverse=True)

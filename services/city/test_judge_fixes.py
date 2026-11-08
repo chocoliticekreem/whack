@@ -153,7 +153,9 @@ class TraderRecordTest(CityCase):
         ex2.record["tube"]["points"] = 400
         for t in range(T0, T0 + 20_000, 5_000):
             ex2.tick(t)
-        self.assertEqual({b["stake"] for m in ex2.markets.values() for b in m.ai_bets if b["trader"] == "tube"}, {40})
+        stakes = [b["stake"] for i in ex2.order for b in ex2.markets[i].ai_bets if b["trader"] == "tube"]
+        self.assertEqual(stakes, [traders.stake_for(400, sum(stakes[:k])) for k in range(len(stakes))])
+        self.assertEqual(stakes[:3], [40, 36, 32], "10% of what is not already staked")
 
 
 class StampSettlementTest(CityCase):

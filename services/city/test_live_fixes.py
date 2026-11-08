@@ -4,18 +4,23 @@
 """
 from __future__ import annotations
 
+import contextlib
+import io
+import random
 import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 import markets as mk
+import pricing
 import server
 import traders
 from data import Store
 from exchange import Clock, Exchange
 from ledger import Ledger, WalletError
-from test_city import CITY, MIN, SPOTS, T0, Raw, TestSeries, city, crowd_history, no_delay, vix_payload
+from test_city import (CITY, MIN, SPOTS, T0, Raw, TestSeries, aircraft, city, crowd_history, minutely, no_delay,
+                       vix_payload)
 from test_judge_fixes import stamped
 from test_local import RECORDED, utc
 
@@ -324,6 +329,144 @@ class AiExposureTest(unittest.TestCase):
     def liability(m, option: str) -> float:
         staked = sum(b["stake"] for b in m.ai_bets)
         return sum(round(b["stake"] * b["odds"]) for b in m.ai_bets if b["option"] == option) - staked
+
+
+class OpenStakeReserveTest(unittest.TestCase):
+    """The Contrarian reached -181 live: every stake was 10% of its settled points, but points only move at settle
+    and it held a dozen bets on markets that settle minutes after they close, so their stakes added up past its
+    points. Open stakes are now taken off before sizing, and a negative record on file loads as 0."""
+
+    def setUp(self):
+        no_delay(self)
+        self.raw = Raw()
+        self.addCleanup(self.raw.dir.cleanup)
+        city(self.raw, T0 + 60 * MIN)
+
+    def exchange(self, ledger: Ledger | None = None) -> Exchange:
+        ex = Exchange(Store(self.raw.root, SPOTS), Clock(T0), SPOTS, ledger or Ledger(":memory:"))
+        self.addCleanup(ex.ledger.close)
+        return ex
+
+    def test_stake_is_ten_percent_of_the_points_not_already_staked(self):
+        self.assertEqual([traders.stake_for(1000, o) for o in (0, 500, 890, 910, 1000, 2000)], [100, 50, 11, 0, 0, 0])
+        self.assertEqual(traders.stake_for(100, 10), 0, "the 10-point floor applies to what is free")
+
+    def test_a_dozen_open_bets_never_stake_more_than_the_points(self):
+        ex = self.exchange()
+        ex.tick(T0)
+        for m in ex.active():
+            m.ai_bets.clear()
+        ex.record["contrarian"]["points"] = 120
+        markets = ex.active()
+        for k in range(15):
+            m = markets[k % len(markets)]
+            ex.ai_fill(m, "contrarian", next(iter(m.prices())), "test")
+        open_stakes = ex.ai_open_stakes("contrarian")
+        self.assertGreater(open_stakes, 0)
+        self.assertLessEqual(open_stakes, 120, "losing every open bet must leave 0 or more")
+
+    def test_no_trader_goes_below_zero_over_an_hour_of_rounds(self):
+        ex = self.exchange()
+        for tid in ex.record:
+            ex.record[tid]["points"] = 120
+        bets = 0
+        for t in range(T0, T0 + 60 * MIN, 15_000):
+            ex.tick(t)
+            bets = max(bets, sum(len(m.ai_bets) for m in ex.active()))
+            for tid, rec in ex.record.items():
+                self.assertGreaterEqual(rec["points"], 0, f"{tid} at {t}")
+                self.assertLessEqual(ex.ai_open_stakes(tid), rec["points"], f"{tid} at {t}")
+        self.assertGreater(bets, 1)
+        self.assertTrue(any(r["won"] + r["lost"] for r in ex.record.values()), "some bets settled")
+
+    def test_a_negative_record_on_file_loads_as_zero_logs_it_and_sits_out(self):
+        ledger = Ledger(":memory:")
+        traders.save_records(ledger, T0, {"contrarian": {"won": 6, "lost": 26, "points": -181, "why": "old"}})
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            ex = self.exchange(ledger)
+        self.assertEqual(ex.record["contrarian"], {"won": 6, "lost": 26, "points": 0, "why": "old"})
+        self.assertIn("contrarian: -181 points on file, loaded as 0", err.getvalue())
+        for t in range(T0, T0 + 5 * MIN, 15_000):
+            ex.tick(t)
+        self.assertFalse([b for m in ex.markets.values() for b in m.ai_bets if b["trader"] == "contrarian"])
+        self.assertIn("0 points left", ex.sat_out["contrarian"][1])
+
+
+class HeathrowReversionTest(unittest.TestCase):
+    """Fading the stack (Plane Spotter's public rule) won 22/34 out of sample (+66%): the old model added a past
+    5-min change to the count, blind to where it stood against its recent level. Now the count reverts to its
+    trailing 30-min mean and the line sits at the futures' median on a .5."""
+
+    def stack_market(self, recent: int, now_count: int):
+        raw = Raw()
+        self.addCleanup(raw.dir.cleanup)
+        minutely(raw, T0 - 3 * 3_600_000, T0 - MIN, "aircraft", lambda ts: aircraft(recent))
+        raw.put("aircraft", T0, aircraft(now_count))
+        return mk.build_heathrow_stack("heathrow_stack-1505", raw.store(T0), SPOTS, T0, T0 + 5 * MIN)
+
+    def test_a_stack_that_just_built_is_priced_to_drain_and_one_that_drained_to_refill(self):
+        built, drained = self.stack_market(4, 12), self.stack_market(12, 4)
+        self.assertLess(built.futures.sim.lam, 12)
+        self.assertGreater(drained.futures.sim.lam, 4)
+        self.assertLess(built.spec["line"], 12.5, "the line follows the drain, not the open count")
+        self.assertGreater(drained.spec["line"], 4.5)
+        for m in (built, drained):
+            self.assertLessEqual(abs(m.open_model["over"] - 0.5), 0.2, m.open_model)
+
+    def test_the_line_is_always_on_a_half_and_never_under_one_half(self):
+        self.assertEqual(pricing.count_line([0.0] * pricing.N_FUTURES), 0.5)
+        rng = random.Random(3)
+        for lam in (0.3, 1.0, 2.5, 6.0, 15.0):
+            finals = [float(pricing.poisson(rng, lam)) for _ in range(pricing.N_FUTURES)]
+            line = pricing.count_line(finals)
+            self.assertEqual(line % 1, 0.5)
+            self.assertGreaterEqual(line, 0.5)
+            self.assertFalse(any(f == line for f in finals))
+
+    def test_poisson_draws_have_the_requested_mean(self):
+        rng = random.Random(7)
+        draws = [pricing.poisson(rng, 3.0) for _ in range(20_000)]
+        self.assertAlmostEqual(sum(draws) / len(draws), 3.0, delta=0.05)
+
+
+class CrowdRerunTest(unittest.TestCase):
+    """The live re-run: the hub that rose most since open still won at a fifth of the price once TfL published
+    mid-round, and City Pulse was suspected of running its futures short of the settle stamp (it does not; this pins
+    it). analysis/judge/fit_crowd.py."""
+
+    def setUp(self):
+        self.raw = Raw()
+        self.addCleanup(self.raw.dir.cleanup)
+        self.raw.profile()
+
+    def history(self, step) -> None:
+        """24 polls, each 2 min after a TfL stamp on the :X6/:X1 grid, the last stamped 14:56 (as TfL publishes)."""
+        for k in range(24):
+            stamp = T0 - 4 * MIN - (23 - k) * 5 * MIN
+            self.raw.put("crowding", stamp + 2 * MIN, stamped(dict(CITY), stamp, others=0.30 * step(k)))
+
+    def test_city_pulse_futures_run_from_the_newest_stamp_to_the_first_stamp_after_close(self):
+        self.history(lambda k: 1.0)
+        m = mk.build_city_pulse("city_pulse-1505", self.raw.store(T0), SPOTS, T0, T0 + 5 * MIN)
+        sim = m.futures.sim
+        self.assertEqual(sim.t0, T0 - 4 * MIN, "starts at the newest reading's TfL stamp (14:56)")
+        self.assertEqual(sim.t0 + sim.m * MIN, m.closes_at + 2 * MIN, "ends at the first :X1/:X6 stamp after close")
+        self.assertEqual(sim.m, 10)
+
+    def test_hub_surge_reprices_from_a_publish_stamped_after_open(self):
+        self.history(lambda k: 1.0)
+        store = self.raw.store(T0)
+        m = mk.build_hub_surge("hub_surge-1505", store, SPOTS, T0, T0 + 5 * MIN)
+        before = m.prices()["waterloo"]
+        self.assertLess(m.futures.sim.power, 1.0)
+        self.raw.put("crowding", T0 + 3 * MIN, stamped(dict(CITY, waterloo=0.38 * 1.3), T0 + MIN))
+        mk.observe(m, self.raw.store(T0 + 3 * MIN), T0 + 3 * MIN)
+        self.assertEqual(m.futures.sim.seen, T0 + MIN)
+        self.assertEqual(m.futures.sim.power, 1.0)
+        self.assertEqual(m.futures.ruled_out, 0)
+        self.assertGreater(m.prices()["waterloo"], max(0.6, before))
+        self.assertFalse(m.futures.sim.restart(T0 + MIN, store.latest("crowding", T0)[1]), "same stamp: no restart")
 
 
 if __name__ == "__main__":
