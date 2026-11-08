@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleHelp, Flame, MoreHorizontal, Trophy, WalletIcon, X } from "lucide-react";
+import { CircleHelp, Flame, MoreHorizontal, Trophy, WalletIcon, Workflow, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CityMapGL, flyToHotspots, type Pop } from "./CityMapGL";
 import { Coin, CoinText } from "./Coin";
@@ -24,7 +24,7 @@ import { HowItWorks } from "./HowItWorks";
 import { Confetti, isLandscapePhone, reducedMotion, useDismiss } from "./Live";
 import { LocalMarket } from "./LocalMarket";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
-import { EarningsMenu, TradersMenu } from "./Menus";
+import { EarningsMenu, TradersMenu, UnderTheHood } from "./Menus";
 import { cancelNote, usePendingFills, type Fill } from "./pending-bets";
 import { plainTitle, recordText } from "./plain";
 import { Scenario, type WhatIfOdds } from "./Scenario";
@@ -138,6 +138,7 @@ export function City() {
   const [board, setBoard] = useState<LeaderRow[] | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
+  const [hoodOpen, setHoodOpen] = useState(false);
   const [scenarioOpen, setScenarioOpen] = useState(false);
   const [whatIf, setWhatIf] = useState<Record<string, WhatIfOdds> | null>(null);
   const [tip, setTip] = useState<TipTarget | null>(null);
@@ -620,6 +621,15 @@ export function City() {
             <span className="tl-desk">Data</span>
           </button>
           <TradersMenu traders={traders} hist={traderHist} lastWhy={lastWhy} onTip={setTip} onBoard={() => setBoardOpen(true)} />
+          <UnderTheHood
+            open={hoodOpen}
+            onOpenChange={setHoodOpen}
+            feeds={feed?.feeds}
+            markets={feed?.markets ?? []}
+            openCount={shown.length}
+            traders={traders}
+            now={now}
+          />
           <button type="button" className="wl-open tl-wide" onClick={() => setWalletOpen(true)}>
             <WalletIcon size={16} />
             <span className="tl-desk">Wallet</span>
@@ -670,6 +680,16 @@ export function City() {
                 }}
               >
                 <span className="tl-health-dot" data-h={health} /> Data feeds
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setMoreOpen(false);
+                  setHoodOpen(true);
+                }}
+              >
+                <Workflow size={16} /> Under the hood
               </button>
               <button
                 type="button"
