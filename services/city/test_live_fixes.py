@@ -116,7 +116,7 @@ class RestartMidRoundTest(unittest.TestCase):
         row = next(r for r in again.traders_json(T0 + MIN)["traders"] if r["id"] == "sim")
         self.assertEqual((row["record"], row["points"]), ({"won": 7, "lost": 11}, 2872))
         board = {r["name"]: r["points"] for r in again.leaderboard()["rows"] if r["kind"] == "ai"}
-        self.assertEqual(board["Simulation"], 2872)
+        self.assertEqual(board["Simaissance"], 2872)
 
     def test_london_vix_lists_in_the_first_round_after_start(self):
         store = Store(self.raw.root, SPOTS)
@@ -335,7 +335,7 @@ class AiExposureTest(unittest.TestCase):
 
 
 class OpenStakeReserveTest(unittest.TestCase):
-    """The Contrarian reached -181 live: every stake was 10% of its settled points, but points only move at settle
+    """Fadewater reached -181 live: every stake was 10% of its settled points, but points only move at settle
     and it held a dozen bets on markets that settle minutes after they close, so their stakes added up past its
     points. Open stakes are now taken off before sizing, and a negative record on file loads as 0."""
 
@@ -403,7 +403,7 @@ class OpenStakeReserveTest(unittest.TestCase):
 
 
 class HeathrowReversionTest(unittest.TestCase):
-    """Fading the stack (Plane Spotter's public rule) won 22/34 out of sample (+66%): the old model added a past
+    """Fading the stack (Runway72's public rule) won 22/34 out of sample (+66%): the old model added a past
     5-min change to the count, blind to where it stood against its recent level. Now the count reverts to its
     trailing 30-min mean and the line sits at the futures' median on a .5."""
 

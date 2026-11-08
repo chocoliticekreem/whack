@@ -15,7 +15,7 @@ Ground truth is the code in `services/city` (cited as `file:line`), the live ser
 
 The design and the simulation below are unchanged. These facts about the code are now different; `file:line`
 citations below point at 1053c8d.
-- **Seven AI traders, not six:** the Simulation trader (#55) bets from the central sim. Each stake is min(100, 10% of
+- **Seven AI traders, not six:** Simaissance (#55) bets from the central sim. Each stake is min(100, 10% of
   the trader's points), not a fixed 100, and a trader sits out under 10 points (`traders.py`, #72).
 - **AI records persist** in the ledger DB (`ai_records`, #72), so a restart no longer resets them. They are still not
   double-entry, but AI open stakes now count toward the house exposure cap (#81).
@@ -121,7 +121,7 @@ Two structural facts matter for the economy:
 |---|---|
 | Futures | 38 of 50 end over 22.5, 12 under |
 | Model prior | over (38+0.5)/51 = **75.5%**, under **24.5%** |
-| Tube Crowd bets 100 on Under | spend 95 → 347.7 shares → locked odds **3.47** (the live `aiBets` shows 3.47) |
+| Tube Sigma bets 100 on Under | spend 95 → 347.7 shares → locked odds **3.47** (the live `aiBets` shows 3.47) |
 | Price after | under 0.245·e^(347.7/1200) / Σ = **30.3%**, over **69.7%**. Live `/markets` shows 0.3026 / 0.6974 |
 | A player then bets 100 on Over | 134.0 shares → odds **1.33**, payout 133. Price moves to 72.0% / 28.0% |
 | If the next reading rules out 10 Over futures | the model goes to 69.5% / 30.5%; with the same q the price goes to **63.1% / 36.9%** with no trade |
@@ -169,12 +169,12 @@ Three things change the textbook bound in our code:
 
 | Trader | Feed | Series (`traders.py:199-201`) | Rule | Evidence for the rule |
 |---|---|---|---|---|
-| Tube Crowd | TfL crowding | hub_surge, city_pulse, hub_hour | back the hub furthest below usual; ride the usual curve; back the hour's leader | 36% vs 20% luck (README); leader held 9/16 (`traders.py:98`) |
-| Camera Eye | London VIX | london_vix | fade the last 5-min move | 65%, 26/40 (`traders.py:128`) |
-| Plane Spotter | adsb.lol stacks | heathrow_stack | fade the 10-min move | 60%, 28/47 (`traders.py:140`) |
-| Line Watcher | Line Status | clean_sheet | NO on fresh unplanned trouble, else YES | unproven |
-| Rain Radar | Open-Meteo | city_pulse (in rain) | Over when it rains | unproven |
-| The Contrarian | bets | all, after half the window | fade the stake favourite, take the best-priced alternative | none: a deliberate foil |
+| Tube Sigma | TfL crowding | hub_surge, city_pulse, hub_hour | back the hub furthest below usual; ride the usual curve; back the hour's leader | 36% vs 20% luck (README); leader held 9/16 (`traders.py:98`) |
+| Camadel | London VIX | london_vix | fade the last 5-min move | 65%, 26/40 (`traders.py:128`) |
+| Runway72 | adsb.lol stacks | heathrow_stack | fade the 10-min move | 60%, 28/47 (`traders.py:140`) |
+| Line-ennium | Line Status | clean_sheet | NO on fresh unplanned trouble, else YES | unproven |
+| Rain Street | Open-Meteo | city_pulse (in rain) | Over when it rains | unproven |
+| Fadewater | bets | all, after half the window | fade the stake favourite, take the best-priced alternative | none: a deliberate foil |
 
 **Market makers or directional traders?** Directional. They never quote two-sided prices and never provide resting
 liquidity. They take one side at the house's price for a fixed 100 stake, once per market (`exchange.py:236-257`).
@@ -186,20 +186,20 @@ They still do two useful jobs:
 - **A visible opponent with reasons** (`traders.json` shows each one's `why`).
 
 **Track record (*sim*, 7 days, from 1,000 points).**
-- Tube Crowd: +52,928 (2,079 bets)
-- Camera Eye: +9,553
-- Plane Spotter: +4,993
-- Line Watcher: +188
-- Rain Radar: +39
-- **The Contrarian: −62,544** (3,160 bets, −20% per bet)
+- Tube Sigma: +52,928 (2,079 bets)
+- Camadel: +9,553
+- Runway72: +4,993
+- Line-ennium: +188
+- Rain Street: +39
+- **Fadewater: −62,544** (3,160 bets, −20% per bet)
 
-The specialists' gains depend on the assumed hit rates, which come from one day of data (n = 40–47). The Contrarian's
+The specialists' gains depend on the assumed hit rates, which come from one day of data (n = 40–47). Fadewater's
 loss is structural: it always buys the second favourite after informed flow has moved the price. Live at 20:14 it was
 already 2–4 with 992 points.
 
 **Should they get separate bankrolls?** Yes, for two reasons.
 1. Nothing stops their points going negative: there is no cash check, cap or limit on AI bets
-   (`exchange.py:252-257`). *sim:* The Contrarian loses about 62 points a round (−8,935 per 12-hour day), so it goes
+   (`exchange.py:252-257`). *sim:* Fadewater loses about 62 points a round (−8,935 per 12-hour day), so it goes
    below zero after about 16 rounds, roughly 80 minutes of play.
 2. Leaving them off the ledger hides real house risk. If their bets were ledgered, the base house book would be
    +12,770 instead of +11,928. At fee 0% it would be −34,208, and with the overconfident model
@@ -244,7 +244,7 @@ See recommendation R2.
   | Informed (prior with noise + a private signal right 65% binary / 40% 5-way) | +14.5% | 76% | +798 |
   | Herding | −4.5% | | |
   | Random | −14.8% | | |
-  | Contrarian | −16.9% | | |
+  | Fadewater | −16.9% | | |
 
   Informed players hold 8.7 of the leaderboard top 10. Without the private signal, the same informed players lose
   20.5%: knowing the opening probability is not an edge, because the price is already there and later data moves
@@ -469,7 +469,7 @@ Ranked by impact. "Must" means before the demo. None is applied; the owner of `s
 Check: `closes_at` = settles_at − 55 min = :35, the end of the opening round. The rule text and the `/round`
 headline copy should say "betting closes at :35". The card's countdown already reads `closesAt`.
 
-**R2. Must: give the AI traders a bankroll floor.** Evidence: The Contrarian reaches −62,544 points in 7 days
+**R2. Must: give the AI traders a bankroll floor.** Evidence: Fadewater reaches −62,544 points in 7 days
 (*sim*), about −62 a round. It goes negative after about 80 minutes of continuous rounds and then shows on the
 leaderboard beside humans.
 

@@ -2,7 +2,7 @@
 saying why in one line that cites the real number it saw. A trader with nothing to go on sits the round out and says
 so. Deterministic: no LLM calls. The rules are the cues measured in docs/questions.md.
 
-Adding a series: add `{series_id: decide_fn}` to the PLAYS entry of each trader whose feed informs it. The Contrarian
+Adding a series: add `{series_id: decide_fn}` to the PLAYS entry of each trader whose feed informs it. Fadewater
 plays every series."""
 from __future__ import annotations
 
@@ -21,26 +21,26 @@ KELLY_FRACTION = 0.25
 TROUBLE = re.compile(r"cancellations|signal|faulty|points|customer|incident", re.I)
 
 TRADERS = [
-    {"id": "tube", "name": "Tube Crowd", "emoji": "🚇", "feed": "crowding",
+    {"id": "tube", "name": "Tube Sigma", "kind": "AI hedge fund", "emoji": "🚇", "feed": "crowding",
      "watches": "Live busyness at 20 Tube stations against TfL's typical day (TfL Crowding API)",
      "style": "Backs the hub furthest below its usual to catch up, rides City Pulse with the usual curve, and backs "
               "the hour's leader unless a final whistle points at a hub."},
-    {"id": "cams", "name": "Camera Eye", "emoji": "📷", "feed": "vix",
+    {"id": "cams", "name": "Camadel", "kind": "AI hedge fund", "emoji": "📷", "feed": "vix",
      "watches": "The London VIX from the OverWatch multiverse, built on the JamCam people counts",
      "style": "Fades the VIX's last 5-min move: spikes fade (65% in today's replay)."},
-    {"id": "lines", "name": "Line Watcher", "emoji": "🚦", "feed": "line_status",
+    {"id": "lines", "name": "Line-ennium", "kind": "AI hedge fund", "emoji": "🚦", "feed": "line_status",
      "watches": "TfL status of every Tube line, minute by minute",
      "style": "Bets the clean sheet breaks when fresh unplanned trouble is on the board; otherwise backs it."},
-    {"id": "rain", "name": "Rain Radar", "emoji": "🌧️", "feed": "rain_now",
+    {"id": "rain", "name": "Rain Street", "kind": "AI hedge fund", "emoji": "🌧️", "feed": "rain_now",
      "watches": "Open-Meteo precipitation now for central London",
      "style": "Sits out unless it rains: wet weather sends people underground, so it backs City Pulse Over."},
-    {"id": "bus", "name": "Plane Spotter", "emoji": "✈️", "feed": "aircraft",
+    {"id": "bus", "name": "Runway72", "kind": "AI hedge fund", "emoji": "✈️", "feed": "aircraft",
      "watches": "Aircraft in the four Heathrow holding stacks (adsb.lol)",
      "style": "Stacks drain after they build: fades the last 10 minutes' move."},
-    {"id": "contrarian", "name": "The Contrarian", "emoji": "🙃", "feed": "bets",
+    {"id": "contrarian", "name": "Fadewater", "kind": "AI hedge fund", "emoji": "🙃", "feed": "bets",
      "watches": "Where players and the other traders are putting their points",
      "style": "Fades the favourite of any series and takes the best-priced alternative."},
-    {"id": "sim", "name": "Simulation", "emoji": "🧭", "feed": "sim",
+    {"id": "sim", "name": "Simaissance", "kind": "AI hedge fund", "emoji": "🧭", "feed": "sim",
      "watches": "Agent simulation of central London (50 worlds on the street graph)",
      "style": "Backs the option the simulation's forecast rates most above the market's price, only with an edge of "
               "5 points or more."},
@@ -98,7 +98,7 @@ def stake_for(points: int, open_stakes: float, belief: float | None, price: floa
     against the option's current price, sized on the points not already staked on unsettled markets, at most STAKE,
     rounded down; 0 under MIN_STAKE or with no edge after the fee and slippage, so the trader sits out.
     Never overdraws: the stake is at most KELLY_FRACTION of the free points, so every open stake together is at most
-    the points and losing all of them ends at >= 0 (the Contrarian went to -181 live when stakes were sized on
+    the points and losing all of them ends at >= 0 (Fadewater went to -181 live when stakes were sized on
     settled points alone, while a dozen bets on the same pre-loss points were still open)."""
     free = points - open_stakes
     if belief is None or free < MIN_STAKE:
@@ -153,7 +153,7 @@ def save_records(ledger, ts: int, records: dict[str, dict]) -> None:
                               [(tid, ts, r["won"], r["lost"], r["points"], r["why"]) for tid, r in records.items()])
 
 
-# ---------------------------------------------------------------- Tube Crowd
+# ---------------------------------------------------------------- Tube Sigma
 
 
 def tube_surge(m: Market, store: Store, now: int, ctx: dict):
@@ -221,7 +221,7 @@ def tube_busy(m: Market, store: Store, now: int, ctx: dict):
         f"that trend puts it near {proj:.1f}% at {local_time(m.settles_at)}")
 
 
-# ---------------------------------------------------------------- Camera Eye, Plane Spotter, Line Watcher, Rain
+# ---------------------------------------------------------------- Camadel, Runway72, Line-ennium, Rain
 
 
 def fade(series: list[tuple[int, float]], minutes: int):
@@ -319,7 +319,7 @@ def sim_trade(m: Market, store: Store, now: int, ctx: dict):
     best = max(prices, key=lambda o: view["probs"][o] - prices[o])
     if view["probs"][best] - prices[best] < SIM_EDGE:
         return None
-    return best, (f"Simulation: {view['detail'][best]}; {m.label(best)} in {pct(view['probs'][best])} of its draws "
+    return best, (f"Simaissance: {view['detail'][best]}; {m.label(best)} in {pct(view['probs'][best])} of its draws "
                   f"vs the market's {pct(prices[best])}")
 
 
@@ -330,7 +330,7 @@ PLAYS = {"tube":{"hub_surge": tube_surge, "city_pulse": tube_pulse, "hub_hour": 
 
 
 def decide(tid: str, m: Market, store: Store, now: int, ctx: dict):
-    """(option, why) or None. Only the series in the trader's PLAYS entry (all series for the Contrarian)."""
+    """(option, why) or None. Only the series in the trader's PLAYS entry (all series for Fadewater)."""
     if tid == "contrarian":
         return contrarian(m, store, now, ctx)
     play = PLAYS[tid].get(m.sub)

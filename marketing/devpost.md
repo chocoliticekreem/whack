@@ -63,8 +63,8 @@ It opens three doors:
   area: Waterloo · 440 m".
 - **Switch to the Exchange** (top bar): the same markets on a live order book with no house, against 2,196 AI
   accounts. A dark trading-terminal screen with a price chart, the book, trades, and your orders and positions.
-- **Seven AI traders bet on the same markets as you**, each reading one live feed: Tube Crowd (station crowding), Camera Eye (the
-  London VIX), Line Watcher (Tube status), Rain Radar (rain), Plane Spotter (Heathrow holding stacks), The Contrarian
+- **Seven AI traders bet on the same markets as you**, each reading one live feed: Tube Sigma (station crowding), Camadel (the
+  London VIX), Line-ennium (Tube status), Rain Street (rain), Runway72 (Heathrow holding stacks), Fadewater
   (where the points are going) and Simulation (the agent simulation's forecast). Each sizes its bet by its edge, gives
   a reason with a real number, and sits out (and says why) when it has no edge. The traders dropdown ranks them by
   trust: "The market leans on traders who've been right."
@@ -156,9 +156,9 @@ everything after 17:00 is out of sample.
   54 markets after 00:55 that no earlier analysis saw it is slightly worse than the old loop (+0.0008 ± 0.0018).
 - **Nobody has proven skill.** A permutation test re-ran the whole loop 200 times on shuffled outcomes. Of the 10
   trader-series with five or more settled views, about 0.5 would look skilled at p < 0.05 by chance. 2 did (Tube
-  Crowd on City Pulse, Plane Spotter on Heathrow), and none survives Bonferroni or Benjamini–Hochberg. The loop's own
+  Crowd on City Pulse, Runway72 on Heathrow), and none survives Bonferroni or Benjamini–Hochberg. The loop's own
   verdict agrees: no trader ends with P(skill > 0) above 0.95.
-- **One open leak.** As the city empties in the late evening, copying Tube Crowd on City Pulse still makes +42% (95% CI
+- **One open leak.** As the city empties in the late evening, copying Tube Sigma on City Pulse still makes +42% (95% CI
   +23% to +61%, n = 82, 17:00–00:05), because in the evening the city moved 1.6× the usual curve and one afternoon can't teach the model that. TOPS shaves the pick's
   return at the opening price from +19.3% to +16.8% after 17:00; the caps stop it closing the gap. The trend model (#103) cuts it only to +41%, so we
   didn't ship anything tuned on a single evening.
@@ -233,14 +233,14 @@ changed the product:
   temperature we had tuned on the same day's data, and a permutation test against chance (#102).
 
 The technical challenges:
-- **Our own trader beat the house.** A replay found that copying Tube Crowd's rule (back TfL's usual-Saturday curve)
+- **Our own trader beat the house.** A replay found that copying Tube Sigma's rule (back TfL's usual-Saturday curve)
   beat our market maker by 32–48% per bet. We put that curve into the futures and rebuilt the hub race model. On the
   hub race the edge is gone (−3% out of sample). On City Pulse in a falling evening it isn't, and we say so.
 - **Bots pressure-tested the exchange, and they found real bugs.** The first live run (75 minutes, 327 bets) caught
   restart, pending-bet, confirm-bypass and settlement-record bugs, which we fixed. The re-run on our new pricing (65
   minutes): City Pulse opened at 50–66% instead of up to 97%, no prices froze, and the house lost 177 points to the
   bots instead of 1,408. It also exposed three leaks, which we fixed and re-measured out of sample, and an AI
-  stake-sizing bug that took The Contrarian to −181 points; under quarter-Kelly on free points no trader can go below 0.
+  stake-sizing bug that took Fadewater to −181 points; under quarter-Kelly on free points no trader can go below 0.
 - **The forecast lost to "nothing changes".** On real Oxford Circus counts the simulation was first off by 5.49 people
   per camera against 1.54 for persistence. Anchoring every world to the last real count and adding rain, crowding and
   bike likelihoods brought it to a tie.
@@ -273,8 +273,8 @@ The technical challenges:
 - **Measure before you claim.** Our naive baseline, "nothing changes", was hard to beat, and a quant will ask. The
   honest number is more defensible than a flattering one.
 - **Test against chance, not just against zero.** With 10 trader-series, about one looks skilled by luck. Our
-  permutation test found two, and none survives correction. Without it we would have called Tube Crowd skilled.
-- **The leaderboard is the product.** When our own Tube Crowd trader beat the house, that was the system working: it
+  permutation test found two, and none survives correction. Without it we would have called Tube Sigma skilled.
+- **The leaderboard is the product.** When our own Tube Sigma trader beat the house, that was the system working: it
   told us which data the market maker was ignoring. That's the TOPS idea.
 - **A good market question is one you can only win by reading the data.** Local questions, where anyone standing there
   knows the answer, kill the urge to bet; obvious ones (a favourite over 85%) aren't worth listing.
@@ -310,9 +310,9 @@ copying simple public rules found three ways to beat our market maker, and each 
 a bootstrap confidence interval; two were priced in, and the one that wasn't we report.
 
 **incident.io: an agent that reacts to a live feed, with personality.** OverWatch's seven AI traders each watch one
-live feed of London and act on it at every new 5-minute round: Tube Crowd reads TfL station crowding,
-Line Watcher the Tube's line status, Plane Spotter the planes holding over Heathrow, Camera Eye the London VIX (the spread of
-50 simulated worlds of Oxford Circus, anchored to YOLO people counts on TfL cameras), Rain Radar Open-Meteo rain, The Contrarian where everyone else's money is
+live feed of London and act on it at every new 5-minute round: Tube Sigma reads TfL station crowding,
+Line-ennium the Tube's line status, Runway72 the planes holding over Heathrow, Camadel the London VIX (the spread of
+50 simulated worlds of Oxford Circus, anchored to YOLO people counts on TfL cameras), Rain Street Open-Meteo rain, Fadewater where everyone else's money is
 going, and Simulation our agent simulation of central London. Each has its own temperament and explains every bet with
 a real number ("Bank is at 93% of a usual Saturday, the furthest below: it catches up"). It sizes the bet by its edge,
 says why when it sits a round out, and keeps a public record that decides how much the market trusts it next time.

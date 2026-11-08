@@ -25,7 +25,7 @@ Partly. Each bet is a **series**, and three places together define it:
 | Series | Question players see | Answers | Settles on | Notes |
 |---|---|---|---|---|
 | `hub_surge` | Which area will see the biggest rise in busyness relative to usual by HH:MM? | Oxford Circus / King's Cross / Piccadilly Circus / Waterloo / Bank | TfL Crowding: each hub's first reading TfL stamped **after** close, compared with its usual-day level | Result in about 14 min (fair settlement). Priced by a relative mean-reversion model refitted every round on today's readings, re-drawn after each mid-round TfL publish. See [hub_surge: the model](#hub_surge-the-model). |
-| `city_pulse` | Will Tube activity finish above the expected level (X) by HH:MM? | Above / Below | Average busyness of 20 TfL stations, first readings stamped after close | The line is the futures' median, on the coarsest of .5/.25/.1/.05/.01 no wider than their spread: .0/.5 by day, finer on a quiet night (#77; a fixed .5 opened 03:20 on 8 Nov at 3%/97%). The futures follow the usual day plus 0.30 of the last 10 min's trend vs usual (see [City Pulse model](#city-pulse-model)). Known: the Tube Crowd "pulse leak" is still open in the evening. |
+| `city_pulse` | Will Tube activity finish above the expected level (X) by HH:MM? | Above / Below | Average busyness of 20 TfL stations, first readings stamped after close | The line is the futures' median, on the coarsest of .5/.25/.1/.05/.01 no wider than their spread: .0/.5 by day, finer on a quiet night (#77; a fixed .5 opened 03:20 on 8 Nov at 3%/97%). The futures follow the usual day plus 0.30 of the last 10 min's trend vs usual (see [City Pulse model](#city-pulse-model)). Known: the Tube Sigma "pulse leak" is still open in the evening. |
 | `london_vix` | Will the model become more uncertain by HH:MM? | More uncertain / Less uncertain | The Oxford Circus multiverse engine's uncertainty index (VIX) at settle | Needs the engine live with about 1 h of warm-up. When it's unavailable, `heathrow_stack` stands in. |
 | `heathrow_stack` (stand-in) | More or fewer planes circling Heathrow at HH:MM? | More planes / Fewer planes | adsb.lol: aircraft in the 4 Heathrow holding stacks | Listed only when the VIX is down. Poisson count around a mean-reverting level, line centred (#86). |
 
@@ -81,7 +81,7 @@ The drift used to be half the last hour's mean change in `d`, capped at σ/5. It
 
 The trend model is the only candidate that beats the old one, 50/50 and climatology. It is also the simplest of the three trend variants. The gain is about 1 SE, from one day of data.
 
-**Pulse leak** (10 points on Tube Crowd's pick at the opening quote, empty book, 95% bootstrap CI over markets): old +43.0% [+22%, +63%], new +41.3% [+22%, +61%]. **Not closed.**
+**Pulse leak** (10 points on Tube Sigma's pick at the opening quote, empty book, 95% bootstrap CI over markets): old +43.0% [+22%, +63%], new +41.3% [+22%, +61%]. **Not closed.**
 
 **Reliability of the opening P(Above), out of sample** (2,880 market × draw pairs):
 
@@ -99,11 +99,11 @@ The trend model is the only candidate that beats the old one, 50/50 and climatol
 Both models are miscalibrated in the middle: the 0.5–0.6 bin hits 28% for the old model and 36% for the new one. The new model is closer there, but the evening's Below tilt is still in it.
 
 **Known limits.**
-1. **The leak is an evening regime, and one afternoon can't teach it.** In the fit window the same leak has no edge: old −7.9% [−29%, +14%], new −14.3% [−35%, +7%]. After 18:00 Tube Crowd's pick wins about 75%. Its pick is mostly the sign of the usual curve's next 15-min step.
+1. **The leak is an evening regime, and one afternoon can't teach it.** In the fit window the same leak has no edge: old −7.9% [−29%, +14%], new −14.3% [−35%, +7%]. After 18:00 Tube Sigma's pick wins about 75%. Its pick is mostly the sign of the usual curve's next 15-min step.
 
    The script prints fits it never prices with. On 18:00–23:30 opens the city moved 1.62× the usual curve's log change, against 1.09× on 12:00–18:00, and the trend coefficient is 0.79 against 0.30. So on this Saturday evening the city moved far more than TfL's typical day says. Betting the usual slope's sign beats any line that carries the slope only once.
 
-   A coefficient refitted on the last 2 h at each open narrows the leak only to +38% [+19%, +58%]. The likely fix is fitting the amplitude and trend by hour of day across several days. The TOPS loop already leans on Tube Crowd's record in the meantime.
+   A coefficient refitted on the last 2 h at each open narrows the leak only to +38% [+19%, +58%]. The likely fix is fitting the amplitude and trend by hour of day across several days. The TOPS loop already leans on Tube Sigma's record in the meantime.
 
    Fits that include the 23:30–00:00 opens collapse (trend −0.08, amplitude 0.29) because of limit 3.
 2. **The futures are too narrow.** 39% of outcomes land outside their 90% band. Sizing sigma on real 15–20 min changes over the last 2 h cuts that to 27% and improves the log score of the spread from +0.48 to −0.40. It does not improve Brier or log loss at the listed line, so it is not live.
@@ -143,7 +143,7 @@ model re-draws from that reading for the steps left, untempered.
 races, 12:14-02:10:
 - Per hub: King's Cross priced 0.154, won 0.241; Bank priced 0.279, won 0.241; Waterloo priced 0.215, won 0.163. The
   pull toward the five-hub mean is the cause: it assumes every hub's normal level is the same.
-- Leader vs riser: the furthest-below hub (Tube Crowd's pick) won 59/166 at 0.29 (+18% ROI); the leader 21/166 at
+- Leader vs riser: the furthest-below hub (Tube Sigma's pick) won 59/166 at 0.29 (+18% ROI); the leader 21/166 at
   0.13 (−10%). Split by hub, Bank as laggard was fair (36/113 at 0.30, −1%) and every other laggard won 23/53 at 0.26
   (+58%).
 - Reversion: b over k steps is 0.054, 0.100, 0.164, 0.216 (± 0.015-0.029) for k = 1-4, close to a 1-step rate
@@ -184,13 +184,13 @@ races; the in-round rule at the price after the first in-round publish):
 
 | rule | old model | deployed |
 |---|---|---|
-| copycat Tube Crowd (hub furthest below usual) | 48/133 at 0.28: +24.0% [−4%, +55%] | 48/133 at 0.30: +18.2% [−9%, +48%] |
+| copycat Tube Sigma (hub furthest below usual) | 48/133 at 0.28: +24.0% [−4%, +55%] | 48/133 at 0.30: +18.2% [−9%, +48%] |
 | back the leader (furthest above usual) | 17/133 at 0.14: −19.0% [−54%, +21%] | 17/133 at 0.13: −12.6% [−51%, +30%] |
 | back the top riser at open (last 5-min move) | 24/100 at 0.20: +18.5% [−24%, +64%] | 24/100 at 0.18: +23.9% [−19%, +75%] |
 | back the top riser since open, at the first in-round publish | 58/126 at 0.42: +0.4% [−21%, +22%] | 58/126 at 0.42: +2.6% [−19%, +24%] |
 
 Every CI includes 0 for both models. With the full exchange (`replay_score.py`, 12:00-02:30, AI staking and locked
-odds), Tube Crowd's real hub_surge record goes from +2.8% [−20%, +27%] to −3.2% [−26%, +20%] on 170 bets.
+odds), Tube Sigma's real hub_surge record goes from +2.8% [−20%, +27%] to −3.2% [−26%, +20%] on 170 bets.
 
 **Known limits.**
 - One recorded day (Saturday 12:00 to Sunday 02:35, 133 scored races, heavily overlapping). The log-loss gain is
@@ -213,13 +213,13 @@ odds), Tube Crowd's real hub_surge record goes from +2.8% [−20%, +27%] to −3
 
 | Trader | Feed | Plays |
 |---|---|---|
-| Tube Crowd | TfL Crowding | hub_surge, city_pulse, hub_hour |
-| Camera Eye | London VIX | london_vix |
-| Line Watcher | TfL line status | clean_sheet |
-| Rain Radar | Open-Meteo rain | city_pulse (only when it rains) |
-| Plane Spotter | Heathrow stacks | heathrow_stack |
+| Tube Sigma | TfL Crowding | hub_surge, city_pulse, hub_hour |
+| Camadel | London VIX | london_vix |
+| Line-ennium | TfL line status | clean_sheet |
+| Rain Street | Open-Meteo rain | city_pulse (only when it rains) |
+| Runway72 | Heathrow stacks | heathrow_stack |
 | Simulation | Central-London agent sim | hub_surge, city_pulse, hub_hour, london_vix |
-| The Contrarian | Other traders' bets | everything |
+| Fadewater | Other traders' bets | everything |
 
 Their track records feed opening prices through the TOPS loop (#93). The blend is 0 until a trader has proven skill.
 

@@ -71,7 +71,7 @@ export function TradersMenu({
                     <span className="ow-rank tl-data">{i + 1}</span>
                     <Badge id={t.id} name={t.name} />
                     <span className="ow-trader-text">
-                      <b>{t.name}</b>
+                      <b>{t.name}</b>{t.kind && <span className="tl-muted"> · {t.kind}</span>}
                       <span className="tl-muted">{plainWatches(t.id, t.watches)}</span>
                     </span>
                     <span className="ow-trader-num">

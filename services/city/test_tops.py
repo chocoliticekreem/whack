@@ -313,7 +313,7 @@ class SizingTest(unittest.TestCase):
 
     def test_no_random_sequence_of_bets_and_settles_overdraws(self):
         """Property: whatever the beliefs, prices, fills and outcomes, every open stake together never exceeds the
-        points, so the balance never goes negative (the Contrarian's -181 in #86)."""
+        points, so the balance never goes negative (Fadewater's -181 in #86)."""
         for seed in range(300):
             rng = random.Random(seed)
             points = rng.choice([0, 9, 10, 11, 50, 120, 1000, rng.randint(0, 3000)])

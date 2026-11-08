@@ -645,7 +645,7 @@ RAIN_MM = 0.1
 
 # ---------------------------------------------------------------- the central-London agent simulation
 
-# Default 0: the central sim loses to persistence (docs/judge-prep.md), so it trades as the Simulation trader but
+# Default 0: the central sim loses to persistence (docs/judge-prep.md), so it trades as Simaissance but
 # stays out of the price unless SIM_WEIGHT is set.
 SIM_WEIGHT = max(0.0, min(1.0, float(os.environ.get("SIM_WEIGHT", "0"))))
 SIM_RHO = 0.5

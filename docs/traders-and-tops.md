@@ -17,7 +17,7 @@ A trader bets on option i, priced `p` by the LMSR (`b = 1200`, 5% fee `f`). With
 
 (the closed form of `pricing.Book.quote`, on any number of outcomes). A winning share pays 1 point.
 
-**The trader's probability `q`.** The Simulation trader uses its forecast. The others only pick a side, so `q` is
+**The trader's probability `q`.** Simaissance uses its forecast. The others only pick a side, so `q` is
 the TOPS view of that pick: the futures' price plus the trader's shrunk excess hit rate on its past picks in the
 series, never below the price (`Tops.belief`). No record means `q` = the price, which means no edge, which means no
 bet. A trader earns its stake by being right first.
@@ -51,8 +51,8 @@ bet leaves `P − O ≥ 0`. The property test `SizingTest.test_no_random_sequenc
 300 random sequences of bets (random beliefs, prices, bankrolls from 0 to 3000) and settles through `stake_for` and
 the real locked odds; replacing `stake_for` with the #86 behaviour (sizing on settled points) makes it fail.
 
-On the replay (12:40–02:35, 30 s ticks) the traders placed 221 bets, mean stake 23: Tube Crowd 137, the Contrarian
-68, Plane Spotter 16. Final points: Tube Crowd 1080, Contrarian 1050, Plane Spotter 805, the rest 1000 untouched
+On the replay (12:40–02:35, 30 s ticks) the traders placed 221 bets, mean stake 23: Tube Sigma 137, Fadewater
+68, Runway72 16. Final points: Tube Sigma 1080, Fadewater 1050, Runway72 805, the rest 1000 untouched
 (no edge, or no views: no recorded sim, VIX round or rain).
 
 ## 2. Skill: an empirical-Bayes posterior per trader per series
@@ -142,11 +142,11 @@ slightly worse on hub_surge and on the 54 fresh markets after 00:55 (noise at th
 (two traders per series, both rules sit on the cap and the floor), and the old weights with the new λ match the new
 loop. The improvement is all λ.
 
-**Leaks** (10 points on Tube Crowd's pick at the opening quote, ROI, 95% bootstrap CI), opened ≥ 17:00:
+**Leaks** (10 points on Tube Sigma's pick at the opening quote, ROI, 95% bootstrap CI), opened ≥ 17:00:
 
 | leak | n | futures | old | new |
 |---|---|---|---|---|
-| City Pulse (Tube Crowd's pick) | 112 | +19.3% [+1%, +38%] | +18.2% [−0%, +37%] | +16.8% [−1%, +35%] |
+| City Pulse (Tube Sigma's pick) | 112 | +19.3% [+1%, +38%] | +18.2% [−0%, +37%] | +16.8% [−1%, +35%] |
 | copycat (hub_surge) | 112 | +15.1% [−13%, +45%] | +15.0% [−13%, +45%] | +13.9% [−14%, +44%] |
 
 Shaved, not closed. The caps are why: λ ≤ 0.3 and a 40% weight move the price at most 12% of the way to one view.
@@ -175,33 +175,33 @@ nothing). Statistic: the trader's undecayed mean log score over the day; p = sha
 
 | trader | series | n | mean score (nats) | p, shuffle | p, prior draw | P(θ > 0) at the end |
 |---|---|---|---|---|---|---|
-| Tube Crowd | city_pulse | 164 | +0.0099 | 0.015 | 0.020 | 0.37 |
-| Plane Spotter | heathrow_stack | 103 | +0.0051 | 0.030 | 0.045 | 0.54 |
-| Contrarian | clean_sheet | 13 | +0.1351 | 0.075 | 0.010 | 0.91 |
-| Line Watcher | clean_sheet | 13 | −0.0065 | 0.44 | 0.54 | 0.48 |
-| Tube Crowd | hub_surge | 164 | −0.0024 | 0.55 | 0.32 | 0.71 |
-| Contrarian | hub_surge | 164 | −0.0045 | 0.70 | 0.46 | 0.41 |
-| Contrarian | heathrow_stack | 155 | −0.0001 | 0.77 | 0.14 | 0.47 |
-| Tube Crowd | hub_hour | 12 | −0.0276 | 0.85 | 0.71 | 0.37 |
-| Contrarian | city_pulse | 165 | −0.0186 | 0.995 | 0.995 | 0.43 |
-| Contrarian | hub_hour | 12 | −0.0931 | 1.000 | 0.97 | 0.12 |
+| Tube Sigma | city_pulse | 164 | +0.0099 | 0.015 | 0.020 | 0.37 |
+| Runway72 | heathrow_stack | 103 | +0.0051 | 0.030 | 0.045 | 0.54 |
+| Fadewater | clean_sheet | 13 | +0.1351 | 0.075 | 0.010 | 0.91 |
+| Line-ennium | clean_sheet | 13 | −0.0065 | 0.44 | 0.54 | 0.48 |
+| Tube Sigma | hub_surge | 164 | −0.0024 | 0.55 | 0.32 | 0.71 |
+| Fadewater | hub_surge | 164 | −0.0045 | 0.70 | 0.46 | 0.41 |
+| Fadewater | heathrow_stack | 155 | −0.0001 | 0.77 | 0.14 | 0.47 |
+| Tube Sigma | hub_hour | 12 | −0.0276 | 0.85 | 0.71 | 0.37 |
+| Fadewater | city_pulse | 165 | −0.0186 | 0.995 | 0.995 | 0.43 |
+| Fadewater | hub_hour | 12 | −0.0931 | 1.000 | 0.97 | 0.12 |
 
 - **Expected by chance at p < 0.05: 0.5 of 10.** Observed: 2 under the shuffle null (P(≥ 2 by chance) = 0.095) and
   3 under the prior null (P = 0.010).
 - **None survives Bonferroni (p < 0.005) or Benjamini–Hochberg at 5%.**
 - **The loop's own verdict at the end, P(θ > 0) > 0.95: 0 traders** (0.06 expected by chance). The posterior is
   doing its job: it does not call anyone skilled on this sample.
-- Read it as: there is probably some signal in the set (Tube Crowd on City Pulse is the one consistent with the
+- Read it as: there is probably some signal in the set (Tube Sigma on City Pulse is the one consistent with the
   City Pulse leak), but no single trader-series is proven. The prior-draw null rejects more easily because it also
   assumes the futures are calibrated; a trader exploiting a futures mispricing (the leak) is information the
   market should absorb, which is exactly what TOPS is for.
-- Tube Crowd's City Pulse edge was a daytime edge: its decayed posterior at the end of the window is P = 0.37, and
+- Tube Sigma's City Pulse edge was a daytime edge: its decayed posterior at the end of the window is P = 0.37, and
   on the 17 City Pulse markets after 00:55 its pick lost money (−26%).
 
 ## 7. Limits
 
 - **One day of data.** 509 settled markets, five series, two traders with views on most of them (the Simulation,
-  Camera Eye and Rain Radar have none in the replay: no recorded sim, no VIX round, no rain). Nothing here is
+  Camadel and Rain Street have none in the replay: no recorded sim, no VIX round, no rain). Nothing here is
   significant after multiple-testing correction; the comparison can only say "not worse".
 - **λ̂ is scale-free; the shrink now measures evidence, the cap still binds.** `Σr / Σr²` grows as the pool's
   moves shrink, so where the pool barely differs from the futures λ̂ is large. The James–Stein factor stops noise

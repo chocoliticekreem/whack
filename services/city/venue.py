@@ -185,7 +185,7 @@ class Venue:
         return bool(seen) and max(seen) - min(seen) >= FAST_MOVE
 
     def option_volume(self, m) -> dict[str, float]:
-        """Contracts bought on each of a market's options so far (what the Contrarian fades)."""
+        """Contracts bought on each of a market's options so far (what Fadewater fades)."""
         out = {o: 0.0 for o in m.option_ids()}
         for cid, c in self.contracts.items():
             if c.market is not m:

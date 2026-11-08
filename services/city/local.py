@@ -9,7 +9,7 @@ street segments and nothing to trade: no settlement source is ever invented.
 One market per sensor per round (a second click near the same sensor gets the same market), at most 12 per round,
 and at most 4 new ones a minute per player. The markets are ordinary exchange markets in series local_cam and
 local_station: same 50 futures, particle filter, LMSR, odds floor, position and house caps, decided-outcome lock,
-settlement snapshot, void and refund. AI traders opt in by feed (Camera Eye on cameras, Tube Crowd and the
+settlement snapshot, void and refund. AI traders opt in by feed (Camadel on cameras, Tube Sigma and the
 Simulation on stations).
 
 Settlement:
@@ -411,7 +411,7 @@ def series_view(m, store: Store):
 
 
 def cams_local(m, store: Store, now: int, ctx: dict):
-    """Camera Eye: back the side of the line the camera's last 30 min of counts sit on."""
+    """Camadel: back the side of the line the camera's last 30 min of counts sit on."""
     rows = cam_counts(store, m.spec["sensor"]["id"], now - 30 * MIN_MS, now)
     if len(rows) < 3:
         return None
@@ -422,7 +422,7 @@ def cams_local(m, store: Store, now: int, ctx: dict):
 
 
 def tube_local(m, store: Store, now: int, ctx: dict):
-    """Tube Crowd: carry half the last 15 min's change in vs usual forward to the settle reading."""
+    """Tube Sigma: carry half the last 15 min's change in vs usual forward to the settle reading."""
     nap = m.spec["naptan"]
     hist = [(ts, s[nap] / t * 100) for ts, s in store.between("crowding", now - 16 * MIN_MS, now)
             if nap in s and (t := store.typical(nap, ts))]
@@ -436,7 +436,7 @@ def tube_local(m, store: Store, now: int, ctx: dict):
 
 
 def sim_local(m, store: Store, now: int, ctx: dict):
-    """Simulation: the side the central simulation's station forecast rates 5+ points above its price."""
+    """Simaissance: the side the central simulation's station forecast rates 5+ points above its price."""
     fc = store.sim(now)
     dist = pricing.sim_dist(fc, m.spec["naptan"], m.settles_at) if fc else None
     if not dist:
@@ -447,7 +447,7 @@ def sim_local(m, store: Store, now: int, ctx: dict):
     best = max(prices, key=lambda o: probs[o] - prices[o])
     if probs[best] - prices[best] < traders.SIM_EDGE:
         return None
-    return best, (f"Simulation: {m.spec['name']} {mu * 100:.0f}% of usual at {local_time(m.settles_at)}; "
+    return best, (f"Simaissance: {m.spec['name']} {mu * 100:.0f}% of usual at {local_time(m.settles_at)}; "
                   f"{m.label(best)} in {probs[best] * 100:.0f}% of its draws vs the market's {prices[best] * 100:.0f}%")
 
 

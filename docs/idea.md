@@ -25,7 +25,7 @@ Live at https://overwatchcapital.vercel.app/multiverse. Points only, never real 
 |---|---|---|
 | **1. The futures** (engine) | 50 futures per market from the latest real reading at TfL's own stamp. City Pulse walks follow the usual-Saturday curve; the hub race mean-reverts toward the five-hub average (#72, #77). The central sim can supply a share (`SIM_WEIGHT`), set to 0 live because it loses to persistence. The London VIX comes from the agent simulation of Oxford Circus (50 worlds, common random numbers) | *The new world*: futures that don't exist yet |
 | **2. The market** (exchange) | City-wide 5-minute rounds on the London clock, plus click-anywhere local markets on 33 real sensors (#71). Each reading reweights the futures; LMSR turns them and the bets into prices. Kalshi-style rules: a source and rule on every market, close before settle, settlement on TfL's own timestamp, void and refund, a frozen reading, bet delays against courtsiding (#61, #72, #81) | *The interaction*: you bet, reality settles it |
-| **3. The traders** (the first half of TOPS) | 7 computer traders, each reading one live feed: Tube Crowd (station crowding), Camera Eye (the VIX), Line Watcher (Tube status), Rain Radar (rain), Plane Spotter (Heathrow holding stacks), The Contrarian (where the points are going), Simulation (the central sim's forecast). Each bets through the same LMSR, gives a reason citing a real number, and keeps a record that survives restarts. The TOPS loop scores every view against the futures and blends the proven ones into the opening price (at most 30%, no trader over 40% of that); with no proven skill the price is the futures | *The MW hook*: their founding idea, pointed at a city |
+| **3. The traders** (the first half of TOPS) | 7 computer traders, each reading one live feed: Tube Sigma (station crowding), Camadel (the VIX), Line-ennium (Tube status), Rain Street (rain), Runway72 (Heathrow holding stacks), Fadewater (where the points are going), Simulation (the central sim's forecast). Each bets through the same LMSR, gives a reason citing a real number, and keeps a record that survives restarts. The TOPS loop scores every view against the futures and blends the proven ones into the opening price (at most 30%, no trader over 40% of that); with no proven skill the price is the futures | *The MW hook*: their founding idea, pointed at a city |
 | **4. The Exchange** | The same markets on order books, no house: 12 AI market makers, 184 funds, 2,000 retail (#90–#123). On known-truth markets its prices end 52% closer to the truth than our forecast | *Where it goes*: from bookmaker to exchange |
 | **Output: the London VIX** | The price-weighted spread of predicted crowds across the simulated worlds of Oxford Circus, as one index. An uncertainty gauge, not a fear index | *The new data* |
 
@@ -65,7 +65,7 @@ pointed at a city: the opening price leans on the traders who've been right, and
 > it arrives. Seven AI traders, each reading one stream of alternative data, bet on the same markets, explain why and
 > build a public track record. Real readings settle every market under published rules, on a double-entry ledger.
 >
-> Nobody knows the outcome in advance. The edge is reading the data better. Our own Tube Crowd trader proved the house
+> Nobody knows the outcome in advance. The edge is reading the data better. Our own Tube Sigma trader proved the house
 > could be read better; we priced its signal in. That's the leaderboard's job.
 
 **Close:** "Marshall Wace built TOPS to find out which brokers to trust. We built it to find out which data reads a
@@ -76,7 +76,7 @@ city best."
   1.35 over the latest 30 minutes (48 counts), 79% inside its 80% range (`eval_real.py --windows 6`). Central London
   loses to persistence (station MAE 3.94 vs 3.61), so the sim is out of the price. Out of sample, the hub race's open
   price beats a uniform guess (Brier 0.755 vs 0.800, t = 1.7, n=51); no other series does significantly.
-- *"Did your own trader beat the house?"* Yes: copying Tube Crowd made +32–48% a bet. We put the usual-Saturday curve
+- *"Did your own trader beat the house?"* Yes: copying Tube Sigma made +32–48% a bet. We put the usual-Saturday curve
   into the futures; out of sample it's now about +13%, with a 95% CI of −27% to +55%. Not proven gone.
 - *"Real betting?"* No. Points only. The ledger is real-money grade; a house-banked LMSR is bookmaking. The order
   book (exchange-design.md) is live at /multiverse/exchange beside the house-priced main screen; real money and
@@ -102,7 +102,7 @@ inside the 3-minute slot.
 2. **0:30:** who's on the other side: the LMSR house, capped on a ledger.
 3. **0:50, a station market's fair wait.** A closed hub card: "Betting closed · result about 23:50, when TfL
    publishes". We settle only on numbers TfL stamped after close.
-4. **1:20, the traders dropdown.** Tube Crowd's record and reason. The TOPS line, with the honest leak number.
+4. **1:20, the traders dropdown.** Tube Sigma's record and reason. The TOPS line, with the honest leak number.
 5. **1:50, the Exchange.** Top bar, Exchange: the same markets on an order book, no house, 2,196 AI accounts.
 6. **2:20, settle.** The fast market settles; "Your bets" shows the result for 10 s and, on a win, confetti with the profit.
 7. **2:40 close:** the TOPS line.
@@ -110,7 +110,7 @@ inside the 3-minute slot.
 ## Why simulate, not just read data
 Owner's direction: the digital twin and the agent simulation must earn their place beyond looks, with no
 special-cased scenarios, and the scope is central London, not one junction. **Status: the Oxford Circus simulation
-produces the London VIX; the central-London simulation (#54) trades as the Simulation trader (#55) and powers scenario
+produces the London VIX; the central-London simulation (#54) trades as Simaissance (#55) and powers scenario
 mode (#66), which is off the trading screen (#120). It loses to persistence, so it's out of the price (`SIM_WEIGHT=0`).**
 
 **Data looks backwards; simulation looks forwards.** Sensors (13 cameras, 20 stations) show what already happened,
@@ -128,7 +128,7 @@ and statistical futures only extend trends. The agent simulation on the real str
    until sim flows are exposed (#68).
 6. **B2B** (later): councils, TfL and event organisers stress-test interventions, priced (stage 3 in business.md).
 
-**The Simulation trader** (shipped, #55): bets from the central sim's forecast. Its P&L against the data-only traders
+**Simaissance** (shipped, #55): bets from the central sim's forecast. Its P&L against the data-only traders
 answers live whether a model of the city beats raw data. Tonight's answer: no (8 wins, 30 losses live).
 
 **Positioning:** data settles, the simulation forecasts. The twin is the scenario room, not decoration.

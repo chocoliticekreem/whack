@@ -146,7 +146,7 @@ in the base scenario).
 - **Calibration:** the closing price against the public forecast. The ecosystem should beat it.
 - **A random taker** loses about the spread plus the fee, no more and no less.
 - **Known edges close:** the VIX fade (65%) and the stack drain (60%) stop paying once funds trade them.
-  So does the biggest leak found so far: copying Tube Crowd on City Pulse beat today's market maker on
+  So does the biggest leak found so far: copying Tube Sigma on City Pulse beat today's market maker on
   21 of 23 bets out of sample, +48% per point staked ([judge-prep.md](judge-prep.md); n = 23, one
   evening, directional). In this design, a fund running that rule would trade it away.
 - **Market makers' P&L**, split into spread earned and adverse selection paid. They should roughly break

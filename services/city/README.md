@@ -6,7 +6,7 @@ Seven rule-based AI traders each read one feed and bet against the players. Each
 its own probability (its calibrated record in the series, or the Simulation's forecast) against the option's price,
 after the 5% fee and the slippage, on the points not already staked on unsettled markets, at most 100; with no edge,
 or a stake under 10, it sits out. A stake is never more than a quarter of the free points, so losing every open bet
-still leaves 0 or more (sizing on settled points alone took the Contrarian to −181 live). A negative record on file
+still leaves 0 or more (sizing on settled points alone took Fadewater to −181 live). A negative record on file
 loads as 0 and is logged. Details: `docs/traders-and-tops.md`. Their records (points, won/lost, last reason) are appended to the ledger's SQLite
 (`ai_records`) on every settle and reloaded on start. The web app proxies `/api/city/*` here.
 
@@ -21,7 +21,7 @@ Env: `CITY_PORT` (8051), `CITY_RAW` (recorder root; default `data/raw` of the ma
 multiverse server itself defaults to :8049, so start it with `MULTIVERSE_PORT=8349` or set this),
 `SIM_URL` (default `http://127.0.0.1:8449`, the central-London agent simulation; live mode polls its `GET /state` every
 30 s), `SIM_WEIGHT` (default 0: the share of each market's 50 futures sampled from the simulation; the sim loses to
-persistence, so by default it only trades, as the Simulation trader), `CITY_LEDGER_DB`.
+persistence, so by default it only trades, as Simaissance), `CITY_LEDGER_DB`.
 CORS allows localhost:3047, :3349 and :3849.
 
 ## Endpoints
@@ -54,7 +54,7 @@ server fetches the VIX once (5 s timeout) before the first round, after the firs
 on a full day; a frame fetched before it was stale by the time the round was built), so london_vix lists in it. `/leaderboard` ranks players by ledger equity.
 
 Every request and tick shares one lock, so a tick never holds it for the slow part of a round open: it settles under
-the lock, builds the next round's markets (and the Simulation trader's 4000-draw view of each) outside it, then lists
+the lock, builds the next round's markets (and Simaissance's 4000-draw view of each) outside it, then lists
 them under it. The VIX poller hands its fetch to the ticker, which keeps every store write on one thread. Any holder
 that keeps the lock past 500 ms logs `lock held N ms by <tick part | METHOD /path>` to stderr. **A `/bet` that times
 out on the client may still have filled.** Retry with the same `idempotency_key`: the server returns the original bet
@@ -175,10 +175,10 @@ Each market runs 50 futures. Every future starts from the last real reading:
   rate priced 85% against a real 43%); each future draws its break time, so a clean hour drifts toward YES.
 
 Today's replay (15:05–18:30, 42 rounds): favourite at open in 30–70% for city_pulse 86%, heathrow_stack 82%, both
-headlines 100%; hub_surge sits at 0.25–0.45 as a 5-way race should (Tube Crowd's furthest-below pick won 15/42 = 36%).
+headlines 100%; hub_surge sits at 0.25–0.45 as a 5-way race should (Tube Sigma's furthest-below pick won 15/42 = 36%).
 
 Out of sample (hub_surge and City Pulse fitted on 12:00–17:00, scored on markets opened 17:00–21:30, 54 each):
-hub_surge open Brier 0.752 (was 0.797; uniform 0.800), log loss 1.501 (was 1.561; uniform 1.609). Copying Tube Crowd
+hub_surge open Brier 0.752 (was 0.797; uniform 0.800), log loss 1.501 (was 1.561; uniform 1.609). Copying Tube Sigma
 (10 points on the furthest-below hub at the open quote) returns +13%, 95% bootstrap CI −27% to +55% (was +32%,
 −17% to +86%): 54 races can't pin it to ±5%. City Pulse opens with the favourite in 40–65% on 78% of markets with
 nearest-half lines (52% with x.5-only lines; was 13%), since the futures often span less than a point. Its P(over) runs high in the evening
@@ -201,7 +201,7 @@ Marshall Wace's TOPS collects ideas from brokers, scores who has been right and 
 brokers are the seven traders, and the loop (`tops.py`) feeds their records back into the opening price:
 
 1. **Views at open.** Before a market is listed, every trader that plays the series states a view, with the same rules
-   and feed-freshness checks as its bets. The Simulation trader's is its forecast (`sim_view`). The others pick a side;
+   and feed-freshness checks as its bets. Simaissance's is its forecast (`sim_view`). The others pick a side;
    the pick becomes a probability from the trader's own record in that series: the futures' price for the pick plus its
    shrunk excess hit rate on past picks (never below the price: a losing trader is trusted less, never faded). With no
    record, the view is the futures' price, so it moves nothing.
@@ -244,10 +244,10 @@ walk-forward, nothing fitted on the window. Log loss vs the futures prior (negat
 The rule set before the run (keep new if new − old ≤ 0 over the whole walk) keeps the new loop; the pooled differences
 are inside 1.2 SE (per series: clean_sheet −2.1 SE on 13 markets, hub_hour +1.5 SE on 12). All of the gain is the λ
 rule (mean λ 0.03 → 0.16); the new weights alone change nothing, since with two traders per series both rules mostly
-sit on the cap and the floor. The Tube Crowd leaks are shaved, not closed (after
+sit on the cap and the floor. The Tube Sigma leaks are shaved, not closed (after
 17:00: City Pulse +19.3% → +16.8%, copycat +15.1% → +13.9%). Multiple testing (`tops_permutation.py`, 200 re-walks
-with the outcomes shuffled): of 10 trader-series, 0.5 would pass p < 0.05 by chance and 2 do (Tube Crowd on City
-Pulse, Plane Spotter on Heathrow); none survives Bonferroni or Benjamini–Hochberg, and the posterior calls no one
+with the outcomes shuffled): of 10 trader-series, 0.5 would pass p < 0.05 by chance and 2 do (Tube Sigma on City
+Pulse, Runway72 on Heathrow); none survives Bonferroni or Benjamini–Hochberg, and the posterior calls no one
 skilled (P(θ > 0) > 0.95: 0).
 Full write-up: `docs/traders-and-tops.md`.
 
@@ -263,13 +263,13 @@ Stations share one city-wide shock (correlation 0.5) because the sim publishes m
   by draws from the sim, each a bridge from the live reading to the drawn value so the particle filter scores it like any
   other. hub_surge / hub_hour read the hub station's vs usual directly; City Pulse takes the drawn vs usual × the typical
   day for the 13 simulated stations and holds the other stations' vs usual. `futures.fromSim` on each market counts them.
-- Simulation trader (`sim`): the option whose probability under 4 000 sim draws beats its price by the most, only if by
+- Simaissance (`sim`): the option whose probability under 4 000 sim draws beats its price by the most, only if by
   5+ points, through the same quote, odds floor and position cap as the other traders (25% of its points per market).
   london_vix only when `MULTIVERSE_URL` is the simulation itself; the Oxford Circus multiverse VIX is a different number.
 
 `python3 services/city/eval_sim.py record SIM_LOG` logs forecasts forward from now (there was no sim history);
 `eval_sim.py score SIM_LOG --traders http://127.0.0.1:8121` rebuilds each recorded round statistical-only and blended
-from the recorder's data, settles it, and prints Brier, log loss, favourite calibration and the Simulation trader's P&L.
+from the recorder's data, settles it, and prints Brier, log loss, favourite calibration and Simaissance's P&L.
 
 ## Integrity: courtsiding
 
@@ -293,7 +293,7 @@ table (`TABLE`):
   past 25% of cash goes through only if the player confirmed that bet; otherwise it is cancelled. At `fillsAt` the bet is booked through the ledger at the price
   then, under the same `betId` and idempotency key. If the market halted, closed or was suspended in between, or the
   wallet refuses the fill, the bet is cancelled and nothing has moved, so the ledger invariants never see a pending bet.
-  Replaying the key returns the pending, filled or cancelled bet. AI traders, the Simulation trader included, queue
+  Replaying the key returns the pending, filled or cancelled bet. AI traders, Simaissance included, queue
   through the same delay and are dropped by the same cancels (a dropped trader may decide again once the market reopens).
 - **Suspend on change.** Each tick compares every new reading of a watched feed with the one before. A change past the
   threshold halts the market (`haltReason: "suspended: Central now Severe Delays; reopens 15:41:20"`), cancels its
@@ -358,7 +358,7 @@ against the forecast alone and an uninformed guess) and the ledger audit.
 
 `data.py` reads the recorder files into compact snapshots and never returns data after `now`. `pricing.py` holds the
 fits, simulators, particle filter and LMSR. `markets.py` holds the series registry and builds and settles each series. `traders.py` holds the
-seven traders (Tube Crowd → S1/S2/S5, Camera Eye → S3, Plane Spotter → S4, Line Watcher → S6, Rain Radar → S2 only in
-rain, Contrarian → all, Simulation → S1/S2/S5). `tops.py` is the TOPS loop (above). `eval_sim.py` scores the simulation (below). `signals.py` builds the per-market clues and `/signals`. `exchange.py` runs the rounds, betting, settlement and scores. `integrity.py` holds the bet delay, suspend-on-change and caps. `server.py` is the HTTP layer. `backup.py` copies the ledger every 5 minutes (above).
+seven traders (Tube Sigma → S1/S2/S5, Camadel → S3, Runway72 → S4, Line-ennium → S6, Rain Street → S2 only in
+rain, Fadewater → all, Simulation → S1/S2/S5). `tops.py` is the TOPS loop (above). `eval_sim.py` scores the simulation (below). `signals.py` builds the per-market clues and `/signals`. `exchange.py` runs the rounds, betting, settlement and scores. `integrity.py` holds the bet delay, suspend-on-change and caps. `server.py` is the HTTP layer. `backup.py` copies the ledger every 5 minutes (above).
 `hotspots.json` lists the hotspots with their JamCams, bus stops and lines; the recorder adds these cams to its
 YOLO list.

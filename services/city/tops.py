@@ -3,7 +3,7 @@
 Marshall Wace's TOPS collects ideas from many brokers, scores who has been right and leans on them by track record.
 Here the brokers are the seven rule-based traders (traders.py). Per market:
 
-1. At open, each trader that plays the series states a view: a probability per option. The Simulation trader's is
+1. At open, each trader that plays the series states a view: a probability per option. Simaissance's is
    its forecast (sim_view). The others only pick a side, so the pick gets a calibrated probability from that
    trader's own past picks in the series (the futures prior plus its shrunk excess hit rate) and the other options
    keep their prior shares of the rest. With no history the view equals the prior, so it moves nothing.

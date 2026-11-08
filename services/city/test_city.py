@@ -880,7 +880,7 @@ class TraderTest(CityCase):
         self.assertIn("no series this round is informed by its feed", why["cams"])
         self.assertRegex(why["tube"], r"\d")
         names = {t["id"]: t["name"] for t in traders.TRADERS}
-        self.assertEqual(names["bus"], "Plane Spotter")
+        self.assertEqual(names["bus"], "Runway72")
 
 
 # ---------------------------------------------------------------- the central-London simulation
@@ -978,7 +978,7 @@ class SimTest(CityCase):
         self.assertIsNone(self.decide_with({"over": p + 0.049, "under": 1 - p - 0.049}, m))
         side, why = self.decide_with({"over": p + 0.051, "under": 1 - p - 0.051}, m)
         self.assertEqual(side, "over")
-        self.assertRegex(why, rf"^Simulation: Bank 103% of usual; Over .* in \d+% of its draws vs the market's "
+        self.assertRegex(why, rf"^Simaissance: Bank 103% of usual; Over .* in \d+% of its draws vs the market's "
                               rf"{p * 100:.0f}%$")
 
     def test_the_sim_trader_respects_the_position_cap_and_the_odds_floor(self):
@@ -1022,11 +1022,11 @@ class SimTest(CityCase):
         ex = Exchange(self.raw.store(self.now), Clock(self.now), SPOTS)
         ex.tick(self.now)
         rows = {t["id"]: t for t in ex.traders_json(self.now)["traders"]}
-        self.assertEqual(rows["sim"]["name"], "Simulation")
+        self.assertEqual(rows["sim"]["name"], "Simaissance")
         self.assertEqual(rows["sim"]["watches"], "Agent simulation of central London (50 worlds on the street graph)")
         self.assertIn("Sitting out: the city simulation", rows["sim"]["why"])
         self.assertFalse([b for m in ex.active() for b in m.ai_bets if b["trader"] == "sim"])
-        self.assertIn("Simulation", [r["name"] for r in ex.leaderboard()["rows"]])
+        self.assertIn("Simaissance", [r["name"] for r in ex.leaderboard()["rows"]])
 
     def test_fetch_sim_times_out_and_the_feed_keeps_the_last_good_forecast_for_three_minutes(self):
         import threading
