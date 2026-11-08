@@ -64,7 +64,7 @@ Memorise the one-liners. The full answers are in section 2.
 | 5 | "You settle on the 'first reading after bets close'. Is that number already public?" | "No longer. We settle on the first reading TfL itself stamped after the close, and a value measured at or before the close voids. The cost is a 14-minute wait, which the card shows: 'result about 22:00'." | strong |
 | 6 | "What does the agent simulation actually add? Evidence, not adjectives." | "Nothing measurable yet. Oxford Circus ties persistence, central London loses by 9%, the event layer has no skill. So it's out of the price (`SIM_WEIGHT=0`) and trades as the Simulation trader, which is losing live. Its real use today is scenario mode." | weak |
 | 7 | "How is this TOPS? Where's the track-record weighting?" | "It's built. Every view a trader states at open is scored at settle against our own futures. Skill per trader per series is a Bayesian posterior (half-life 20 markets, empirical-Bayes prior). Trust is proportional to P(skill > 0), capped at 40% each, and the opening price blends the pool in by λ ≤ 0.3, learned from how much it improved past log loss: no proven skill, zero lean. Walk-forward over 509 markets it beats the futures by 0.0010 ± 0.0009 log loss, not significant. A permutation test says about 0.5 of 10 trader-series look skilled by chance; 2 do, none survives Bonferroni or BH. The City Pulse leak is shaved from +19.3% to +16.8%, not closed." | ok |
-| 8 | "Why LMSR rather than an order book? Is this an exchange or a bookmaker?" | "The live site is a bookmaker with a published model: a thin market of strangers needs guaranteed liquidity. The exchange is built as a prototype beside it: an order book per contract, AI market makers quoting both sides, the same integrity rules, no house. On synthetic markets with a known truth, informed money moved its prices a third closer to the truth. It isn't live, and we haven't measured whether it prices London better than the LMSR." | ok |
+| 8 | "Why LMSR rather than an order book? Is this an exchange or a bookmaker?" | "The live site is a bookmaker with a published model: a thin market of strangers needs guaranteed liquidity. The exchange is built as a prototype beside it: an order book per contract, AI market makers quoting both sides, the same integrity rules, no house. It's live at /multiverse/exchange. On synthetic markets with a known truth, its prices end 52% closer to the truth than the forecast. We haven't measured whether it prices London better than the LMSR." | ok |
 | 9 | "What is the London VIX?" | "The spread of predicted crowds across 50 simulated worlds of Oxford Circus. It covers one area and needs an hour to burn in, so call it an uncertainty gauge, not a fear index. Camera Eye fades its moves, and that's 12–12 live." | ok |
 | 10 | "Real money: which regulator, and who on earth hedges footfall?" | "Consumers: the UK Gambling Commission, or the CFTC route Kalshi took. The first paying customer we'd test is a data buyer, not a hedger. Footfall hedging is a hypothesis with zero customer conversations." | ok |
 
@@ -102,7 +102,7 @@ The exchange in `docs/exchange-design.md` (#67) is built as a prototype that run
 both sides (designated ones held to a 6-point spread and 90% uptime for a share of fees), 184 hedge funds, 2,000
 retail, and the same speed bumps, position limits, halts and settlement sources as the live exchange. Since #98 its
 fees are off by default (a points game has no exchange to fund); `--fees kalshi` turns on Kalshi's taker fee
-ceil(0.07·C·P·(1−P)) with makers free. It is API only and not on the site.
+ceil(0.07·C·P·(1−P)) with makers free. Since #112 it is live at `/multiverse/exchange` (Vercel `VENUE_URL` → :8062).
 
 What we can say: on 25 minutes of Saturday's recorded data (`venue_demo.py --replay-from 2026-11-07T15:00:00Z`) every
 structural check passed (no crossed books, no trade after close, ledger audit clean), the median quoted spread was
@@ -114,7 +114,11 @@ Since #98, a known-truth test (`analysis/exchange/simulate.py`: synthetic contra
 ends 33% closer to the truth than the forecast (4.1 → 2.7 points), on 89% of contracts. With no informed money or only
 noise traders it stays as accurate as the forecast. It found market makers losing to informed flow (−1.24 points per
 contract in the baseline); widening quotes on one-sided flow, plus a public fast-market flag that lets designated makers
-quote up to 12 points, took that to −0.26. Edges are only partly traded away (about 40% of a 10-point bias).
+quote up to 12 points, took that to −0.26. #111 starts widening only at 70% one-sided flow (spreads 7–13% tighter,
+accuracy unchanged). #113 has market makers take 30% of fair value from the last minute's traded price and drops the
+forecast-only funds, which pulled prices back to the forecast: the error cut goes 33% → 52% (baseline), 34% → 51%
+(unpriced edge), and more than half of a known mispricing is traded away (was about a third). With no information in
+the market it is 0.1 points worse. A TOPS-style capital allocator was tried and dropped: 5 minutes of P&L is mostly luck.
 
 What we can't say yet: whether it prices London better than the LMSR, or whether the City Pulse leak survives on it.
 That comparison isn't measured.
@@ -448,7 +452,7 @@ cooling-off design.
 | Every vs-usual market voided after the midnight profile refresh, until a restart | Profile re-read on mtime or size change, merged per station and weekday, a cut or corrupt gzip retried next tick (#87) | New `test_rerun_fixes.py` fails or errors on the old code |
 | POST /bet stalled 2–10 s at round opens | Round markets built off the lock, time-band lookup cached, lock holds over 500 ms logged (#87) | Round-open lock hold 100–124 ms → about 1 ms (scratch servers) |
 | london_vix skipped in the first round after a restart | Boot order: recover, then fetch sim and VIX, then the first tick (#87) | Listed in round 1 on 2 restarts (scratch servers) |
-| An order book isn't built; the house banks every bet | Built as a prototype, not live: a parallel order-book venue with AI market makers, the Kalshi fee and the same integrity rules (#90, #94). The live site still runs the LMSR | Demo on 25 recorded minutes: all 9 health checks pass, median spread 4, designated market makers up 95–96%. Pricing vs the LMSR not measured |
+| An order book isn't built; the house banks every bet | Built and live at `/multiverse/exchange` (#112), beside the house: a parallel order-book venue with AI market makers, the Kalshi fee and the same integrity rules (#90, #94). The live site still runs the LMSR | Demo on 25 recorded minutes: all 9 health checks pass, median spread 4, designated market makers up 95–96%. Pricing vs the LMSR not measured |
 
 **Still open:**
 1. **City Pulse in a falling evening** (known limitation, Q2.7): Under won 14/15 live; copying Tube Crowd made +42%
@@ -466,7 +470,7 @@ cooling-off design.
 
 ## 5. 3-minute demo script
 
-Six timed beats. **Say** is the exact line. **Show** is what's on screen. **If slow** is the fallback when live data
+Seven timed beats. **Say** is the exact line. **Show** is what's on screen. **If slow** is the fallback when live data
 lags; never wait on the network in silence, say the line and move on.
 
 **Before the slot (T−20 min):**
@@ -477,6 +481,8 @@ lags; never wait on the network in silence, say the line and move on.
 - Check the live server runs #102 or later (trust bars, quarter-Kelly reasons) and #87 or later (no vs-usual voids
   after the 00:03 profile refresh).
 - Don't restart the server in the 10 minutes before the slot: 5-minute markets rebuild from fresh data.
+- Check `https://overwatchcapital.vercel.app/api/venue/health` returns `"ok": true`, then open `/multiverse/exchange`
+  in a background tab (beat 6). Its tunnel is a Cloudflare quick tunnel: if it restarted, re-set `VENUE_URL` and redeploy.
 - Open, in background tabs: `docs/traders-and-tops.md` and the Devpost section "How it works under the hood" (fallbacks
   for beats 4 and 5).
 
@@ -503,7 +509,7 @@ lags; never wait on the network in silence, say the line and move on.
 - **Show:** Orders tab, the T−20 bet: "Won +W…", "Lost −W…", or "Waiting for TfL…". Then the portfolio page, bet
   table, column "Settlement reading and source": the frozen TfL reading the market settled on. (Settled cards leave the
   feed since #100, so the reading lives in the portfolio.)
-- **Say:** "This one settled on real TfL data. TfL stamps every crowding reading, then publishes it about seven
+- **Say:** "This one settled on real TfL data. TfL stamps every crowding reading, then publishes it a couple of
   minutes later. We settle only on the first reading TfL stamped after betting closed, so nobody polling faster than us
   can know the answer; a reading from before the close voids the market and refunds you. That's why the card waits
   about 14 minutes. Fair beats fast."
@@ -522,7 +528,7 @@ lags; never wait on the network in silence, say the line and move on.
 - **If slow:** if every trust bar is 0 (fresh ledger), say "this ledger restarted, so nobody has a record yet and the
   lean is exactly zero: no record, no trust" and show the permutation table in `docs/traders-and-tops.md` §6.
 
-**2:10 Under the hood (30 s).**
+**2:10 Under the hood (20 s).**
 - **Show:** the menu, "Under the hood".
 - **Say:** "Under the hood it's six steps. 50 futures from TfL's own timestamp. Each reading reweights them. An LMSR
   turns them into prices with a capped worst case. Settlement only on readings stamped after the close. AI traders
@@ -531,16 +537,24 @@ lags; never wait on the network in silence, say the line and move on.
 - **If slow:** if the panel isn't on the live build, open the Devpost section "How it works under the hood" or
   `docs/traders-and-tops.md` and say the same six steps.
 
-**2:40 Honest limits, and close (20 s).**
+**2:30 The exchange: no house (15 s).**
+- **Show:** `/multiverse/exchange` (open in a background tab before the slot). The order book for one hub contract,
+  recent trades scrolling.
+- **Say:** "What you just saw is a bookmaker. This is where it goes: the same markets on a real order book, no house.
+  12 AI market makers, 184 hedge funds, 2,000 retail. Where we know the true answer, its prices end 52% closer to the
+  truth than our own forecast."
+- **If slow:** if the book is empty or the page errors, skip it and say the line over the map. If asked: the 52% is a
+  known-truth simulation, not London.
+
+**2:45 Honest limits, and close (15 s).**
 - **Show:** back to the map.
-- **Say:** "What it doesn't do yet: our crowd forecast ties 'nothing changes', it's one day of data, and one public
-  rule still beats us: bet Under on City Pulse when the city empties in the evening, +42% out of sample. We measured
-  it, and the leaderboard shows Tube Crowd taking it. Marshall Wace built TOPS to find out which brokers to trust. We
+- **Say:** "What it doesn't do yet: our crowd forecast ties 'nothing changes', it's one day of data, and bet Under on
+  City Pulse when the city empties still beats us. Marshall Wace built TOPS to find out which brokers to trust. We
   built it to find out which data reads a city best."
 - **If slow:** none needed. If over time, cut to the last two sentences.
 
 Rehearsal notes:
-- If the fast bet from 0:20 settles before 2:40, the earnings dropdown updates and a win shows confetti with the
+- If the fast bet from 0:20 settles before 2:45, the earnings dropdown updates and a win shows confetti with the
   profit; call it out in one line. Start the slot in the last 3 minutes of a round to make that likely.
 - The "+42%" line is n=82 on one evening (replay 17:00–00:05), CI +23% to +61%. If asked, say it.
 - The permutation numbers: 10 trader-series, 200 re-walks, 0.5 expected at p < 0.05, 2 observed under the shuffle
