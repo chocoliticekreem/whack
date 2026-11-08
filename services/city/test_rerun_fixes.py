@@ -168,7 +168,7 @@ class OperatingDayTest(unittest.TestCase):
 
 
 class RoundOpenStallTest(test_server.HttpCase):
-    """Bug 4: POST /bet took 2.3-10 s at a round open, because the round's markets (and the Simulation trader's
+    """Bug 4: POST /bet took 2.3-10 s at a round open, because the round's markets (and Simaissance's
     4000-draw view of each) were built while the request lock was held."""
 
     def slow_round(self, build_s: float) -> tuple[threading.Event, int]:

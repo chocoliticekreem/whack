@@ -11,7 +11,7 @@ Four defences, one table (TABLE, keyed by series):
   cool_off_s, pending bets are cancelled and the price restarts from the futures (the LMSR book is reset).
 - cap_pct: the per-player position cap, lower on locally observable series.
 
-AI traders (the Simulation trader included) go through the same delay and cancels.
+AI traders (Simaissance included) go through the same delay and cancels.
 """
 from __future__ import annotations
 

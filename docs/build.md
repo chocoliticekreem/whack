@@ -24,7 +24,7 @@ round show "Betting closed · result about 00:00, when TfL publishes".
 | **Pricing** | 50 futures per market. City Pulse walks follow TfL's usual-Saturday curve (#72); hub_surge uses `RelativeRaceSim` (mean reversion toward the five-hub average, correlated shocks, Platt softening, #77), re-simulated untempered from the first in-round TfL publish (#86). heathrow_stack is a Poisson count around a level reverting toward its 30-min mean, line on the futures' median (`CountSim`, #86). Weighted updating keeps prices moving after the 60% ruled-out cap (#72). LMSR b = 1200, fee 5%. `SIM_WEIGHT=0` | `services/city/pricing.py` |
 | **Local markets** | Click anywhere: a pin drops and, within 400 m of one of 33 real sensors (20 TfL Crowding stations, about 13 JamCams with fresh counts), a local market opens for the round, settled only on that sensor. Otherwise the pin snaps to the nearest sensor's market ("Detected area: Waterloo · 440 m") | `services/city/local.py` (#71, #122, #124) |
 | **Integrity** | Source and rule on every market, close before settle, void and refund, frozen reading with `measuredAt` (values measured at or before close void). Courtsiding: bet delay per series (45 s clean sheet and local, 5 s hubs and pulse, 2 s VIX and Heathrow), suspend on a feed change, caps 10%/25% | `integrity.py` (#61, #81) |
-| **AI traders** | 7, each reading one feed (Tube Crowd, Camera Eye, Line Watcher, Rain Radar, Plane Spotter, The Contrarian, Simulation). Rule-based, not LLMs. Stake min(100, 10% of points not already staked on open markets), so a trader can't go below 0 (#86); records persist in the ledger DB | `services/city/traders.py` (#33, #55, #72, #86) |
+| **AI traders** | 7, each reading one feed (Tube Sigma, Camadel, Line-ennium, Rain Street, Runway72, Fadewater, Simulation). Rule-based, not LLMs. Stake min(100, 10% of points not already staked on open markets), so a trader can't go below 0 (#86); records persist in the ledger DB | `services/city/traders.py` (#33, #55, #72, #86) |
 | **Wallet** | Append-only double-entry SQLite ledger, server-issued tokens, daily gross-loss limit, stake confirmation (counts pending stakes), breaks, house exposure cap (counts AI stakes), odds floor. Restart rebuilds open hourly markets and reads caps from the ledger | `ledger.py`, `Wallet.tsx` (#45, #70, #81) |
 | **Portfolio** | `/multiverse/portfolio`: cash, equity, P&L, equity curve, open positions, bet history with CSV export, P&L by series, record vs each AI trader, raw ledger | (#65) |
 | **OverWatch UI** | MapLibre dusk-palette 3D map with deck.gl hub columns and arcs at 60 fps (#68); plain-language cards: a question, two buttons, "Bet 100 · win 400" (#69, #73, #78); scrolling exchange ticker (#75); "result about HH:MM" on station cards (#74); traders dropdown, live earnings dropdown, a bet-placed pop-up and "Your bets" on the map's right (awaiting results, soonest first; a result shows 10 s then moves to past orders, #127), win confetti showing profit, busyness as change vs normal ("Bank −19%") (#78, #80); first-visit "How it works"; phone portrait and landscape (market column left, map right, #83) | `apps/stream/src/app/multiverse/` |
@@ -37,7 +37,7 @@ round show "Betting closed · result about 00:00, when TfL publishes".
 | **Docs** | Market structure today (#58), the exchange design target (#67), judge prep (#57, refreshed), steering log | `docs/`, `marketing/steering-log.md` |
 
 **Merged since the first MVP (#49–#87, plus the venue):** event layer (#49, #60), futures fan (#50), name and icon (#51, #52), central
-sim and Simulation trader (#54, #55), market structure (#58), courtsiding defences (#61), claim corrections (#63),
+sim and Simaissance (#54, #55), market structure (#58), courtsiding defences (#61), claim corrections (#63),
 portfolio (#65), scenario mode (#66), exchange design (#67), 3D map (#68), plain cards (#69, #73), stale-login fix
 (#70), click-anywhere markets (#71), judge fixes (#72), result times (#74), ticker (#75), pricing round 2 (#77),
 earnings and traders dropdowns and confetti (#78, #80), live pressure test (#79) and its fixes (#81), doc refresh
@@ -55,7 +55,7 @@ not merged.
 3. **One Saturday of data** behind every number; samples are small and directional.
 4. **The live server must run #87 or later.** One started earlier voids vs-usual markets from the 00:03 profile
    refresh until it is restarted (`analysis/live_trading/RERUN.md` #1).
-5. **City Pulse is biased in a falling evening.** Under won 14/15 in the live re-run; copying Tube Crowd on City Pulse
+5. **City Pulse is biased in a falling evening.** Under won 14/15 in the live re-run; copying Tube Sigma on City Pulse
    made +42% after 17:00 in replay (95% CI +23% to +61%, n=82). No stable fix in the fit window (#86).
 6. **#86 and #87 are measured offline only.** After 17:00: Heathrow fade −7.6% (CI −28% to +14%), hub top riser +6%
    (CI −25% to +42%); the riser still makes +48% on 12:40–20:10. No live bot run since.
@@ -157,4 +157,4 @@ Every source can be switched on or off with `--only` / `--skip`. Each AI trader 
 - [ ] Who owns: engine, UI/3D, data recorder, pitch?
 - [x] Where the recorder runs: Anson's laptop (keep it plugged in and awake).
 - [x] Area: central London (5 hubs, 20 stations). The Oxford Circus simulation produces the VIX; the central-London
-  simulation (#54) powers scenario mode and the Simulation trader.
+  simulation (#54) powers scenario mode and Simaissance.

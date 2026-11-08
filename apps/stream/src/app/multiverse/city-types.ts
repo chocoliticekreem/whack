@@ -12,6 +12,8 @@ export interface Hotspot {
 export interface Trader {
   id: string;
   name: string;
+  /** What kind of participant this is, e.g. "AI hedge fund". */
+  kind?: string;
   emoji: string;
   watches: string;
   style: string;

@@ -23,12 +23,12 @@ const HOTSPOTS: Hotspot[] = [
 ];
 
 const TRADERS: Trader[] = [
-  { id: "tube", name: "Tube Crowd", emoji: "🚇", watches: "Live busyness at 20 Tube stations (TfL)", style: "Backs whichever station is running hottest against its usual.", record: { won: 3, lost: 2 }, points: 1180 },
-  { id: "cams", name: "Camera Eye", emoji: "📷", watches: "People counted on TfL JamCams (YOLO)", style: "Counts heads on the street cameras and extrapolates.", record: { won: 4, lost: 3 }, points: 1090 },
-  { id: "lines", name: "Line Watch", emoji: "🚦", watches: "Tube line status board (TfL)", style: "Bets on trouble the moment a line flickers amber.", record: { won: 2, lost: 2 }, points: 990 },
-  { id: "rain", name: "Rain Radar", emoji: "🌧️", watches: "Rain right now across London (Open-Meteo)", style: "Rain means people go underground.", record: { won: 3, lost: 1 }, points: 1240 },
-  { id: "bus", name: "Bus Clock", emoji: "🚌", watches: "Live bus arrivals at 5 hubs (TfL)", style: "Reads the countdown boards, nothing else.", record: { won: 1, lost: 3 }, points: 870 },
-  { id: "contrarian", name: "Contrarian", emoji: "🦊", watches: "The other traders' bets", style: "Fades whatever everyone else is backing.", record: { won: 2, lost: 4 }, points: 940 },
+  { id: "tube", name: "Tube Sigma", kind: "AI hedge fund", emoji: "🚇", watches: "Live busyness at 20 Tube stations (TfL)", style: "Backs whichever station is running hottest against its usual.", record: { won: 3, lost: 2 }, points: 1180 },
+  { id: "cams", name: "Camadel", kind: "AI hedge fund", emoji: "📷", watches: "People counted on TfL JamCams (YOLO)", style: "Counts heads on the street cameras and extrapolates.", record: { won: 4, lost: 3 }, points: 1090 },
+  { id: "lines", name: "Line Watch", kind: "AI hedge fund", emoji: "🚦", watches: "Tube line status board (TfL)", style: "Bets on trouble the moment a line flickers amber.", record: { won: 2, lost: 2 }, points: 990 },
+  { id: "rain", name: "Rain Street", kind: "AI hedge fund", emoji: "🌧️", watches: "Rain right now across London (Open-Meteo)", style: "Rain means people go underground.", record: { won: 3, lost: 1 }, points: 1240 },
+  { id: "bus", name: "Bus Clock", kind: "AI hedge fund", emoji: "🚌", watches: "Live bus arrivals at 5 hubs (TfL)", style: "Reads the countdown boards, nothing else.", record: { won: 1, lost: 3 }, points: 870 },
+  { id: "contrarian", name: "Contrarian", kind: "AI hedge fund", emoji: "🦊", watches: "The other traders' bets", style: "Fades whatever everyone else is backing.", record: { won: 2, lost: 4 }, points: 940 },
 ];
 
 const FEEDS = ["crowding", "line_status", "jamcams", "rain_now", "bus"] as const;

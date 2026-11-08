@@ -33,9 +33,9 @@ the falling late evening).
 | Open price vs uniform (Brier gain), full day | hub_surge +0.025 ± 0.018 (t = 1.4, n=86), city_pulse −0.002 ± 0.018 (t = −0.1, n=87), heathrow_stack +0.017 ± 0.011 (t = 1.6, n=78). **None significant** | same |
 | Out of sample, 17:00–21:30 (55 rounds) | hub_surge Brier 0.755 vs uniform 0.800, gain +0.045 ± 0.027 (t = 1.7, n=51); city_pulse +0.029 ± 0.029 (t = 1.0, n=51); heathrow_stack +0.033 ± 0.014 (t = 2.3, n=53) | same |
 | Out of sample, 17:00–00:05 (86 rounds) | hub_surge 0.753 vs 0.800, gain +0.047 ± 0.018 (t = 2.7, n=83); city_pulse +0.012 ± 0.025 (t = 0.5, n=82); heathrow_stack +0.024 ± 0.018 (t = 1.3, n=84) | same |
-| Copying Tube Crowd vs the house, out of sample | 17:00–21:30: City Pulse 32/51, **+17%** per point staked (95% CI −11% to +46%); hub_surge 19/51, +5% (CI −35% to +49%). 17:00–00:05: City Pulse 60/82, **+42% (CI +23% to +61%)**; hub_surge −3%. Before #72/#77 the same rule made +32% (City Pulse) and +44% (hub_surge) full day | same (bootstrap CI, 2,000 resamples) |
+| Copying Tube Sigma vs the house, out of sample | 17:00–21:30: City Pulse 32/51, **+17%** per point staked (95% CI −11% to +46%); hub_surge 19/51, +5% (CI −35% to +49%). 17:00–00:05: City Pulse 60/82, **+42% (CI +23% to +61%)**; hub_surge −3%. Before #72/#77 the same rule made +32% (City Pulse) and +44% (hub_surge) full day | same (bootstrap CI, 2,000 resamples) |
 | #77's own copycat test | 10 points on the furthest-below hub at the open quote, 54 races after 17:00: **+13%, 95% CI −27% to +55%** (was +32%). Not proven gone | `services/city/README.md`, #77 |
-| Plane Spotter (fade the Heathrow stack) | after #86: 17:00–00:05 38/64, **−7.6% (CI −28% to +14%)**; 17:00–21:30 24/43, −12%; full day 32/64, −18%. Before #86: +66% (22/34, 17:00–21:30) and +47% (CI −1% to +122%, #86's baseline after 17:00) | `replay_score.py`, #86 |
+| Runway72 (fade the Heathrow stack) | after #86: 17:00–00:05 38/64, **−7.6% (CI −28% to +14%)**; 17:00–21:30 24/43, −12%; full day 32/64, −18%. Before #86: +66% (22/34, 17:00–21:30) and +47% (CI −1% to +122%, #86's baseline after 17:00) | `replay_score.py`, #86 |
 | Hub "top riser since open" at the first in-round TfL publish | after #86, 17:00–00:05: 36/78 at a mean price 0.46, **+6% (CI −25% to +42%)**, model Brier 0.723 → 0.649 (#86). Before: +76% (CI +31% to +129%). Full day 12:40–20:10, which includes the fit window: still 44/78, **+48% (CI +8% to +97%)** | `replay_score.py`, `analysis/judge/fit_crowd.py`, #86 |
 | Backing the open favourite | full day: hub_surge −9%, City Pulse −19%, Heathrow +5% (fee plus spread) | same |
 | City Pulse line | the futures' median at settle, on the coarsest of .5/.25/.1/.05/.01 no wider than the futures' spread (IQR/1.349). Replay 12:00–02:35, 175 rounds × 5 seeds: favourite ≤ 70% in 98% (was 87% on the fixed .0/.5), 0 of 875 above 0.85 (was 39), max 0.77 (was 0.97); daytime lines stay on .0/.5 (91–100%, 12:00–19:00). Live 03:20 on 8 Nov: line 2.5, 0 of 50 futures over, 3%/97%; rebuilt: line 2.3, 21 of 50, 42% | `markets.py`, `RERUN.md` |
@@ -49,7 +49,7 @@ the falling late evening).
 | Live trading test (#79, code before #72/#77/#81) | 75 min, 327 bot bets: 0 voids, 0 fills after close, 120/120 wallet reconciliations exact, 46/46 bets on halted markets refused | `analysis/live_trading/README.md` |
 | Live trading re-run (#84, #85; code at #79, before #81, #86, #87) | 65 min, 15 rounds, 280 bot + 34 reader bets. **30/30** crowding markets settled on TfL readings stamped after close (none seen by the recorder before close); City Pulse opened 0.50–0.66; **0** frozen prices; **0 of 229** fills after close; 26/26 bets on halted markets refused; ledger audit clean; house **−177** vs players (was −1,408). Open: hub_surge reader 6/10, +202% ± 108% (before #86's mid-round re-price); City Pulse Under won 14/15 in a falling evening; vs-usual markets void after the midnight profile refresh and one 54 s server stall (both fixed in #87) | `analysis/live_trading/RERUN.md` |
 | Tests | city 306, multiverse 132, recorder 16, all passing (re-run on 10c3486, after #102 and #98) | `python3 -m unittest discover -s services/<x>` |
-| Live, 23:45 | london_vix listed in 9 of 9 rounds since the last restart (heathrow_stack skipped: "the London VIX is live"); 0 voids; `fromSim: 0` on every market (`SIM_WEIGHT=0`). AI records survived the restart: Tube Crowd 24–18, 2,450 points, top of the board; Simulation 8–30, 78 points; The Contrarian −181 points (cause found and fixed in #86: see 6.2) | `GET /round`, `/stats`, `/markets`, `/traders` |
+| Live, 23:45 | london_vix listed in 9 of 9 rounds since the last restart (heathrow_stack skipped: "the London VIX is live"); 0 voids; `fromSim: 0` on every market (`SIM_WEIGHT=0`). AI records survived the restart: Tube Sigma 24–18, 2,450 points, top of the board; Simulation 8–30, 78 points; Fadewater −181 points (cause found and fixed in #86: see 6.2) | `GET /round`, `/stats`, `/markets`, `/traders` |
 
 ## 1. The 10 most likely, most dangerous questions
 
@@ -59,14 +59,14 @@ Memorise the one-liners. The full answers are in section 2.
 |---|---|---|---|
 | 1 | "Who's on the other side, and what's your worst case?" | "An automated market maker, LMSR with b = 1200 over the model's probabilities. The ledger caps the house's worst-case open loss at 100,000 points, AI stakes included, and each player at 25% of equity per market." | ok |
 | 2 | "Your forecast ties 'nothing changes'. Why should anyone trust these prices?" | "As a forecast, not yet. Out of sample the hub race beats a uniform guess (Brier 0.755 vs 0.800, t = 1.7), the rest don't. What we built is a market structure that measures that honestly." | ok |
-| 3 | "Your own Tube Crowd trader beat your market maker. Is the house still a piggy bank?" | "On hubs, no longer: copying it is flat out of sample. On City Pulse, yes, in one regime: over the falling late evening it made +42% (CI +23% to +61%, n=82), because our futures don't carry the evening decline. That's our known open leak. The Heathrow fade that used to beat us now loses 7.6%." | weak |
+| 3 | "Your own Tube Sigma trader beat your market maker. Is the house still a piggy bank?" | "On hubs, no longer: copying it is flat out of sample. On City Pulse, yes, in one regime: over the falling late evening it made +42% (CI +23% to +61%, n=82), because our futures don't carry the evening decline. That's our known open leak. The Heathrow fade that used to beat us now loses 7.6%." | weak |
 | 4 | "Someone on a train sees a line stop before TfL does. Isn't clean sheet an insider market?" | "It's the one single-event market, so it gets the strictest rules: bets fill 45 s after you place them, any line change pauses the market and cancels pending bets, a 10% cap, and betting closes with its first 5-minute round. A head start under 44 s gains nothing." | ok |
 | 5 | "You settle on the 'first reading after bets close'. Is that number already public?" | "No longer. We settle on the first reading TfL itself stamped after the close, and a value measured at or before the close voids. The cost is a 14-minute wait, which the card shows: 'result about 22:00'." | strong |
-| 6 | "What does the agent simulation actually add? Evidence, not adjectives." | "Nothing measurable yet. Oxford Circus ties persistence, central London loses by 9%, the event layer has no skill. So it's out of the price (`SIM_WEIGHT=0`) and trades as the Simulation trader, which is losing live. Its real use today is scenario mode." | weak |
+| 6 | "What does the agent simulation actually add? Evidence, not adjectives." | "Nothing measurable yet. Oxford Circus ties persistence, central London loses by 9%, the event layer has no skill. So it's out of the price (`SIM_WEIGHT=0`) and trades as Simaissance, which is losing live. Its real use today is scenario mode." | weak |
 | 7 | "How is this TOPS? Where's the track-record weighting?" | "It's built. Every view a trader states at open is scored at settle against our own futures. Skill per trader per series is a Bayesian posterior (half-life 20 markets, empirical-Bayes prior). Trust is proportional to P(skill > 0), capped at 40% each, and the opening price blends the pool in by λ ≤ 0.3, learned from how much it improved past log loss: no proven skill, zero lean. Walk-forward over 509 markets it beats the futures by 0.0010 ± 0.0009 log loss, not significant. A permutation test says about 0.5 of 10 trader-series look skilled by chance; 2 do, none survives Bonferroni or BH. The City Pulse leak is shaved from +19.3% to +16.8%, not closed." | ok |
 | 8 | "Why LMSR rather than an order book? Is this an exchange or a bookmaker?" | "The live site is a bookmaker with a published model: a thin market of strangers needs guaranteed liquidity. The exchange is built as a prototype beside it: an order book per contract, AI market makers quoting both sides, the same integrity rules, no house. It's live at /multiverse/exchange. On synthetic markets with a known truth, its prices end 52% closer to the truth than the forecast. We haven't measured whether it prices London better than the LMSR." | ok |
 | 8b | "Seven traders on the game, thousands on the Exchange. Why two markets, and why not one?" | "The game's prices come from the house, so there's nothing for thousands of agents to trade on there; its seven traders bet against the house. The Exchange is the same questions on an order book with no house: 12 market makers, 184 funds running the seven traders' rules with Kelly sizing, and 2,000 retail. We haven't switched the game onto it yet because that moves the live money path, and we want a longer real-data replay first: on synthetic markets with a known truth it prices about twice as close to the truth as the forecast, on 25 recorded minutes it tied the forecast (n = 16). Switching is one reviewed PR once real data agrees." | ok |
-| 9 | "What is the London VIX?" | "The spread of predicted crowds across 50 simulated worlds of Oxford Circus. It covers one area and needs an hour to burn in, so call it an uncertainty gauge, not a fear index. Camera Eye fades its moves, and that's 12–12 live." | ok |
+| 9 | "What is the London VIX?" | "The spread of predicted crowds across 50 simulated worlds of Oxford Circus. It covers one area and needs an hour to burn in, so call it an uncertainty gauge, not a fear index. Camadel fades its moves, and that's 12–12 live." | ok |
 | 10 | "Real money: which regulator, and who on earth hedges footfall?" | "Consumers: the UK Gambling Commission, or the CFTC route Kalshi took. The first paying customer we'd test is a data buyer, not a hedger. Footfall hedging is a hypothesis with zero customer conversations." | ok |
 
 ## 2. The full Q&A bank
@@ -89,7 +89,7 @@ invariant test checks the books balance.
 **Q1.3 What's the market maker's P&L expectation?** *(ok)*
 If the model were calibrated, the house keeps about the 5% fee. Backing the open favourite loses 9–19% per series. The
 known informed flows, out of sample after 17:00 (17:00–00:05): fading the Heathrow stack now loses 7.6% (CI −28% to
-+14%, was +47%); the hub "top riser" rule makes +6% (CI −25% to +42%, was +76%); copying Tube Crowd on City Pulse
++14%, was +47%); the hub "top riser" rule makes +6% (CI −25% to +42%, was +76%); copying Tube Sigma on City Pulse
 makes +42% (CI +23% to +61%, n=82), almost all from the falling late evening. So the house still loses to one public
 rule: Under on City Pulse when the city empties. One day of data; say "directional".
 
@@ -185,13 +185,13 @@ the price.
 
 **Q2.7 In the evening, "bet Under on City Pulse" beats you. Why haven't you fixed it?** *(weak, so say it first)*
 It's our one known open leak, and we found it ourselves. In the live re-run the pulse fell from 22.7 to 16.6 over 70
-minutes and Under won 14 of 15; the Over favourite at open lost 8 of 8. In replay after 17:00, copying Tube Crowd on
+minutes and Under won 14 of 15; the Over favourite at open lost 8 of 8. In replay after 17:00, copying Tube Sigma on
 City Pulse made +42% (CI +23% to +61%, n=82). The cause: the line sits on the futures' median, the settle reading is
 stamped 12–20 minutes after the newest reading the market sees, and the futures don't carry the evening decline over
 that gap. #86 confirmed the horizon is right (a new test pins it) and tested forecasts on TfL's own stamp grid
 (`analysis/judge/fit_crowd.py`), but none gave a stable fix in the fit window, so we didn't ship a patch tuned on one
 evening. The answer to give: "We measured it, we know the mechanism, and the fix is fitting the evening decline across
-more than one day. Until then, the leaderboard shows Tube Crowd taking it, which is the product working as designed."
+more than one day. Until then, the leaderboard shows Tube Sigma taking it, which is the product working as designed."
 
 ### 2.3 Edge and information
 
@@ -217,13 +217,13 @@ settlement on TfL's number. The fix is to drop low-typical stations or use unrou
 
 **Q3.4 Does an AI trader front-run players?** *(strong)*
 No. Traders are deterministic rules on public feeds, decide once per market, and wait out the same bet delay as
-players. The Contrarian waits until halfway and fades where the points are, at the price players left. There are no
+players. Fadewater waits until halfway and fades where the points are, at the price players left. There are no
 unfilled orders to see. It does move the price a player gets (100 points ≈ 4 pts), which the card shows.
 
 **Q3.5 Is there a guaranteed-profit strategy?** *(ok)*
 No riskless one: buying every outcome loses the fee, odds round down, a market closes when its outcome is decided, and
 settlement is exactly-once with idempotent bets (an 8-thread hammer test). The confirm-bypass and pending-order holes
-the live test found are fixed (#81). One positive-expectation rule is left out of sample: copy Tube Crowd
+the live test found are fixed (#81). One positive-expectation rule is left out of sample: copy Tube Sigma
 (Under) on City Pulse when the city is emptying (+42%, n=82, 17:00–00:05). The Heathrow fade (−7.6%) and hub top
 riser (+6%, CI −25% to +42%) were priced in by #86. In a points game, `X-Forwarded-For` can still be spoofed past
 the new-player limit (30 a minute, 500 a day per network) to farm grants (a `debt:` note in `server.py`).
@@ -239,7 +239,7 @@ delay persistence wins (0.65 vs 0.99). The prices are honest about uncertainty, 
 - **Central London (#54):** station MAE 3.94 against persistence 3.61, so the sim loses by 9%. It beats the typical
   day.
 - **Events:** after #60's fix (no more closing busy stations), on vs off is 3.94 vs 3.94: no gain, no harm.
-- **Live:** the Simulation trader is 8–30 and down to 78 points.
+- **Live:** Simaissance is 8–30 and down to 78 points.
 
 So it's out of the price (`SIM_WEIGHT=0`). Scenario mode ("what if Regent Street closes?", #66) is built but off the
 trading screen: a public what-if either repeats what the price already knows or hands every player a free edge against
@@ -307,7 +307,7 @@ positive-part James–Stein) and capped at 0.3
 
 Say it plainly: the loop is real and principled, but nobody has proven skill yet, so it moves prices very little.
 Permutation test (`analysis/judge/tops_permutation.py`, 200 reruns): of 10 trader-series about 0.5 would look
-skilled at p < 0.05 by chance; 2 do (Tube Crowd on City Pulse, Plane Spotter on Heathrow), and none survives
+skilled at p < 0.05 by chance; 2 do (Tube Sigma on City Pulse, Runway72 on Heathrow), and none survives
 Bonferroni or Benjamini–Hochberg. Known limit: λ is now shrunk by its evidence (t), not by a count of markets, so
 noise gives λ = 0 (hub_surge and hub_hour went 0.3 → 0 on the live ledger), but λ̂ = Σr/Σr² grows as the pool's
 moves shrink, so weak evidence can still reach the cap: City Pulse at 03:25 on 8 Nov had λ̂ = 1.93, t = 1.38 → 0.3.
@@ -319,12 +319,12 @@ the trader's probability, the price, LMSR slippage, the 5% fee and the odds cap,
 floored at 10, on free points (points − open stakes). Kelly never spends past the point where the next share costs
 q/(1 − f), which has the closed form x = b/(1 − f)·ln((1 − p)/(1 − q(1 − f))), tested against `pricing.Book`. No
 edge (or no record) means no bet. A stake is at most a quarter of free points, so a trader can't go negative: a
-property test over 300 random bet/settle sequences fails on the pre-#86 sizing. The Contrarian's old −181 was that
+property test over 300 random bet/settle sequences fails on the pre-#86 sizing. Fadewater's old −181 was that
 bug.
 
 **Q6.3 Is "which data has alpha" actually measured? With what sample?** *(ok)*
-On one day, against the house, out of sample after 17:00 (n = 43–84 per series). After #86, Tube Crowd on City Pulse
-is the only trader with an edge there (Plane Spotter's was priced in). Line Watcher barely trades and Rain Radar never
+On one day, against the house, out of sample after 17:00 (n = 43–84 per series). After #86, Tube Sigma on City Pulse
+is the only trader with an edge there (Runway72's was priced in). Line-ennium barely trades and Rain Street never
 traded on a dry day. That's a measurement design, not a result.
 
 ### 2.7 Scale and business
@@ -385,7 +385,7 @@ in #81. We re-ran it for 65 minutes on code with #72 and #77 (#84, #85):
   after close. House P&L vs players −177 (was −1,408).
 - **Still beatable, then fixed:** the hub "top riser" reader won 6 of 10 (+202% ± 108%). #86 re-prices hubs at the
   first in-round publish; in replay after 17:00 that rule fell from +76% to +6%. Not yet re-tested live.
-- **Also fixed in #86:** the Contrarian's −181 points on the live server, an AI stake-sizing bug (Q6.2).
+- **Also fixed in #86:** Fadewater's −181 points on the live server, an AI stake-sizing bug (Q6.2).
 - **Fixed in #87:** vs-usual markets voiding after the midnight profile refresh, and one server stall (Q8.5).
 - **Still open:** City Pulse in a falling evening (Q2.7).
 
@@ -424,10 +424,10 @@ cooling-off design.
 |---|---|---|
 | "Every price is 50 simulated futures of the city" | They're statistical walks; the sim's share is 0 live | "Every price comes from 50 futures fitted to today's data and TfL's usual day" |
 | "The sim makes the prices better" | It loses to persistence by 9% and is out of the price | "The sim powers what-ifs and trades as one trader; the market scores it" |
-| "The Tube Crowd leak is fixed" | On City Pulse it made +42% after 17:00 (CI +23% to +61%) | "Fixed on hubs; on City Pulse it still wins in a falling evening, and the leaderboard shows it" |
+| "The Tube Sigma leak is fixed" | On City Pulse it made +42% after 17:00 (CI +23% to +61%) | "Fixed on hubs; on City Pulse it still wins in a falling evening, and the leaderboard shows it" |
 | "No public rule beats the house" | Under on City Pulse in a falling evening made +42% | "One public rule still beats it on one day. The Heathrow fade and the hub riser were measured and priced in" |
-| "TOPS fixes the leak" | The blend shaves Tube Crowd's City Pulse pick from +19.3% to +16.8% after 17:00 (n=112); λ is capped at 0.3 | "The market leans on proven traders, a little and only where they're proven" |
-| "Tube Crowd is a skilled trader" | p = 0.015 is one of 10 tests; none survives Bonferroni or BH, and its posterior ends at P(skill > 0) = 0.37 | "Two of ten look skilled where chance gives about one half; none survives correction" |
+| "TOPS fixes the leak" | The blend shaves Tube Sigma's City Pulse pick from +19.3% to +16.8% after 17:00 (n=112); λ is capped at 0.3 | "The market leans on proven traders, a little and only where they're proven" |
+| "Tube Sigma is a skilled trader" | p = 0.015 is one of 10 tests; none survives Bonferroni or BH, and its posterior ends at P(skill > 0) = 0.37 | "Two of ten look skilled where chance gives about one half; none survives correction" |
 | "The London VIX is the city's fear index" | One area, 1 h burn-in | "An uncertainty gauge for Oxford Circus: the spread of 50 simulated worlds" |
 | "Points to pounds is a licence, not a rewrite" | A house-banked LMSR is bookmaking | "The ledger is real-money grade; the order book is live beside the house in points; real money plus licensing are the work left" |
 | "City-scale aggregates one person can't move" | Untested; Bank sits at 5–6% of baseline | "Five busy hubs against their own baselines; low-traffic stations are the soft spot" |
@@ -440,10 +440,10 @@ cooling-off design.
 
 | Weak spot (#57) | Fix | Evidence |
 |---|---|---|
-| Copying Tube Crowd beat the house by +32–48% | Usual-Saturday slope in the walks (#72); `RelativeRaceSim` for hubs and median City Pulse lines (#77) | Hubs fixed: −3% after 17:00. City Pulse is not: +42% after 17:00 (still open, below) |
+| Copying Tube Sigma beat the house by +32–48% | Usual-Saturday slope in the walks (#72); `RelativeRaceSim` for hubs and median City Pulse lines (#77) | Hubs fixed: −3% after 17:00. City Pulse is not: +42% after 17:00 (still open, below) |
 | City Pulse opened lopsided (favourite ~94% in the evening; 97% in the live test; 97% again at 03:20 on 8 Nov, a quiet night) | Line = the futures' median (#77), on a step that fits their spread | Live re-run: opens 0.50–0.66, median 0.54, 0 of 13 above 0.85. Replay to 02:35: 0 of 875 above 0.85, max 0.77 |
 | Pruning froze 80% of markets | Weighted updating after the cap (#72) | Capped markets that stop learning, full-day replay: 96 → 42 (#72) → 0 of 24 (main after #86); live re-run: 0 frozen of 30 |
-| AI records reset on restart | `ai_records` in the ledger DB (#72) | Live: Tube Crowd 24–18 kept across tonight's restart |
+| AI records reset on restart | `ai_records` in the ledger DB (#72) | Live: Tube Sigma 24–18 kept across tonight's restart |
 | Settlement on our poll time; TfL stamped every settling row before the close | Settle on the first reading TfL stamped after close (#72); `measuredAt` on the record, pre-close values void (#81); "result about HH:MM" on cards (#74) | Live re-run: 30/30 settled on readings stamped after close, none seen before close; 0 of 229 fills after close |
 | Clean sheet open for 59 min with no bet delay | 45 s delay, pause on line change, 10% cap (#61); closes with its first round (#72) | Courtsider edge 0 for leads up to 44 s |
 | london_vix never listed | Freshness check fixed (#72); VIX fetched at startup (#81) | Live: 9/9 rounds since the restart; re-run 14/15 (missed round 1); round 1 after a restart since #87 |
@@ -452,7 +452,7 @@ cooling-off design.
 | Restart bypassed the position cap and dropped the hourly market; pending bets could bypass confirm | #81 | 17 new tests; `edge.py` 28/28 |
 | Fading the Heathrow stack beat the house (+66% / +47%) | Poisson count around a mean-reverting level, line on the futures' median, in-round readings re-run the model (#86) | After 17:00: −7.6% (CI −28% to +14%) |
 | Hub "top riser since open" beat the house (+76% in replay; 6/10, +202% in the live re-run) | Every future re-simulated from the first in-round TfL publish, untempered (#86) | After 17:00: +6% (CI −25% to +42%). Full day still +48%, so narrowed, not proven closed; not re-run live |
-| The Contrarian showed −181 points | Stakes sized on points − open stakes (#86), now quarter-Kelly on free points; a negative record loads as 0 | Can't go below 0; new tests in `test_live_fixes.py` |
+| Fadewater showed −181 points | Stakes sized on points − open stakes (#86), now quarter-Kelly on free points; a negative record loads as 0 | Can't go below 0; new tests in `test_live_fixes.py` |
 | House lost 1,408 to bots in the first live test | Pricing fixes #72, #77 | Live re-run: house −177 vs players, ledger audit clean |
 | Every vs-usual market voided after the midnight profile refresh, until a restart | Profile re-read on mtime or size change, merged per station and weekday, a cut or corrupt gzip retried next tick (#87) | New `test_rerun_fixes.py` fails or errors on the old code |
 | POST /bet stalled 2–10 s at round opens | Round markets built off the lock, time-band lookup cached, lock holds over 500 ms logged (#87) | Round-open lock hold 100–124 ms → about 1 ms (scratch servers) |
@@ -460,7 +460,7 @@ cooling-off design.
 | An order book isn't built; the house banks every bet | Built and live at `/multiverse/exchange` (#112), beside the house: a parallel order-book venue with AI market makers, the Kalshi fee and the same integrity rules (#90, #94). The live site still runs the LMSR | Demo on 25 recorded minutes: all 9 health checks pass, median spread 4, designated market makers up 95–96%. Pricing vs the LMSR not measured |
 
 **Still open:**
-1. **City Pulse in a falling evening** (known limitation, Q2.7): Under won 14/15 live; copying Tube Crowd made +42%
+1. **City Pulse in a falling evening** (known limitation, Q2.7): Under won 14/15 live; copying Tube Sigma made +42%
    after 17:00 (CI +23% to +61%). No stable fix in the fit window.
 2. The hub top-riser fix is out of sample on one evening (+6%, CI −25% to +42%) and not re-tested live. None of #86 or
    #87 has been through a live bot run yet.

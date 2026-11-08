@@ -190,7 +190,7 @@ class Exchange:
             self.list_round(self.build_round(now))
 
     def build_round(self, now: int) -> dict:
-        """The current round's markets, built but not listed, with the Simulation trader's view of each (its 4000
+        """The current round's markets, built but not listed, with Simaissance's view of each (its 4000
         draws were most of a round open). It reads only the store, and the markets are visible to no one yet, so the
         server runs it outside the request lock (the store is only written by the thread that calls this)."""
         at = round_for(now)
@@ -516,7 +516,7 @@ class Exchange:
             at, said = self.sat_out.get(t["id"], (None, None))
             why = (bets[-1]["why"] if bets else said if at == round_for(now)
                    else traders.sit_out(t["id"], self.store, now, current))
-            rows.append({k: t[k] for k in ("id", "name", "emoji", "watches", "style")} |
+            rows.append({k: t[k] for k in ("id", "name", "kind", "emoji", "watches", "style")} |
                         {"record": {"won": rec["won"], "lost": rec["lost"]}, "points": rec["points"], "why": why,
                          "lastWhy": rec["why"], "trust": self.tops.trust(t["id"])})
         return {"traders": rows}

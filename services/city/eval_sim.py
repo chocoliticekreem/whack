@@ -7,7 +7,7 @@ No recorded simulation history existed before this script, so `record` builds on
 every 5-min round whose opening has a fresh simulation forecast in SIM_LOG (at most 3 min old) over the recorder's
 data: each sim-informed series (hub_surge, city_pulse, hub_hour) is built twice from the same readings, once
 statistical-only and once blended, then settled by its own rule. It reports Brier score, log loss and the favourite's
-calibration for both, and the Simulation trader's P&L at statistical-only opening prices (stake 100, 5-point edge).
+calibration for both, and Simaissance's P&L at statistical-only opening prices (stake 100, 5-point edge).
 With --traders it also prints the live leaderboard of a running city server (every AI's points).
 """
 from __future__ import annotations
@@ -60,7 +60,7 @@ def score_probs(probs: dict[str, float], winner: str) -> tuple[float, float]:
 
 
 def sim_bet(m, store: data.Store, now: int, winner: str) -> dict | None:
-    """The Simulation trader's bet at this market's opening prices and its P&L (stake 100), or None."""
+    """Simaissance's bet at this market's opening prices and its P&L (stake 100), or None."""
     view = mk.sim_view(m, store, now)
     if not view:
         return None
@@ -154,7 +154,7 @@ def report(rows: list[dict], pending: int, snaps: list[dict]) -> None:
               f"mean price of {statistics.fmean(p for p, _ in favs):.2f}")
     for key in ("betVsStat", "betVsBlend"):
         bets = [r[key] for r in rows if r[key]]
-        print(f"Simulation trader at {'statistical-only' if key == 'betVsStat' else 'blended'} opening prices: "
+        print(f"Simaissance at {'statistical-only' if key == 'betVsStat' else 'blended'} opening prices: "
               f"{len(bets)} bets, {sum(b['won'] for b in bets)} won, P&L {sum(b['pnl'] for b in bets):+d} points")
 
 

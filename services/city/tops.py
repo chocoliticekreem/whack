@@ -3,7 +3,7 @@
 Marshall Wace's TOPS collects ideas from many brokers, scores who has been right and leans on them by track record.
 Here the brokers are the seven rule-based traders (traders.py). Per market:
 
-1. At open, each trader that plays the series states a view: a probability per option. The Simulation trader's is
+1. At open, each trader that plays the series states a view: a probability per option. Simaissance's is
    its forecast (sim_view). The others only pick a side, so the pick gets a calibrated probability from that
    trader's own past picks in the series (the futures prior plus its shrunk excess hit rate) and the other options
    keep their prior shares of the rest. With no history the view equals the prior, so it moves nothing.
@@ -234,8 +234,8 @@ def tilted(probs: dict[str, float], tilt: dict[str, float] | None) -> dict[str, 
 
 
 def picks(m, store, now: int, sim: dict | None, fresh) -> dict[str, tuple]:
-    """Each trader's stance on a market at open, before it is listed: ('probs', {option: p}) for the Simulation
-    trader, ('pick', option) for the rest; the same rules and freshness checks the AI bets use (exchange.ai_bets)."""
+    """Each trader's stance on a market at open, before it is listed: ('probs', {option: p}) for Simaissance
+    (the simulation trader), ('pick', option) for the rest; the same rules and freshness checks the AI bets use (exchange.ai_bets)."""
     import traders  # traders imports markets, which imports this module
 
     out: dict[str, tuple] = {}
