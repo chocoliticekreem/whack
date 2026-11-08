@@ -158,12 +158,18 @@ function Ladder({ depth }: { depth: Depth }) {
         <span>YES price</span>
         <span>Contracts</span>
       </div>
-      <div className="ex-asks">{asks.length ? asks.map((l) => row("ask", l)) : <div className="ex-empty">No offers</div>}</div>
+      {Array.from({ length: DEPTH - asks.length }, (_, i) => (
+        <div key={`a-pad${i}`} className="ex-level" aria-hidden />
+      ))}
+      {asks.map((l) => row("ask", l))}
       <div className="ex-spread tl-num">
         <b className="tl-data">{depth.last ?? "–"}</b>
         <span>{spread == null ? "no two-sided market" : `spread ${spread}`}</span>
       </div>
-      <div className="ex-bids">{bids.length ? bids.map((l) => row("bid", l)) : <div className="ex-empty">No bids</div>}</div>
+      {bids.map((l) => row("bid", l))}
+      {Array.from({ length: DEPTH - bids.length }, (_, i) => (
+        <div key={`b-pad${i}`} className="ex-level" aria-hidden />
+      ))}
     </div>
   );
 }
@@ -454,7 +460,7 @@ export function Exchange() {
                     <span>Qty</span>
                     <span>Time</span>
                   </div>
-                  {(book?.tape ?? []).slice(-11).reverse().map((t, i) => (
+                  {(book?.tape ?? []).slice(-(2 * DEPTH + 1)).reverse().map((t, i) => (
                     <div key={`${t.at}${i}`} className="ex-print tl-num">
                       <span className="tl-data" data-tone={t.aggressor === "yes" ? "up" : "down"}>
                         {t.yesPrice}
