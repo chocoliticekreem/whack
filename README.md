@@ -39,22 +39,6 @@ its `.venv` (the default is a path on Anson's laptop). For the public site, run
 `cloudflared tunnel --url http://localhost:8051` and set Vercel's `CITY_URL` to the tunnel URL. `/` redirects to
 `/multiverse`.
 
-## Reused from Mirrorverse (disclosed, approved by the organisers)
-Our earlier project [Mirrorverse](https://github.com/chocoliticekreem/mirrorverse) (built 17 Oct 2026). What still
-runs from it:
-- **The street-graph agent simulation** in `services/predict` (seed, personas, simulate, LLM wrapper). The Oxford
-  Circus engine in `services/multiverse`, which produces the London VIX, runs 50 forked copies of it.
-- **The YOLO camera counter** runs from the original Mirrorverse service, outside this repo (see `$YOLO_DIR` above).
-- **The seeds** in `services/multiverse/seeds/` were built once from Mirrorverse's three.js twin: the Oxford Circus
-  street field (`oxford-circus-field.json`) from its `/api/twin/field` route, and the central-London streets
-  (`central-osm.json.gz`) from its cached OpenFreeMap tiles. They are committed, and both seed builders rebuild from
-  them with `--offline`.
-
-The Next.js app itself started as Mirrorverse's. All of its Mirrorverse code is removed: the streaming product
-(persona chat, phone streaming, the "around me" map, the `/twin` page), the three.js twin and its API routes, and the
-superseded `/multiverse/oxford` and `/multiverse/board` pages. `apps/stream` is now only the OverWatch pages,
-`/multiverse` and `/multiverse/portfolio`.
-
 ## Docs, in reading order
 | Doc | Read it for |
 |---|---|
