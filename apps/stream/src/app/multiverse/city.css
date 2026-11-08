@@ -2469,3 +2469,211 @@
     transform: none;
   }
 }
+
+/* Phone turned sideways: a slim header, markets in a left column that scrolls on its own, the map on the right.
+   Comes last so it wins over both the desktop and the portrait-phone rules. Mirrors LANDSCAPE_PHONE in Live.tsx. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .tl-root {
+    --bar-h: 40px;
+    --side-w: clamp(272px, 42vw, 400px);
+    --safe-l: env(safe-area-inset-left, 0px);
+    --safe-r: env(safe-area-inset-right, 0px);
+  }
+
+  .tl {
+    font-size: 13px;
+  }
+
+  .tl[data-strip] {
+    --strip-h: 26px;
+  }
+
+  .tl-desk,
+  .tl-clock {
+    display: none;
+  }
+
+  .tl-wide {
+    display: none !important;
+  }
+
+  .tl-more {
+    display: inline-flex !important;
+  }
+
+  .tl-bar {
+    grid-template-columns: auto 1fr auto;
+    gap: var(--s2);
+    padding: env(safe-area-inset-top) calc(var(--s2) + var(--safe-r)) 0 calc(var(--s3) + var(--safe-l));
+  }
+
+  .tl-brand {
+    gap: var(--s3);
+  }
+
+  .tl-title {
+    gap: 8px;
+    font-size: 14px;
+  }
+
+  .tl-mark {
+    width: 20px;
+    height: 20px;
+  }
+
+  .tl-wallet {
+    justify-self: center;
+    gap: var(--s3);
+    padding: 0;
+    border: 0;
+  }
+
+  .tl-bar-right {
+    gap: 6px;
+  }
+
+  .tl-pop {
+    right: calc(var(--s2) + var(--safe-r));
+    max-height: calc(100dvh - var(--bar-h) - env(safe-area-inset-top) - var(--s3));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  .tl-strip {
+    font-size: 12px;
+  }
+
+  .tl-strip-row {
+    padding: 0 calc(var(--s3) + var(--safe-r)) 0 calc(var(--s3) + var(--safe-l));
+  }
+
+  .tl-markets {
+    top: calc(var(--bar-h) + var(--strip-h) + env(safe-area-inset-top));
+    right: auto;
+    bottom: 0;
+    width: calc(var(--side-w) + var(--safe-l));
+    max-height: none;
+    padding-left: var(--safe-l);
+    padding-bottom: env(safe-area-inset-bottom);
+    border-top: 0;
+    border-right: 1px solid var(--line);
+    border-radius: 0;
+  }
+
+  .tl-intro {
+    padding: var(--s3) var(--s4) var(--s2);
+  }
+
+  .tl-intro h1 {
+    font-size: 15px;
+  }
+
+  .tl-error {
+    margin: 0 var(--s4) var(--s2);
+  }
+
+  .tl-market {
+    gap: 10px;
+    padding: var(--s3) var(--s4);
+  }
+
+  .tl-q {
+    font-size: 15px;
+    overflow-wrap: anywhere;
+  }
+
+  .tl-big {
+    font-size: 24px;
+  }
+
+  .tl-spark {
+    width: 72px;
+  }
+
+  .tl-opt {
+    min-height: 52px;
+  }
+
+  .tl-opts:not([data-n="2"]) .tl-opt {
+    min-height: 44px;
+  }
+
+  .tl-opts:not([data-n="2"]) .tl-optcol {
+    grid-template-columns: minmax(0, 1fr) auto 92px;
+    column-gap: var(--s2);
+  }
+
+  .tl-opt-name {
+    overflow-wrap: anywhere;
+  }
+
+  .tl-opt-label {
+    white-space: normal;
+    line-height: 1.2;
+  }
+
+  .tl-stake-btn {
+    height: 36px;
+  }
+
+  /* Details, the leaderboard, the name prompt and the guide: centred, short enough to clear the browser bars. */
+  .tl-modal-bg,
+  .tl-sheet-bg {
+    place-items: center;
+    padding: calc(var(--s2) + env(safe-area-inset-top)) calc(var(--s3) + var(--safe-r))
+      calc(var(--s2) + env(safe-area-inset-bottom)) calc(var(--s3) + var(--safe-l));
+  }
+
+  .tl-modal {
+    gap: var(--s2);
+    max-height: calc(100dvh - 2 * var(--s2) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    padding: var(--s4);
+    overscroll-behavior: contain;
+  }
+
+  .tl-sheet {
+    width: min(560px, 100%);
+    max-height: calc(100dvh - 2 * var(--s2) - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    padding: var(--s4);
+    border-radius: var(--r-l);
+  }
+
+  .tl-toast {
+    top: calc(var(--bar-h) + var(--strip-h) + var(--s3) + env(safe-area-inset-top));
+    left: calc(var(--side-w) + var(--safe-l) + (100% - var(--side-w) - var(--safe-l) - var(--safe-r)) / 2);
+    max-width: calc(100% - var(--side-w) - var(--safe-l) - var(--safe-r) - 2 * var(--s3));
+    padding: var(--s2) var(--s4);
+  }
+
+  .tl-toast-big {
+    font-size: 24px;
+  }
+
+  /* Traders and earnings: a panel under the header on the right that scrolls inside, not a bottom sheet. */
+  .ow-sheet-scrim {
+    display: none;
+  }
+
+  .ow-drop {
+    position: fixed;
+    z-index: 80;
+    top: calc(var(--bar-h) + env(safe-area-inset-top) + 4px);
+    right: calc(var(--s2) + var(--safe-r));
+    bottom: auto;
+    left: auto;
+    width: min(392px, calc(100vw - var(--safe-l) - var(--safe-r) - 2 * var(--s2)));
+    max-height: calc(100dvh - var(--bar-h) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - var(--s3));
+    padding-bottom: 0;
+    border-radius: var(--r-l);
+    animation: ow-drop 160ms ease-out;
+  }
+
+  .ow-menu-btn {
+    padding: 0 6px;
+    gap: 4px;
+  }
+
+  .ow-menu-btn .ow-chev {
+    display: none;
+  }
+}

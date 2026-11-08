@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from "react";
 import { buildCityStyle, LOOK } from "./city-map-style";
 // map-3d: deck.gl overlay mount (see CityLayers.tsx)
 import { CityLayers } from "./CityLayers";
+import { isLandscapePhone } from "./Live";
 import type { Hotspot, HubsVsUsual } from "./city-types";
 import { busyText, vsNormal } from "./plain";
 
@@ -30,11 +31,14 @@ const MAX_BOUNDS: [[number, number], [number, number]] = [
 ];
 const FIT_MAX_ZOOM = 15.2;
 const FIT_MIN_ZOOM = 13.6;
+// A sideways phone leaves the map a short strip; z13 is still the first zoom with extruded buildings.
+const FIT_MIN_ZOOM_SIDEWAYS = 13;
 
 // Why: City.tsx frames hubs through a plain function (the old twin contract), so the live map is held here.
 let liveMap: MapLibreMap | null = null;
 let pending: Hotspot[] | null = null;
 let liveLoaded = false;
+let framed: Hotspot[] | null = null;
 
 const isPhone = () => window.matchMedia("(max-width: 720px)").matches;
 
@@ -56,13 +60,31 @@ function padding() {
   const ai = rect(".tl-ai");
   const bar = rect(".tl-strip") ?? rect(".tl-bar");
   // Tags sit ~40 px above their spot, so the top needs more room than the sides.
-  const p = isPhone()
-    ? { top: (ai?.bottom ?? bar?.bottom ?? 60) + 56, bottom: h - (side?.top ?? h * 0.5) + 24, left: 36, right: 36 }
-    : { top: (bar?.bottom ?? 48) + 70, bottom: 48, left: (side?.right ?? 420) + 56, right: w - (ai?.left ?? w - 288) + 40 };
+  const p = isLandscapePhone()
+    ? { top: (bar?.bottom ?? 40) + 44, bottom: 20, left: (side?.right ?? w * 0.42) + 28, right: 28 }
+    : isPhone()
+      ? { top: (ai?.bottom ?? bar?.bottom ?? 60) + 56, bottom: h - (side?.top ?? h * 0.5) + 24, left: 36, right: 36 }
+      : { top: (bar?.bottom ?? 48) + 70, bottom: 48, left: (side?.right ?? 420) + 56, right: w - (ai?.left ?? w - 288) + 40 };
   // A short or narrow window would leave no room at all, and maplibre refuses to move then.
   const sx = Math.min(1, (w * 0.8) / (p.left + p.right));
   const sy = Math.min(1, (h * 0.8) / (p.top + p.bottom));
   return { top: p.top * sy, bottom: p.bottom * sy, left: p.left * sx, right: p.right * sx };
+}
+
+/**
+ * The point halfway between the hubs as they appear on screen. On a sideways phone the zoom floor is above the
+ * zoom that fits, and the box midpoint (the rotated lat/lon box's corners, not the hubs) would push hubs off one edge.
+ * The camera is moved and restored in the same tick, so no frame renders in between.
+ */
+function hubsMidpoint(map: MapLibreMap, hubs: Hotspot[], cam: NonNullable<ReturnType<MapLibreMap["cameraForBounds"]>>): [number, number] {
+  const saved = { center: map.getCenter(), zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing() };
+  map.jumpTo({ center: cam.center, zoom: cam.zoom, pitch: PITCH, bearing: BEARING });
+  const pts = hubs.map((h) => map.project([h.lon, h.lat]));
+  const xs = pts.map((p) => p.x);
+  const ys = pts.map((p) => p.y);
+  const mid = map.unproject([(Math.min(...xs) + Math.max(...xs)) / 2, (Math.min(...ys) + Math.max(...ys)) / 2]);
+  map.jumpTo(saved);
+  return [mid.lng, mid.lat];
 }
 
 function fit(map: MapLibreMap, hubs: Hotspot[], duration: number) {
@@ -75,11 +97,13 @@ function fit(map: MapLibreMap, hubs: Hotspot[], duration: number) {
   ];
   const cam = map.cameraForBounds(bounds, { padding: pad, maxZoom: FIT_MAX_ZOOM, pitch: PITCH, bearing: BEARING });
   // OpenMapTiles ships buildings from z13 only, so the overview never zooms out past where the city turns flat.
-  const zoom = Math.max(cam?.zoom ?? FIT_MIN_ZOOM, FIT_MIN_ZOOM);
+  const floor = isLandscapePhone() ? FIT_MIN_ZOOM_SIDEWAYS : FIT_MIN_ZOOM;
+  const zoom = Math.max(cam?.zoom ?? floor, floor);
   // An offset, not padding: easeTo keeps padding on the map, and cameraForBounds would then count it twice.
   // map-3d: lift the hubs into the far half of the steep view, where perspective shrinks them enough to fit.
-  const offset: [number, number] = [(pad.left - pad.right) / 2, (pad.top - pad.bottom) / 2 - (isPhone() ? 0 : window.innerHeight * FIT_LIFT)];
-  const center: [number, number] = [(bounds[0][0] + bounds[1][0]) / 2, (bounds[0][1] + bounds[1][1]) / 2];
+  const offset: [number, number] = [(pad.left - pad.right) / 2, (pad.top - pad.bottom) / 2 - (isPhone() || isLandscapePhone() ? 0 : window.innerHeight * FIT_LIFT)];
+  let center: [number, number] = [(bounds[0][0] + bounds[1][0]) / 2, (bounds[0][1] + bounds[1][1]) / 2];
+  if (cam && isLandscapePhone()) center = hubsMidpoint(map, hubs, cam);
   map.easeTo({ center, zoom, offset, pitch: PITCH, bearing: BEARING, duration, essential: true });
 }
 
@@ -91,6 +115,7 @@ export function getCityMap(): MapLibreMap | null {
 /** Frames the given hubs, clear of the cards; safe to call before the map loads (applied once it does). */
 export function flyToHotspots(hubs: Hotspot[]) {
   if (!hubs.length) return;
+  framed = hubs;
   if (!liveMap || !liveLoaded) {
     pending = hubs;
     return;
@@ -151,7 +176,16 @@ export function CityMapGL({
     if (!el) return;
     let cancelled = false;
     let map: MapLibreMap | null = null;
-    const resizer = new ResizeObserver(() => map?.resize());
+    let wide = el.clientWidth > el.clientHeight;
+    const resizer = new ResizeObserver(() => {
+      if (!map) return;
+      map.resize();
+      // Why: a rotated phone moves the market panel from the bottom to the left, so the last framing is redone.
+      // Only on a flip, so the mobile URL bar showing or hiding never yanks a camera the player has moved.
+      const nowWide = el.clientWidth > el.clientHeight;
+      if (nowWide !== wide && liveLoaded && framed) fit(map, framed, 600);
+      wide = nowWide;
+    });
     resizer.observe(el);
     const current = pins.current;
 
