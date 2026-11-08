@@ -169,10 +169,10 @@ function Ticket({ c, account, holding, onDone }: { c: Contract; account: Account
     <div className="ex-ticket">
       <div className="ex-seg" role="group" aria-label="Side">
         <button type="button" data-on={side === "yes" || undefined} data-tone="up" onClick={() => setSide("yes")}>
-          Buy YES · {c.yes}
+          Buy YES <span className="tl-num">{price(c.ask)}</span>
         </button>
         <button type="button" data-on={side === "no" || undefined} data-tone="down" onClick={() => setSide("no")}>
-          Buy NO · {c.no}
+          Buy NO <span className="tl-num">{price(c.bid == null ? null : 100 - c.bid)}</span>
         </button>
       </div>
       <div className="ex-fields">
@@ -244,7 +244,8 @@ export function Exchange() {
   const markets = useMemo(() => {
     const by = new Map<string, Contract[]>();
     for (const c of live) by.set(c.market, [...(by.get(c.market) ?? []), c]);
-    return [...by.values()];
+    const open = (g: Contract[]) => (g.some((c) => c.status === "open") ? 0 : 1);
+    return [...by.values()].sort((a, b) => open(a) - open(b));
   }, [live]);
   const holding = (cid: string) => mine?.positions.find((p) => p.contract === cid) ?? { yes: 0, no: 0 };
   const offline = contracts == null;
@@ -258,7 +259,7 @@ export function Exchange() {
         <div className="ex-title">
           <h1>Exchange</h1>
           <span className="tl-muted tl-num">
-            {offline ? "Connecting to the venue…" : `${contracts.live ? "Live" : "Replay"} · ${londonClock(contracts.now, true)} London · no house: every trade has a buyer and a seller`}
+            {offline ? "Connecting to the venue…" : `${contracts.live ? "Live" : "Replay"} · ${londonClock(contracts.now, true)} · no house, every trade has a buyer and a seller`}
           </span>
         </div>
         <div className="ex-wallet tl-num">
@@ -287,9 +288,20 @@ export function Exchange() {
           <section className="ex-card ex-list" aria-label="Contracts">
             <h2>Contracts</h2>
             {markets.length === 0 && <p className="tl-muted">No market is open right now.</p>}
+            {markets.length > 0 && (
+              <div className="ex-row ex-row-head" aria-hidden>
+                <span />
+                <span>Bid</span>
+                <span>Ask</span>
+                <span>Model</span>
+              </div>
+            )}
             {markets.map((group) => (
-              <div key={group[0].market} className="ex-market">
-                <h3>{group[0].question}</h3>
+              <div key={group[0].market} className="ex-market" data-closed={group.every((c) => c.status !== "open") || undefined}>
+                <h3>
+                  {group[0].question}
+                  {group.every((c) => c.status !== "open") && <span className="tl-muted"> · {group[0].status}, awaiting result</span>}
+                </h3>
                 {group.map((c) => (
                   <button key={c.id} type="button" className="ex-row" data-on={chosen?.id === c.id || undefined} onClick={() => setPicked(c.id)}>
                     <span className="ex-name">{c.yes}</span>
@@ -299,9 +311,10 @@ export function Exchange() {
                     <span className="tl-data" data-tone="down">
                       {price(c.ask)}
                     </span>
-                    <span className="tl-muted tl-num">fcst {pct(c.forecast)}</span>
-                    {c.fast && <span className="ex-badge">Fast</span>}
-                    {c.status !== "open" && <span className="ex-badge" data-quiet>{c.status}</span>}
+                    <span className="tl-muted tl-num">{pct(c.forecast)}</span>
+                    <span className="ex-flag">
+                      {c.status === "open" && c.fast ? <i className="ex-fast" title="Fast market: one-sided trading, so market makers may quote wider" /> : null}
+                    </span>
                   </button>
                 ))}
               </div>
@@ -311,13 +324,30 @@ export function Exchange() {
           {chosen && (
             <section className="ex-card ex-detail" aria-label="Selected contract">
               <header>
-                <h2>
+                <h2>{chosen.question}</h2>
+                <p className="ex-sub">
                   YES = {chosen.yes} <span className="tl-muted">· NO = {chosen.no}</span>
-                </h2>
-                <p className="tl-muted tl-num">
-                  {chosen.question} Trading closes {londonClock(chosen.closesAt)}, settles {londonClock(chosen.settlesAt)} on {chosen.source}. Forecast {pct(chosen.forecast)}
-                  {chosen.last != null && ` · last trade ${chosen.last}`}
-                  {chosen.fast && " · fast market: market makers may quote wider"}
+                </p>
+                <dl className="ex-facts tl-num">
+                  <div>
+                    <dt>Closes</dt>
+                    <dd>{londonClock(chosen.closesAt)}</dd>
+                  </div>
+                  <div>
+                    <dt>Settles</dt>
+                    <dd>{londonClock(chosen.settlesAt)}</dd>
+                  </div>
+                  <div>
+                    <dt>Model</dt>
+                    <dd>{pct(chosen.forecast)}</dd>
+                  </div>
+                  <div>
+                    <dt>Last trade</dt>
+                    <dd>{price(chosen.last)}</dd>
+                  </div>
+                </dl>
+                <p className="ex-note">
+                  Settles on {chosen.source.split(" · ")[0]}.{chosen.fast && " Fast market: trading is one-sided, so market makers may quote wider."}
                 </p>
               </header>
               <div className="ex-cols">
