@@ -2,7 +2,7 @@
 
 import { ArrowLeft } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { fmtPts, londonClock } from "../city-store";
 
 /** Shapes served by services/city/venue_server.py (proxied through /api/venue/*). */
@@ -33,6 +33,7 @@ interface Contract {
   fast?: boolean;
 }
 interface Print {
+  contract: string;
   yesPrice: number;
   qty: number;
   at: number;
@@ -97,15 +98,22 @@ async function call<T>(path: string, init?: { body?: unknown; token?: string }):
   return { ok: res.ok, status: res.status, data };
 }
 
-function usePoll<T>(path: string | null, ms: number, token?: string): T | null {
+function usePoll<T>(path: string | null, ms: number, token?: string, onData?: (data: T) => void): T | null {
   const [data, setData] = useState<T | null>(null);
+  const sink = useRef(onData);
+  useEffect(() => {
+    sink.current = onData;
+  });
   useEffect(() => {
     if (!path) return;
     let alive = true;
     const tick = async () => {
       try {
         const got = await call<T>(path, { token });
-        if (alive && got.ok) setData(got.data);
+        if (alive && got.ok) {
+          setData(got.data);
+          sink.current?.(got.data);
+        }
       } catch {
         /* offline: keep the last good copy */
       }
@@ -141,8 +149,53 @@ function Ladder({ depth }: { depth: Depth }) {
         <span>Contracts</span>
       </div>
       {asks.length ? asks.map((l) => row("ask", l)) : <div className="ex-empty">No offers</div>}
-      <div className="ex-spread tl-num">{spread == null ? "No two-sided market" : `Spread ${spread}`}</div>
+      <div className="ex-spread tl-num">
+        <b className="tl-data">{depth.last ?? "–"}</b>
+        <span>{spread == null ? "no two-sided market" : `spread ${spread}`}</span>
+      </div>
       {depth.bids.length ? depth.bids.map((l) => row("bid", l)) : <div className="ex-empty">No bids</div>}
+    </div>
+  );
+}
+
+interface Point {
+  at: number;
+  price: number;
+  model: number;
+}
+
+function Chart({ points, model }: { points: Point[]; model: number }) {
+  const W = 600;
+  const H = 180;
+  if (points.length < 2) return <div className="ex-chart ex-chart-empty">Waiting for trades…</div>;
+  const t0 = points[0].at;
+  const span = Math.max(1, points[points.length - 1].at - t0);
+  const vals = points.flatMap((p) => [p.price, p.model]);
+  const lo = Math.max(0, Math.min(...vals) - 5);
+  const hi = Math.min(100, Math.max(...vals) + 5);
+  const x = (at: number) => ((at - t0) / span) * W;
+  const y = (v: number) => H - ((v - lo) / Math.max(1, hi - lo)) * H;
+  const line = (k: "price" | "model") => points.map((p, i) => `${i ? "L" : "M"}${x(p.at).toFixed(1)},${y(p[k]).toFixed(1)}`).join("");
+  const last = points[points.length - 1];
+  const area = `${line("price")}L${W},${H}L0,${H}Z`;
+  return (
+    <div className="ex-chart">
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" aria-label="Traded price and model over time">
+        <defs>
+          <linearGradient id="ex-fill" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0" stopColor="var(--ex-accent)" stopOpacity="0.28" />
+            <stop offset="1" stopColor="var(--ex-accent)" stopOpacity="0" />
+          </linearGradient>
+        </defs>
+        <path d={area} fill="url(#ex-fill)" />
+        <path d={line("model")} className="ex-chart-model" />
+        <path d={line("price")} className="ex-chart-price" />
+        <circle cx={x(last.at)} cy={y(last.price)} r="4" className="ex-chart-dot" />
+      </svg>
+      <div className="ex-chart-key tl-num">
+        <span data-k="price">Traded price {last.price}</span>
+        <span data-k="model">Our model {Math.round(100 * model)}</span>
+      </div>
     </div>
   );
 }
@@ -196,7 +249,7 @@ function Ticket({ c, account, holding, onDone }: { c: Contract; account: Account
         {px == null ? "Nobody is offering this side yet." : `Pays 100 if ${side === "yes" ? c.yes : c.no}. Costs up to ${fmtPts(px * qty)}, so you'd win up to ${fmtPts((100 - px) * qty)}.`}
       </p>
       <button type="button" className="ex-go" disabled={!account || !open || px == null} onClick={() => void send(side, qty, px, `Buy ${qty} ${side.toUpperCase()}`)}>
-        {!account ? "Join to trade" : !open ? `Market ${c.status}` : `Buy ${qty} ${side.toUpperCase()} at up to ${price(px)}`}
+        {!account ? "Opening your account…" : !open ? `Market ${c.status}` : `Buy ${qty} ${side.toUpperCase()} at up to ${price(px)}`}
       </button>
       {sellSide && (
         <button type="button" className="ex-sell" disabled={!open || sellPx == null} onClick={() => void send(sellSide, sellQty, sellPx, `Sell ${sellQty}`)}>
@@ -211,22 +264,42 @@ export function Exchange() {
   const [account, setAccount] = useState<Account | null>(() => loadAccount());
   const [picked, setPicked] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
+  const [status, setStatus] = useState<{ msg: string; at: number } | null>(null);
+  const [history, setHistory] = useState<Record<string, Point[]>>({});
+  const joining = useRef(false);
   const contracts = usePoll<{ now: number; live: boolean; contracts: Contract[] }>("contracts", 2000);
   const live = useMemo(() => (contracts?.contracts ?? []).filter((c) => c.status === "open" || c.status === "closed"), [contracts]);
   const chosen = live.find((c) => c.id === picked) ?? live.find((c) => c.status === "open") ?? live[0] ?? null;
-  const book = usePoll<Depth & { tape: Print[] }>(chosen ? `book?contract=${encodeURIComponent(chosen.id)}` : null, 1000);
+  const book = usePoll<Depth & { tape: Print[] }>(chosen ? `book?contract=${encodeURIComponent(chosen.id)}` : null, 1000, undefined, (b) => {
+    if (!chosen || !b.tape?.length) return;
+    const id = chosen.id;
+    const model = 100 * chosen.forecast;
+    setHistory((h) => {
+      const prev = h[id] ?? [];
+      const seen = prev.length ? prev[prev.length - 1].at : 0;
+      const fresh = b.tape.filter((t) => t.contract === id && t.at > seen).map((t) => ({ at: t.at, price: t.yesPrice, model }));
+      return fresh.length ? { ...h, [id]: [...prev, ...fresh].slice(-300) } : h;
+    });
+  });
   const mine = usePoll<Positions>(account ? `positions?account=${account.account}` : null, 2000, account?.token);
   const stats = usePoll<Stats>("stats", 10_000);
 
-  const join = useCallback(async () => {
-    const got = await call<Account & { error?: string }>("account/new", { body: { name: "Player" } });
-    if (got.ok) {
+  // Why: no sign-up step; the venue keeps accounts in memory, so a visitor gets one on arrival.
+  useEffect(() => {
+    if (account || joining.current) return;
+    joining.current = true;
+    void call<Account & { error?: string }>("account/new", { body: { name: "Player" } }).then((got) => {
+      if (!got.ok) return;
       const a = { account: got.data.account, token: got.data.token };
-      window.localStorage.setItem(KEY, JSON.stringify(a));
+      try {
+        window.localStorage.setItem(KEY, JSON.stringify(a));
+      } catch {
+        /* private mode: the account lasts this visit */
+      }
       setAccount(a);
-      setToast("You have 1,000 points. Pick a contract and trade.");
-    } else setToast(`Couldn't join: ${got.data.error ?? got.status}`);
-  }, []);
+    });
+  }, [account]);
+
   const cancel = useCallback(
     async (o: Order) => {
       if (!account) return;
@@ -244,11 +317,12 @@ export function Exchange() {
   const markets = useMemo(() => {
     const by = new Map<string, Contract[]>();
     for (const c of live) by.set(c.market, [...(by.get(c.market) ?? []), c]);
-    const open = (g: Contract[]) => (g.some((c) => c.status === "open") ? 0 : 1);
-    return [...by.values()].sort((a, b) => open(a) - open(b));
+    return [...by.values()].filter((g) => g.some((c) => c.status === "open"));
   }, [live]);
   const holding = (cid: string) => mine?.positions.find((p) => p.contract === cid) ?? { yes: 0, no: 0 };
   const offline = contracts == null;
+  const lastPx = chosen ? (book?.last ?? chosen.last) : null;
+  const edge = chosen && lastPx != null ? lastPx - Math.round(100 * chosen.forecast) : null;
 
   return (
     <div className="ex">
@@ -258,36 +332,37 @@ export function Exchange() {
         </Link>
         <div className="ex-title">
           <h1>Exchange</h1>
-          <span className="tl-muted tl-num">
-            {offline ? "Connecting to the venue…" : `${contracts.live ? "Live" : "Replay"} · ${londonClock(contracts.now, true)} · no house, every trade has a buyer and a seller`}
+          <span className="ex-live tl-num" data-on={!offline && contracts.live ? true : undefined}>
+            {offline ? "Connecting…" : `${contracts.live ? "Live" : "Replay"} · ${londonClock(contracts.now, true)}`}
           </span>
         </div>
         <div className="ex-wallet tl-num">
-          {account && mine ? (
-            <>
-              <b className="tl-data">{fmtPts(mine.cash)}</b> pts cash · {fmtPts(mine.held)} reserved · P&L{" "}
-              <b className="tl-data" data-tone={mine.pnl > 0 ? "up" : mine.pnl < 0 ? "down" : undefined}>
-                {mine.pnl > 0 ? "+" : ""}
-                {fmtPts(mine.pnl)}
-              </b>
-            </>
-          ) : (
-            <button type="button" className="ex-join" onClick={() => void join()}>
-              <b>Get 1,000 free points</b>
-              <span>Join and start trading</span>
-            </button>
-          )}
+          <span>
+            <i>Cash</i>
+            <b className="tl-data">{mine ? fmtPts(mine.cash) : "1,000"}</b>
+          </span>
+          <span>
+            <i>In orders</i>
+            <b className="tl-data">{mine ? fmtPts(mine.held) : "0"}</b>
+          </span>
+          <span>
+            <i>P&amp;L</i>
+            <b className="tl-data" data-tone={mine && mine.pnl > 0 ? "up" : mine && mine.pnl < 0 ? "down" : undefined}>
+              {mine && mine.pnl > 0 ? "+" : ""}
+              {mine ? fmtPts(mine.pnl) : "0"}
+            </b>
+          </span>
         </div>
       </header>
 
       {offline ? (
         <main className="ex-main">
-          <p className="ex-card">The exchange venue isn&apos;t reachable yet. It runs beside the city markets: start services/city/venue_server.py.</p>
+          <p className="ex-card">The exchange isn&apos;t reachable right now. Try again in a minute.</p>
         </main>
       ) : (
         <main className="ex-main">
-          <section className="ex-card ex-list" aria-label="Contracts">
-            <h2>Contracts</h2>
+          <section className="ex-card ex-list" aria-label="Markets">
+            <h2>Markets</h2>
             {markets.length === 0 && <p className="tl-muted">No market is open right now.</p>}
             {markets.length > 0 && (
               <div className="ex-row ex-row-head" aria-hidden>
@@ -301,7 +376,7 @@ export function Exchange() {
               <div key={group[0].market} className="ex-market" data-closed={group.every((c) => c.status !== "open") || undefined}>
                 <h3>
                   {group[0].question}
-                  {group.every((c) => c.status !== "open") && <span className="tl-muted"> · {group[0].status}, awaiting result</span>}
+                  {group.every((c) => c.status !== "open") && <span className="tl-muted"> · awaiting result</span>}
                 </h3>
                 {group.map((c) => (
                   <button key={c.id} type="button" className="ex-row" data-on={chosen?.id === c.id || undefined} onClick={() => setPicked(c.id)}>
@@ -312,7 +387,7 @@ export function Exchange() {
                     <span className="tl-data" data-tone="down">
                       {price(c.ask)}
                     </span>
-                    <span className="tl-muted tl-num">{pct(c.forecast)}</span>
+                    <span className="tl-num ex-model">{pct(c.forecast)}</span>
                     <span className="ex-flag">
                       {c.status === "open" && c.fast ? <i className="ex-fast" title="Fast market: one-sided trading, so market makers may quote wider" /> : null}
                     </span>
@@ -323,102 +398,109 @@ export function Exchange() {
           </section>
 
           {chosen && (
-            <section className="ex-card ex-detail" aria-label="Selected contract">
-              <header>
-                <h2>{chosen.question}</h2>
-                <p className="ex-sub">
-                  YES = {chosen.yes} <span className="tl-muted">· NO = {chosen.no}</span>
-                </p>
-                <dl className="ex-facts tl-num">
-                  <div>
-                    <dt>Closes</dt>
-                    <dd>{londonClock(chosen.closesAt)}</dd>
-                  </div>
-                  <div>
-                    <dt>Settles</dt>
-                    <dd>{londonClock(chosen.settlesAt)}</dd>
-                  </div>
-                  <div>
-                    <dt>Model</dt>
-                    <dd>{pct(chosen.forecast)}</dd>
-                  </div>
-                  <div>
-                    <dt>Last trade</dt>
-                    <dd>{price(chosen.last)}</dd>
-                  </div>
-                </dl>
-                <p className="ex-note">
-                  Settles on {chosen.source.split(" · ")[0]}.{chosen.fast && " Fast market: trading is one-sided, so market makers may quote wider."}
-                </p>
-              </header>
-              <div className="ex-cols">
-                <Ladder depth={book ?? chosen.depth} />
-                <div className="ex-side">
-                  <Ticket c={chosen} account={account} holding={holding(chosen.id)} onDone={setToast} />
-                  <div className="ex-tape" aria-label="Recent trades">
-                    <h3>Recent trades</h3>
-                    {(book?.tape ?? []).slice(-8).reverse().map((t, i) => (
-                      <div key={`${t.at}${i}`} className="ex-print tl-num">
-                        <span className="tl-data" data-tone={t.aggressor === "yes" ? "up" : "down"}>
-                          {t.yesPrice}
-                        </span>
-                        <span>×{t.qty}</span>
-                        <span className="tl-muted">{t.aggressor === "yes" ? "YES bought" : "YES sold"}</span>
-                        <span className="tl-muted">{londonClock(t.at, true)}</span>
-                      </div>
-                    ))}
-                    {!book?.tape?.length && <p className="tl-muted">No trades yet.</p>}
-                  </div>
+            <section className="ex-center" aria-label="Selected market">
+              <div className="ex-card ex-hero">
+                <p className="ex-q">{chosen.question}</p>
+                <div className="ex-hero-row">
+                  <h2>{chosen.yes}</h2>
+                  <b className="ex-px tl-data">{lastPx ?? "–"}</b>
+                  {edge != null && (
+                    <span className="ex-edge tl-num" data-tone={edge > 0 ? "up" : edge < 0 ? "down" : undefined}>
+                      {edge > 0 ? "+" : ""}
+                      {edge} vs model
+                    </span>
+                  )}
+                  <span className="ex-hero-meta tl-num">
+                    Closes {londonClock(chosen.closesAt)} · settles {londonClock(chosen.settlesAt)}
+                    {chosen.fast && " · fast market"}
+                  </span>
+                </div>
+                <Chart points={history[chosen.id] ?? []} model={chosen.forecast} />
+              </div>
+              <div className="ex-split">
+                <div className="ex-card">
+                  <h3>Order book</h3>
+                  <Ladder depth={book ?? chosen.depth} />
+                </div>
+                <div className="ex-card ex-tape" aria-label="Recent trades">
+                  <h3>Trades</h3>
+                  {(book?.tape ?? []).slice(-12).reverse().map((t, i) => (
+                    <div key={`${t.at}${i}`} className="ex-print tl-num">
+                      <span className="tl-data" data-tone={t.aggressor === "yes" ? "up" : "down"}>
+                        {t.yesPrice}
+                      </span>
+                      <span>×{t.qty}</span>
+                      <span className="tl-muted">{londonClock(t.at, true)}</span>
+                    </div>
+                  ))}
+                  {!book?.tape?.length && <p className="tl-muted">No trades yet.</p>}
                 </div>
               </div>
             </section>
           )}
 
-          {account && mine && (mine.orders.length > 0 || mine.positions.length > 0) && (
-            <section className="ex-card" aria-label="Your orders and positions">
-              <h2>You</h2>
-              {mine.positions.map((p) => (
-                <div key={p.contract} className="ex-print tl-num">
-                  <span>{live.find((c) => c.id === p.contract)?.yes ?? p.contract}</span>
-                  <span>{p.yes ? `${p.yes} YES` : `${p.no} NO`}</span>
-                  <span className="tl-muted">cost {fmtPts(p.cost)}</span>
-                </div>
-              ))}
-              {mine.orders.map((o) => (
-                <div key={o.id} className="ex-print tl-num">
-                  <span>
-                    {o.side.toUpperCase()} {o.qty - o.filled} at {o.price}
-                  </span>
-                  <span className="tl-muted">{o.status}</span>
-                  <button type="button" className="ex-link" onClick={() => void cancel(o)}>
-                    Cancel
-                  </button>
-                </div>
-              ))}
-            </section>
-          )}
-
-          {stats && (
-            <section className="ex-card" aria-label="Who is trading">
-              <h2>Who is trading</h2>
-              <p className="tl-muted">
-                Every order, yours included, goes through the same gateway: the same speed bump, limits and fees. AI accounts also carry 300 ms of latency and see only the public book.
+          {chosen && (
+            <aside className="ex-card ex-trade" aria-label="Trade">
+              <h2>Trade</h2>
+              <p className="ex-sub">
+                YES pays 100 if {chosen.yes}. NO pays 100 if not.
               </p>
-              <div className="ex-groups">
-                {GROUP_ORDER.filter((g) => stats.groups[g]).map((g) => (
-                  <div key={g} className="ex-group tl-num">
-                    <b>{g}</b>
-                    <span>{fmtPts(stats.groups[g].accounts)} accounts</span>
-                    <span className="tl-muted">P&L {stats.groups[g].pnl > 0 ? "+" : ""}{fmtPts(stats.groups[g].pnl)}</span>
+              <Ticket
+                c={chosen}
+                account={account}
+                holding={holding(chosen.id)}
+                onDone={(msg) => {
+                  setStatus({ msg, at: Date.now() });
+                  setToast(msg);
+                }}
+              />
+              <div className="ex-mine">
+                <h3>Order status</h3>
+                {status ? (
+                  <p className="ex-status tl-num" data-bad={status.msg.startsWith("Refused") || undefined}>
+                    {status.msg} <span className="tl-muted">· {londonClock(status.at, true)}</span>
+                  </p>
+                ) : (
+                  <p className="tl-muted">No order sent yet.</p>
+                )}
+                <h3>Open orders</h3>
+                {!mine?.orders.length && <p className="tl-muted">None resting.</p>}
+                {mine?.orders.map((o) => (
+                  <div key={o.id} className="ex-print tl-num">
+                    <span>
+                      {o.side.toUpperCase()} {o.qty - o.filled} at {o.price}
+                    </span>
+                    <span className="tl-muted">{o.status}</span>
+                    <button type="button" className="ex-link" onClick={() => void cancel(o)}>
+                      Cancel
+                    </button>
+                  </div>
+                ))}
+                <h3>Positions</h3>
+                {!mine?.positions.length && <p className="tl-muted">None yet.</p>}
+                {mine?.positions.map((p) => (
+                  <div key={p.contract} className="ex-print tl-num">
+                    <span>{live.find((c) => c.id === p.contract)?.yes ?? p.contract}</span>
+                    <span>{p.yes ? `${p.yes} YES` : `${p.no} NO`}</span>
+                    <span className="tl-muted">cost {fmtPts(p.cost)}</span>
                   </div>
                 ))}
               </div>
-              <p className="tl-muted tl-num">
-                {fmtPts(stats.trades)} trades · market makers quoting {(() => {
-                  const u = Object.values(stats.marketMakerUptime).filter((x): x is number => x != null);
-                  return u.length ? `${pct(Math.min(...u))}–${pct(Math.max(...u))}` : "–";
-                })()} of the time · ledger audit {stats.audit === "ok" ? "clean" : "failing"}
-              </p>
+            </aside>
+          )}
+
+          {stats && (
+            <section className="ex-card ex-who" aria-label="Who is trading">
+              <h2>On the other side</h2>
+              <div className="ex-groups">
+                {GROUP_ORDER.filter((g) => stats.groups[g]).map((g) => (
+                  <div key={g} className="ex-group tl-num">
+                    <b>{fmtPts(stats.groups[g].accounts)}</b>
+                    <span>{g.replace("AI ", "").replace("fund · tier", "funds, tier")}</span>
+                  </div>
+                ))}
+              </div>
+              <p className="tl-muted tl-num">{fmtPts(stats.trades)} trades so far · no house</p>
             </section>
           )}
         </main>
