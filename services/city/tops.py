@@ -47,6 +47,7 @@ K_CAL = 5.0
 FLOOR = 0.05
 CAP = 0.40
 LAMBDA_MAX = 0.30
+MIN_RECORD = 20  # settles before the price may lean on the pool: 5 lucky markets once pushed lam to the cap
 P_LO, P_HI = pricing.P_FLOOR, pricing.P_CEIL
 HISTORY_SHOWN = 200
 FUTURES = "futures"
@@ -201,8 +202,10 @@ def lam_t(rec: dict | None) -> tuple[float, float]:
 def lam_of(rec: dict | None) -> float:
     """How far the price leans on the pool: lam^ shrunk by its own significance, lam^ max(0, 1 - 1/t^2) (positive-part
     James-Stein), held in [0, LAMBDA_MAX]. 0 with no record, when the pool's gains are within noise (|t| <= 1) and
-    when the pool has not beaten the futures on log loss. One market gives |t| = 1, so 0; m equal gains give t^2 =
+    when the pool has not beaten the futures on log loss, and before MIN_RECORD settles. One market gives |t| = 1, so 0; m equal gains give t^2 =
     their effective count, so lam^ (1 - 1/m): no extra n / (n + K) shrink is needed."""
+    if not rec or rec["count"] < MIN_RECORD:
+        return 0.0
     lam, t = lam_t(rec)
     if lam <= 0 or t * t <= 1:
         return 0.0

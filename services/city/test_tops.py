@@ -148,7 +148,7 @@ class MathsTest(unittest.TestCase):
 
     def test_lambda_is_the_second_order_fit_shrunk_by_its_significance_and_is_capped(self):
         rec = tops.new_pool_record()
-        rs = (0.1, -0.05, 0.08, 0.02, 0.12, 0.06, -0.02, 0.09)
+        rs = (0.1, -0.05, 0.08, 0.02, 0.12, 0.06, -0.02, 0.09) * 3
         for r in rs:
             tops.update_pool(rec, r)
         w = [tops.DECAY ** (len(rs) - 1 - k) for k in range(len(rs))]
@@ -168,6 +168,15 @@ class MathsTest(unittest.TestCase):
         for _ in range(200):
             tops.update_pool(big, 0.5)
         self.assertEqual(tops.lam_of(big), tops.LAMBDA_MAX)
+
+    def test_lambda_is_zero_until_the_pool_has_a_minimum_record(self):
+        rec = tops.new_pool_record()
+        for _ in range(tops.MIN_RECORD - 1):
+            tops.update_pool(rec, 0.5)
+        self.assertGreater(tops.lam_t(rec)[1], 4, "a strong but short record")
+        self.assertEqual(tops.lam_of(rec), 0.0)
+        tops.update_pool(rec, 0.5)
+        self.assertEqual(tops.lam_of(rec), tops.LAMBDA_MAX)
 
     def test_lambda_is_zero_when_the_pools_gains_are_noise(self):
         """r with mean 0: the pool moved the price but did not improve it. The old n / (n + 10) rule leaned on it."""
