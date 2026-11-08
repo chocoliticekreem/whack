@@ -3,7 +3,8 @@
 import { Bus, Camera, Check, CloudRain, Shuffle, TrafficCone, TrainFront, X, type LucideIcon } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createPortal } from "react-dom";
-import { countdown, fmtPts, londonClock, type MyBet, type Settled } from "./city-store";
+import { Coin } from "./Coin";
+import { countdown, fmtPts, fmtW, londonClock, type MyBet, type Settled } from "./city-store";
 import type { Market, Trader } from "./city-types";
 import { MarketClues, usualGhost } from "./Clues";
 import { FuturesFan } from "./FuturesFan";
@@ -112,28 +113,28 @@ function MyLine({ m, bet, now }: { m: Market; bet: MyBet; now: number }) {
   if (bet.done === "won") {
     return (
       <p className="tl-mine" data-result="won">
-        You won <b className="tl-data">{fmtPts(bet.payout)}</b>
+        You won <b className="tl-data">{fmtW(bet.payout)}</b>
       </p>
     );
   }
   if (bet.done === "lost") {
     return (
       <p className="tl-mine" data-result="lost">
-        You lost <span className="tl-data">{fmtPts(bet.stake)}</span>
+        You lost <span className="tl-data">{fmtW(bet.stake)}</span>
       </p>
     );
   }
   if (bet.done === "void") {
     return (
       <p className="tl-mine" data-result="void">
-        Refunded <span className="tl-data">{fmtPts(bet.stake)}</span>
+        Refunded <span className="tl-data">{fmtW(bet.stake)}</span>
       </p>
     );
   }
   const left = bet.pending ? Math.ceil((bet.pending.fillsAt - now) / 1000) : 0;
   return (
     <p className="tl-mine" data-pending={bet.pending ? true : undefined}>
-      You: <b className="tl-data">{fmtPts(bet.stake)}</b> on {plainLabel(m, bet.option)}
+      You: <b className="tl-data">{fmtW(bet.stake)}</b> on {plainLabel(m, bet.option)}
       <span className="tl-mine-sub">
         {bet.pending ? (
           left > 0 ? (
@@ -147,7 +148,7 @@ function MyLine({ m, bet, now }: { m: Market; bet: MyBet; now: number }) {
         ) : (
           <>
             {" "}
-            · locked in to win <span className="tl-data">{fmtPts(bet.payout)}</span>
+            · locked in to win <span className="tl-data">{fmtW(bet.payout)}</span>
           </>
         )}
       </span>
@@ -289,7 +290,7 @@ function Details({
               Bets fill {ig.delayS} s after you place them, at the price then; if the market pauses or closes first the bet is
               cancelled and your stake is untouched.
               {ig.suspendsOn.length > 0 && ` The market pauses for ${ig.coolOffS} s whenever ${ig.suspendsOn.join(" or ")}.`} Max{" "}
-              {ig.capPct}% of your points in this market.
+              {ig.capPct}% of your balance in this market.
             </p>
           </section>
         )}
@@ -410,7 +411,7 @@ export function MarketCard({
                     chance
                   </span>
                   <span className="tl-opt-pay">
-                    Bet <span className="tl-data">{REF_STAKE}</span> · win <b className="tl-data">{fmtPts(REF_STAKE * o.odds)}</b>
+                    Bet <span className="tl-data">{fmtW(REF_STAKE)}</span> · win <b className="tl-data">{fmtW(REF_STAKE * o.odds)}</b>
                   </span>
                 </span>
               </button>
@@ -423,10 +424,10 @@ export function MarketCard({
       {canBet && drafted && (
         <div className="tl-stake" onClick={(e) => e.stopPropagation()}>
           <div className="tl-stake-row">
-            <div className="tl-seg" role="group" aria-label="Points to bet">
+            <div className="tl-seg" role="group" aria-label="Amount to bet">
               {STAKES.map((s) => (
                 <button key={s} type="button" className="tl-stake-btn tl-data" data-on={stake === s || undefined} disabled={points < s} onClick={() => onStake(s)}>
-                  {s}
+                  W{s}
                 </button>
               ))}
               <button type="button" className="tl-stake-btn" data-on={stake === "all" || undefined} disabled={points <= 0} onClick={() => onStake("all")}>
@@ -439,7 +440,16 @@ export function MarketCard({
           </div>
           <button type="button" className="tl-confirm" data-side={draftedSide} disabled={stakeN <= 0} onClick={onConfirm}>
             <span>
-              Bet <span className="tl-data">{fmtPts(stakeN)}</span> · win <span className="tl-data">{fmtPts(stakeN * drafted.odds)}</span>
+              Bet{" "}
+              <span className="tl-data">
+                <Coin />
+                {fmtPts(stakeN)}
+              </span>{" "}
+              · win{" "}
+              <span className="tl-data">
+                <Coin />
+                {fmtPts(stakeN * drafted.odds)}
+              </span>
             </span>
             <span className="tl-confirm-win">on {plainLabel(m, drafted.id)}</span>
           </button>

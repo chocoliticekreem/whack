@@ -83,7 +83,7 @@ const plainIntegrity = (i: Integrity) =>
   `Bets fill ${i.delayS} s after you place them, at the price then; if the market pauses or closes first the bet is ` +
   `cancelled and your stake is untouched.` +
   (i.suspendsOn.length ? ` The market pauses for ${i.coolOffS} s whenever ${i.suspendsOn.join(" or ")}.` : "") +
-  ` Max ${i.capPct}% of your points in this market.`;
+  ` Max ${i.capPct}% of your balance in this market.`;
 
 const clock = (ms: number, seconds = false) =>
   new Intl.DateTimeFormat("en-GB", {

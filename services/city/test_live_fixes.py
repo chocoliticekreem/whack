@@ -69,7 +69,7 @@ class RestartMidRoundTest(unittest.TestCase):
         mid = self.before_restart("hub_surge", "bank", 20)
         ex = self.after_restart(T0 + MIN)
         self.assertEqual(ex.markets[mid].bets, [], "the round's market is rebuilt fresh by open_round")
-        with self.assertRaisesRegex(PermissionError, r"position cap: max 250 points in this market \(20 already"):
+        with self.assertRaisesRegex(PermissionError, r"position cap: max W250 in this market \(W20 already"):
             self.bet(ex, mid, "bank", 235, T0 + MIN)
         self.assertEqual(self.bet(ex, mid, "bank", 230, T0 + MIN)["status"], "pending")
 
@@ -87,7 +87,7 @@ class RestartMidRoundTest(unittest.TestCase):
         self.assertEqual(ex.restored, [])
         self.assertEqual(ex.market_json(m, now)["status"], "open")
         self.assertIn(mid, ex.round_json(now)["current"]["headlines"])
-        with self.assertRaisesRegex(PermissionError, r"\(50 already staked\)"):
+        with self.assertRaisesRegex(PermissionError, r"\(W50 already staked\)"):
             self.bet(ex, mid, "bank", 210, now)
         late = self.bet(ex, mid, "waterloo", 100, now)
         ex.tick(now + 5_000)
@@ -193,7 +193,7 @@ class DoomedPendingTest(PendingDeskCase):
         with self.assertRaises(WalletError) as cm:
             self.bet("heathrow_stack", "over", 40, T0 + 1_000)
         self.assertEqual(cm.exception.code, "loss_limit")
-        self.assertIn("in play 200", str(cm.exception))
+        self.assertIn("in play W200", str(cm.exception))
 
 
 class BurstConfirmTest(PendingDeskCase):
@@ -390,7 +390,7 @@ class OpenStakeReserveTest(unittest.TestCase):
         for t in range(T0, T0 + 5 * MIN, 15_000):
             ex.tick(t)
         self.assertFalse([b for m in ex.markets.values() for b in m.ai_bets if b["trader"] == "contrarian"])
-        self.assertIn("0 points left", ex.sat_out["contrarian"][1])
+        self.assertIn("W0 left", ex.sat_out["contrarian"][1])
 
 
 class HeathrowReversionTest(unittest.TestCase):

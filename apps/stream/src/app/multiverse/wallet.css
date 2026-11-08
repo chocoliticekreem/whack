@@ -531,3 +531,25 @@
     padding: 0 9px;
   }
 }
+
+
+.wl-pin-form {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+}
+
+.wl-link {
+  margin-top: 12px;
+  padding: 0;
+  font: inherit;
+  font-size: 13px;
+  color: var(--wl-ink);
+  background: none;
+  border: 0;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}

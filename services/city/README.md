@@ -34,8 +34,8 @@ result and the VIX line.
 
 Wallet: `POST /player/new` (per client IP, which at a venue is the whole Wi-Fi behind NAT: 30 a minute,
 `CITY_NEWPLAYER_PER_MIN`, and 500 a day, `CITY_NEWPLAYER_PER_DAY`) is the only way to get a player: it returns a
-server-made id, a random token (stored hashed) and the 1000-point grant. `GET /wallet /ledger /positions /history ?player=`,
-`POST /bet /limits {dailyLoss} /break {hours} /player/name {name}` all need `X-Player-Token`; reads never create a
+server-made id, a random token (stored hashed) and the W1000 grant. `GET /wallet /ledger /positions /history ?player=`,
+`POST /bet /limits {dailyLoss} /break {hours} /player/name {name} /player/pin {pin}` all need `X-Player-Token`; reads never create a
 player. `ledger.py` keeps player points in an append-only, double-entry SQLite ledger (`CITY_LEDGER_DB`, default
 `services/city/data/ledger.db`, gitignored, one server per file via a lock file; `--replay-from` uses an in-memory
 ledger). Balances are sums of entries. `/bet` takes an `idempotency_key` (scoped to the market round), a minimum stake
@@ -60,6 +60,37 @@ out on the client may still have filled.** Retry with the same `idempotency_key`
 over 16 KB. `Ledger.audit()` re-checks every invariant from the raw entries. A `/bet` is accepted as pending and fills
 after the series' delay (see Integrity below); `GET /bet?player=&id=` shows it pending, filled or cancelled, and
 `/positions` lists the pending ones under `pending`.
+
+Players see the currency as W (play money, no real value); the ledger stores whole W as integers, and every new player
+gets `GRANT` = 1000 once.
+
+Signing in on another device (no logins): nicknames are unique, case-insensitively (`/player/new {name}` and
+`/player/name` answer 409 `name_taken`). `POST /player/pin {player, pin}` (token required) sets or changes a 4-digit
+PIN, stored as salted PBKDF2 in `player_pins`; the player needs a name first. `POST /player/recover {name, pin}`
+returns `{player, token, nickname}` with a NEW token (kept hashed in `player_tokens`); the device's old token stays
+valid, so both devices keep playing. A wrong name, a wrong PIN and a player without a PIN all answer the same 401
+"Name or PIN didn't match". Five misses on one name within 15 minutes lock that name's recovery for 15 minutes (409
+`locked`, in memory, so a restart clears it), and each network gets 20 tries per 10 minutes (429).
+
+## Backups and restore
+
+`backup.py` runs as a thread of the live server: on start and then every 5 minutes it copies the ledger with the
+sqlite3 backup API (consistent while the server writes) to `services/city/data/backups/ledger-<UTC time>.db`
+(gitignored) and keeps the newest 48 (4 hours). If `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` are set, each copy is
+also uploaded to the Supabase Storage bucket `ledger-backups` (create it once, private); without them it stays local.
+`python3 services/city/backup.py` takes one backup now.
+
+To restore: stop the city server (it holds `ledger.db.lock`), move the live files aside, copy a backup into place, start
+again. The ledger replays its own tables, so balances, PINs and tokens come back as of that copy.
+
+    mv services/city/data/ledger.db services/city/data/ledger.db.broken
+    rm -f services/city/data/ledger.db-wal services/city/data/ledger.db-shm
+    cp services/city/data/backups/ledger-<time>.db services/city/data/ledger.db
+    python3 -c "import sys; sys.path.insert(0, 'services/city'); from ledger import Ledger; print(Ledger('services/city/data/ledger.db').audit())"   # [] = healthy
+    python3 services/city/server.py
+
+From Supabase: download the object from the `ledger-backups` bucket in the dashboard (or
+`curl -H "Authorization: Bearer $SUPABASE_SERVICE_ROLE_KEY" "$SUPABASE_URL/storage/v1/object/ledger-backups/<name>" -o ledger.db`) and copy it into place the same way.
 
 ## Rounds and series
 
@@ -258,6 +289,6 @@ against the forecast alone and an uninformed guess) and the ledger audit.
 `data.py` reads the recorder files into compact snapshots and never returns data after `now`. `pricing.py` holds the
 fits, simulators, particle filter and LMSR. `markets.py` holds the series registry and builds and settles each series. `traders.py` holds the
 seven traders (Tube Crowd → S1/S2/S5, Camera Eye → S3, Plane Spotter → S4, Line Watcher → S6, Rain Radar → S2 only in
-rain, Contrarian → all, Simulation → S1/S2/S5). `eval_sim.py` scores the simulation (below). `signals.py` builds the per-market clues and `/signals`. `exchange.py` runs the rounds, betting, settlement and scores. `integrity.py` holds the bet delay, suspend-on-change and caps. `server.py` is the HTTP layer.
+rain, Contrarian → all, Simulation → S1/S2/S5). `eval_sim.py` scores the simulation (below). `signals.py` builds the per-market clues and `/signals`. `exchange.py` runs the rounds, betting, settlement and scores. `integrity.py` holds the bet delay, suspend-on-change and caps. `server.py` is the HTTP layer. `backup.py` copies the ledger every 5 minutes (above).
 `hotspots.json` lists the hotspots with their JamCams, bus stops and lines; the recorder adds these cams to its
 YOLO list.

@@ -2,9 +2,9 @@
 
 import { ChevronDown } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { countdown, fmtPts, type MyBet, type Settled } from "./city-store";
+import { countdown, fmtW, type MyBet, type Settled } from "./city-store";
 import type { Market, Trader } from "./city-types";
-import { MiniSpark, Tick, signedPts, toneOf, useCountUp, useDismiss } from "./Live";
+import { MiniSpark, Tick, signedW, toneOf, useCountUp, useDismiss } from "./Live";
 import { Badge, type TipTarget } from "./MarketCard";
 import { plainLabel, plainTitle, plainWatches, recordText } from "./plain";
 
@@ -71,7 +71,7 @@ export function TradersMenu({
                     </span>
                     <span className="ow-trader-num">
                       <Tick value={t.points} className="ow-pts tl-data">
-                        {fmtPts(t.points)}
+                        {fmtW(t.points)}
                       </Tick>
                       <MiniSpark values={hist[t.id] ?? [t.points]} />
                       <span className="ow-rec">{recordText(t.record.won, t.record.lost)}</span>
@@ -260,11 +260,11 @@ export function EarningsMenu({
         className="ow-menu-btn ow-earn-btn"
         data-tone={toneOf(pnl)}
         aria-expanded={open}
-        aria-label={`This session ${signedPts(pnl)} points`}
+        aria-label={`This session ${signedW(pnl)}`}
         onClick={() => setOpen((o) => !o)}
       >
         <span key={pulse} className="ow-pnl tl-data" data-pulse={pulse > 0 || undefined}>
-          {signedPts(shownPnl)}
+          {signedW(shownPnl)}
         </span>
         <ChevronDown size={14} className="ow-chev" aria-hidden />
       </button>
@@ -276,7 +276,7 @@ export function EarningsMenu({
               <div>
                 <span className="ow-cap">This session</span>
                 <b className="ow-earn-total tl-data" data-tone={toneOf(pnl)}>
-                  {signedPts(shownPnl)}
+                  {signedW(shownPnl)}
                 </b>
               </div>
               <MiniSpark values={series} w={112} h={34} className="ow-spark ow-spark-big" />
@@ -315,11 +315,11 @@ export function EarningsMenu({
                           {r.answer}
                           {r.chance != null && r.pendingS == null && <i>{Math.round(r.chance * 100)}%</i>}
                         </span>
-                        <span>{fmtPts(r.stake)}</span>
-                        <span>→ {r.pendingS == null ? fmtPts(r.payout) : "…"}</span>
+                        <span>{fmtW(r.stake)}</span>
+                        <span>→ {r.pendingS == null ? fmtW(r.payout) : "…"}</span>
                         <span className="ow-now">
                           {r.chance != null && r.pendingS == null ? (
-                            <Tick value={Math.round(r.payout * r.chance)}>≈ {fmtPts(r.payout * r.chance)}</Tick>
+                            <Tick value={Math.round(r.payout * r.chance)}>≈ {fmtW(r.payout * r.chance)}</Tick>
                           ) : (
                             "–"
                           )}
@@ -329,8 +329,8 @@ export function EarningsMenu({
                   ))}
                   <div className="ow-pos ow-pos-sum tl-data">
                     <span>Total</span>
-                    <span>{fmtPts(atRisk)}</span>
-                    <span>→ {fmtPts(potential)}</span>
+                    <span>{fmtW(atRisk)}</span>
+                    <span>→ {fmtW(potential)}</span>
                     <span />
                   </div>
                 </>
@@ -352,7 +352,7 @@ export function EarningsMenu({
                       <span className="ow-state">refunded</span>
                     ) : (
                       <b className="tl-data" data-tone={toneOf(s.pnl)}>
-                        {signedPts(s.pnl)}
+                        {signedW(s.pnl)}
                       </b>
                     )}
                   </div>

@@ -118,8 +118,8 @@ export function plainResult(m: Market, r: Settled): string {
 
 /** The settle toast's line: what happened in London, then what it meant for you. */
 export function plainSettle(m: Market, r: Settled, outcome: "won" | "lost" | "void", pts: string): string {
-  if (outcome === "void") return `No data came in, so the question was cancelled. Your ${pts} points are back.`;
-  return `${plainResult(m, r)}. You ${outcome} ${pts} points.`;
+  if (outcome === "void") return `No data came in, so the question was cancelled. Your W${pts} is back.`;
+  return `${plainResult(m, r)}. You ${outcome} W${pts}.`;
 }
 
 /** Busyness as a move against a normal day, like a stock's daily change: "−19%", "+12%", "±0". */

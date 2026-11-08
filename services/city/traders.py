@@ -240,7 +240,7 @@ def contrarian(m: Market, store: Store, now: int, ctx: dict):
     prices = m.prices()
     if any(stakes.values()):
         fav = max(stakes, key=lambda o: stakes[o])
-        reason = f"players and traders put {stakes[fav]:g} points on {m.label(fav)}"
+        reason = f"players and traders put W{stakes[fav]:g} on {m.label(fav)}"
     else:
         fav = max(prices, key=lambda o: prices[o])
         reason = f"the market has {m.label(fav)} at {pct(prices[fav])}"

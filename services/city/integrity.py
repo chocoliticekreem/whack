@@ -112,7 +112,7 @@ def plain(series: str) -> str:
            f"the bet is cancelled and your stake is untouched.")
     if r.suspends_on:
         out += f" The market pauses for {r.cool_off_s} s whenever {' or '.join(t.says for t in r.suspends_on)}."
-    return out + f" Max {r.cap_pct:.0%} of your points in this market."
+    return out + f" Max {r.cap_pct:.0%} of your balance in this market."
 
 
 class Integrity:

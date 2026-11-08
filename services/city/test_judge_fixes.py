@@ -148,7 +148,7 @@ class TraderRecordTest(CityCase):
         for t in range(T0, T0 + 20_000, 5_000):
             ex.tick(t)
         self.assertFalse([b for m in ex.markets.values() for b in m.ai_bets if b["trader"] == "tube"])
-        self.assertIn("90 points left", ex.sat_out["tube"][1])
+        self.assertIn("W90 left", ex.sat_out["tube"][1])
         ex2 = self.exchange()
         ex2.record["tube"]["points"] = 400
         for t in range(T0, T0 + 20_000, 5_000):

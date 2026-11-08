@@ -187,7 +187,7 @@ export function usePortfolio(): State {
   return state;
 }
 
-export const signed = (n: number) => (n > 0 ? `+${fmtPts(n)}` : n < 0 ? `−${fmtPts(-n)}` : "0");
+export const signed = (n: number) => (n > 0 ? `+W${fmtPts(n)}` : n < 0 ? `−W${fmtPts(-n)}` : "W0");
 export const tone = (n: number) => (n > 0 ? "up" : n < 0 ? "down" : undefined);
 export const pct = (n: number | null) => (n == null ? "–" : `${Math.round(n * 100)}%`);
 

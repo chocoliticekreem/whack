@@ -8,7 +8,7 @@ const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono"
 
 export const metadata: Metadata = {
   title: "OverWatch",
-  description: "Bet points on what London does in the next few minutes, against six AI traders. Real TfL data settles every bet.",
+  description: "Bet play money on what London does in the next few minutes, against six AI traders. Real TfL data settles every bet.",
 };
 
 export const viewport: Viewport = { width: "device-width", initialScale: 1, viewportFit: "cover" };

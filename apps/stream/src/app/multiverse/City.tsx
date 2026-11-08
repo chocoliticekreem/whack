@@ -3,10 +3,13 @@
 import { CircleHelp, Flame, MoreHorizontal, Trophy, WalletIcon, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CityMapGL, flyToHotspots, type Pop } from "./CityMapGL";
+import { Coin, CoinText } from "./Coin";
 import {
   START_POINTS,
   defaultName,
   fmtPts,
+  freshWallet,
+  fmtW,
   loadWallet,
   londonClock,
   saveWallet,
@@ -24,7 +27,8 @@ import { EarningsMenu, TradersMenu } from "./Menus";
 import { cancelNote, usePendingFills, type Fill } from "./pending-bets";
 import { plainTitle, recordText } from "./plain";
 import { Scenario, type WhatIfOdds } from "./Scenario";
-import { WalletPanel, createPlayer, setNickname, useServerWallet, useStakeConfirm } from "./Wallet";
+import { WalletPanel, createPlayer, setNickname, useServerWallet, useStakeConfirm, type Recovered } from "./Wallet";
+import { Welcome } from "./Welcome";
 
 const POLL_MS = 3000;
 const SETTLE_POLL_MS = 2500;
@@ -129,8 +133,8 @@ export function City() {
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<{ market: string; option: string } | null>(null);
   const [stake, setStake] = useState<number | "all">(100);
-  const [askName, setAskName] = useState(false);
-  const [nameInput, setNameInput] = useState("");
+  const [signIn, setSignIn] = useState(false);
+  const [nudge, setNudge] = useState(false);
   const [board, setBoard] = useState<LeaderRow[] | null>(null);
   const [boardOpen, setBoardOpen] = useState(false);
   const [healthOpen, setHealthOpen] = useState(false);
@@ -151,6 +155,12 @@ export function City() {
   const dropToken = useCallback((stale: string | null) => setWallet((w) => (w.token && w.token === stale ? { ...w, token: null } : w)), []);
   const { wallet: server, refresh: refreshWallet } = useServerWallet(wallet.player, wallet.token, !mock && !!wallet.token, mirrorCash, dropToken);
   const [askStake, stakeDialog] = useStakeConfirm();
+  // Why: one key per draft (market, option, stake), so a retry after a lost reply replays the bet instead of placing a second.
+  const betKey = useRef<{ sig: string; key: string } | null>(null);
+  const hasPin = useRef(false);
+  useEffect(() => {
+    hasPin.current = !!server?.player.hasPin;
+  }, [server]);
 
   const nameRef = useRef(wallet.name);
   useEffect(() => {
@@ -269,7 +279,7 @@ export function City() {
         setToast({
           key,
           good: won,
-          text: isVoid ? `Refunded ${fmtPts(bet.stake)}` : won ? `+${fmtPts(bet.payout - bet.stake)}` : `−${fmtPts(bet.stake)}`,
+          text: isVoid ? `Refunded ${fmtW(bet.stake)}` : won ? `+${fmtW(bet.payout - bet.stake)}` : `−${fmtW(bet.stake)}`,
           sub: plainTitle(m),
         });
         if (won) {
@@ -277,7 +287,7 @@ export function City() {
           window.setTimeout(() => setWin((x) => (x?.key === key ? null : x)), 1400);
         }
         window.setTimeout(() => setToast((t) => (t?.key === key ? null : t)), 4500);
-        if (winHub) setPop({ key, hotspot: winHub, text: won ? `+${fmtPts(bet.payout - bet.stake)}` : `−${fmtPts(bet.stake)}`, good: won });
+        if (winHub) setPop({ key, hotspot: winHub, text: won ? `+${fmtW(bet.payout - bet.stake)}` : `−${fmtW(bet.stake)}`, good: won });
         return next;
       });
       if (!mock) void refreshWallet();
@@ -363,12 +373,29 @@ export function City() {
         return;
       }
       setBetError(null);
+      const sig = `${m.id}|${opt.id}|${amount}`;
+      if (betKey.current?.sig !== sig) betKey.current = { sig, key: crypto.randomUUID() };
+      // A lost reply may hide a filled bet: ask once more with the same key, and the server answers with that bet.
+      const send = async (b: object) => {
+        try {
+          const r = await call<BetResponse>(mock, "bet", b, w.token);
+          if (r.status < 502) return r;
+        } catch {
+          // Network drop: fall through to the one retry.
+        }
+        setBetNote("Checking your bet…");
+        try {
+          return await call<BetResponse>(mock, "bet", b, w.token);
+        } finally {
+          setBetNote(null);
+        }
+      };
       try {
-        const body = { player: w.player, market: m.id, option: opt.id, stake: amount, idempotency_key: crypto.randomUUID() };
-        let r = await call<BetResponse>(mock, "bet", body, w.token);
+        const body = { player: w.player, market: m.id, option: opt.id, stake: amount, idempotency_key: betKey.current.key };
+        let r = await send(body);
         if (r.data.code === "confirm_required") {
           if (!(await askStake(r.data.error ?? "Confirm this stake."))) return;
-          r = await call<BetResponse>(mock, "bet", { ...body, confirm_token: r.data.confirmToken }, w.token);
+          r = await send({ ...body, confirm_token: r.data.confirmToken });
         }
         if (r.status === 401) {
           dropToken(w.token);
@@ -380,6 +407,12 @@ export function City() {
           return;
         }
         setBetNote(null);
+        betKey.current = null;
+        if (!mock && !hasPin.current && !w.pinNudged) {
+          setNudge(true);
+          setWallet((cur) => ({ ...cur, pinNudged: true }));
+          window.setTimeout(() => setNudge(false), 12_000);
+        }
         if (r.data.status === "pending" && r.data.betId && r.data.fillsAt) {
           const pending = { betId: r.data.betId, fillsAt: r.data.fillsAt };
           const bet: MyBet = { market: m.id, option: opt.id, label: opt.label, stake: amount, payout: 0, pending };
@@ -406,7 +439,7 @@ export function City() {
         }));
         setDraft(null);
       } catch {
-        setBetError("Could not reach the exchange");
+        setBetError("Could not reach the exchange. Tap again: it won't bet twice.");
       }
     },
     [draft, stake, mock, book, askStake, dropToken],
@@ -440,23 +473,18 @@ export function City() {
   );
   usePendingFills(wallet.bets, wallet.player, wallet.token, mock, onFill, onCancelled);
 
-  const confirm = () => {
-    if (!wallet.name) {
-      setNameInput(defaultName(wallet.player));
-      setAskName(true);
-      return;
-    }
-    void placeBet(wallet);
+  const confirm = () => void placeBet(wallet);
+  const cancelDraft = () => {
+    betKey.current = null;
+    setDraft(null);
   };
 
-  const saveName = () => {
-    const name = nameInput.trim().slice(0, 18) || defaultName(wallet.player);
-    const w = { ...wallet, name };
-    setWallet(w);
-    setAskName(false);
-    if (!mock && w.token) void setNickname(w.player, w.token, name);
-    void placeBet(w);
-  };
+  const onRecovered = useCallback((r: Recovered) => {
+    setWallet({ ...freshWallet(), player: r.player, token: r.token, name: r.nickname, seenIntro: true, pinNudged: true });
+    setSignIn(false);
+    setWalletOpen(false);
+  }, []);
+  const welcome = signIn ? "recover" : !mock && !wallet.name ? "new" : null;
 
   useEffect(() => {
     if (!boardOpen) return;
@@ -524,10 +552,10 @@ export function City() {
             </span>
           </span>
         </div>
-        <div className="tl-wallet tl-num" aria-label="Your points">
+        <div className="tl-wallet tl-num" aria-label="Your balance">
           <span className="tl-pts">
+            <Coin size={16} />
             <b className="tl-data">{fmtPts(wallet.points)}</b>
-            <span className="tl-pts-unit"> pts</span>
           </span>
           <span className="tl-streak" data-hot={wallet.streak > 0 || undefined} aria-label={`Win streak ${wallet.streak}`}>
             <Flame size={14} strokeWidth={2.5} />
@@ -690,7 +718,7 @@ export function City() {
             }}
             onStake={setStake}
             onConfirm={confirm}
-            onCancel={() => setDraft(null)}
+            onCancel={cancelDraft}
             onTip={setTip}
             whatIf={scenarioOpen ? whatIf?.[m.id] : undefined}
           />
@@ -725,7 +753,7 @@ export function City() {
             }}
             onStake={setStake}
             onConfirm={confirm}
-            onCancel={() => setDraft(null)}
+            onCancel={cancelDraft}
             onTip={setTip}
           />
         )}
@@ -756,35 +784,56 @@ export function City() {
 
       {scenarioOpen && <Scenario hotspots={hotspots} markets={feed?.markets ?? []} now={now} onOdds={setWhatIf} onClose={() => setScenarioOpen(false)} />}
 
-      <WalletPanel player={wallet.player} token={wallet.token} wallet={server} open={walletOpen} onClose={() => setWalletOpen(false)} refresh={() => void refreshWallet()} />
+      <WalletPanel
+        player={wallet.player}
+        token={wallet.token}
+        wallet={server}
+        open={walletOpen}
+        onClose={() => setWalletOpen(false)}
+        refresh={() => void refreshWallet()}
+        onSignIn={() => setSignIn(true)}
+      />
       {stakeDialog}
 
       {toast && (
         <div key={toast.key} className="tl-toast" role="status" data-good={toast.good || undefined} data-bad={toast.text.startsWith("−") || undefined}>
-          <span className="tl-toast-big tl-num">{toast.text}</span>
+          <span className="tl-toast-big tl-num">
+            <CoinText text={toast.text} size={26} />
+          </span>
           <span className="tl-toast-sub">{toast.sub}</span>
         </div>
       )}
       {win && <Confetti key={`confetti-${win.key}`} from=".ow-earn-btn" />}
 
-      {askName && (
-        <div className="tl-modal-bg" onClick={() => setAskName(false)}>
-          <form
-            className="tl-modal"
-            onClick={(e) => e.stopPropagation()}
-            onSubmit={(e) => {
-              e.preventDefault();
-              saveName();
+      {nudge && (
+        <div className="tl-nudge" role="status">
+          <span>Set a PIN to play on another device</span>
+          <button
+            type="button"
+            className="tl-nudge-btn"
+            onClick={() => {
+              setNudge(false);
+              setWalletOpen(true);
             }}
           >
-            <h2>Your trader name</h2>
-            <p className="tl-muted">Shown on the leaderboard next to the computer traders.</p>
-            <input value={nameInput} onChange={(e) => setNameInput(e.target.value)} maxLength={18} autoFocus aria-label="Trader name" />
-            <button type="submit" className="tl-confirm">
-              Place my bet
-            </button>
-          </form>
+            Set PIN
+          </button>
+          <button type="button" className="tl-stake-x" aria-label="Dismiss" onClick={() => setNudge(false)}>
+            <X size={16} />
+          </button>
         </div>
+      )}
+
+      {welcome && (
+        <Welcome
+          key={welcome}
+          player={wallet.player}
+          token={wallet.token}
+          mode={welcome}
+          onNamed={(name) => setWallet((w) => ({ ...w, name }))}
+          onRecovered={onRecovered}
+          onClose={signIn ? () => setSignIn(false) : undefined}
+        />
       )}
 
       {boardOpen && (
@@ -809,7 +858,7 @@ export function City() {
                       {me && " (you)"}
                     </span>
                     <span className="tl-kind">{r.kind === "ai" ? "Computer trader" : "Player"}</span>
-                    <b className="tl-data">{fmtPts(r.points)}</b>
+                    <b className="tl-data">{fmtW(r.points)}</b>
                   </li>
                 );
               })}

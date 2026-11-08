@@ -45,9 +45,9 @@ export function Tick({ value, className, children }: { value: number; className?
   );
 }
 
-export const signedPts = (n: number) => {
+export const signedW = (n: number) => {
   const r = Math.round(n);
-  return r > 0 ? `+${r.toLocaleString("en-GB")}` : r < 0 ? `−${(-r).toLocaleString("en-GB")}` : "±0";
+  return r > 0 ? `+W${r.toLocaleString("en-GB")}` : r < 0 ? `−W${(-r).toLocaleString("en-GB")}` : "±W0";
 };
 export const toneOf = (n: number) => (Math.round(n) > 0 ? "up" : Math.round(n) < 0 ? "down" : undefined);
 
