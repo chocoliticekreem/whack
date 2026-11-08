@@ -41,6 +41,7 @@ OXFORD = "oxford-circus"
 HUB_ORDER = "Oxford Circus, King's Cross, Piccadilly Circus, Waterloo, Bank"
 PULSE_STATIONS = 20
 PULSE_MIN_STATIONS = 18
+PULSE_TREND_MS = 30 * MIN_MS
 READING_MAX_AGE_MS = 2 * MIN_MS
 SETTLE_LAG_MS = 30_000
 GRACE_MS = 3 * MIN_MS
@@ -558,6 +559,18 @@ def pulse_along_usual(store: Store, snap_at: tuple[int, dict], t_end: int) -> fl
     return pulse_of(vals)
 
 
+def pulse_devs(store: Store, start: int, now: int) -> list[tuple[int, float]]:
+    """(TfL stamp, log City Pulse ÷ the usual day's pulse at that stamp) per stamp polled in (start, now], oldest first;
+    a reading with any station's usual missing is left out."""
+    out: dict[int, float] = {}
+    for ts, s in store.between("crowding", start, now):
+        stamp = store.measured_at(ts)
+        typ = [store.usual(nap, stamp) for nap in s]
+        if stamp not in out and (p := pulse_of(s)) and all(typ):
+            out[stamp] = math.log(p / (100 * sum(typ) / len(typ)))
+    return sorted(out.items())
+
+
 def pulse_line(sim: pricing.ScalarSim) -> float:
     """The half point (x.0 or x.5) nearest the futures' median final City Pulse, so markets open close to 50/50."""
     return round(statistics.median(math.exp(p[-1]) for p in sim.paths) * 2) / 2
@@ -566,9 +579,10 @@ def pulse_line(sim: pricing.ScalarSim) -> float:
 def build_city_pulse(mid: str, store: Store, spots: list[dict], now: int, settles_at: int) -> Market | None:
     """Over/under on City Pulse; line = the futures' median City Pulse at the settle reading, on a .5, so the market
     opens near 50/50 (the old line, open + the median 5-min change, missed the usual-day slope the futures drift along
-    and opened evening markets at a 94% favourite). The futures already run from the newest reading's TfL stamp to
-    the first stamp after close, with the usual slope over that whole span. Dropping the walk drift, or adding
-    momentum, scored worse out of sample on the market replay (analysis/judge/fit_crowd.py, replay_score.py)."""
+    and opened evening markets at a 94% favourite). The futures run from the newest reading's TfL stamp to the first
+    stamp after close along the usual day, plus the last 10 min's trend in vs usual (pricing.fit_pulse;
+    analysis/judge/pulse_model.py). Without the usual profile at those two readings they fall back to the plain
+    walk's drift, half the last hour's mean change."""
     last = store.latest("crowding", now)
     p0 = pulse_of(last[1]) if last else None
     if not p0:
@@ -576,6 +590,9 @@ def build_city_pulse(mid: str, store: Store, spots: list[dict], now: int, settle
     mu, sd = pricing.fit_log_walk(pulse_vs_usual(store, now - HISTORY_MS, now), 0.01, 0.002, 0.05)
     m0 = store.measured_at(last[0])
     t_end, minutes = crowd_walk(m0, settles_at, now)
+    trend = pricing.fit_pulse(pulse_devs(store, now - PULSE_TREND_MS, now), m0, minutes)
+    if trend is not None:
+        mu = trend
     mu += pricing.usual_drift(p0, pulse_along_usual(store, (m0, last[1]), t_end), minutes)
     sim = pricing.ScalarSim(p0, mu, sd, m0, minutes, random.Random(seed_of(mid)), pulse_of, p0)
     blend_pulse(sim, store, last, now, t_end, mid)
