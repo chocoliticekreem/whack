@@ -144,9 +144,7 @@
 .ex-main {
   box-sizing: border-box;
   display: grid;
-  grid-template-areas:
-    "list center trade"
-    "who who who";
+  grid-template-areas: "list center trade";
   grid-template-columns: minmax(240px, 290px) minmax(0, 1fr) minmax(260px, 310px);
   gap: var(--s3);
   max-width: 1440px;
@@ -154,9 +152,13 @@
   padding: var(--s4) var(--s4) 48px;
 }
 
-.ex-list {
+.ex-left {
+  display: flex;
   grid-area: list;
+  flex-direction: column;
+  gap: var(--s3);
   align-self: start;
+  min-width: 0;
 }
 
 .ex-center {
@@ -174,9 +176,7 @@
   top: calc(var(--bar-h) + var(--s4));
 }
 
-.ex-who {
-  grid-area: who;
-}
+
 
 .ex-card {
   box-sizing: border-box;
@@ -374,7 +374,36 @@
 .ex-split {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: var(--s3);
+  gap: var(--s5);
+}
+
+.ex-asks,
+.ex-bids {
+  display: flex;
+  flex-direction: column;
+  min-height: calc(5 * 27px);
+}
+
+.ex-asks {
+  justify-content: flex-end;
+}
+
+.ex-tape-head,
+.ex-tape .ex-print {
+  display: grid;
+  grid-template-columns: 3em 3em minmax(0, 1fr);
+  gap: var(--s2);
+  padding: 3px var(--s2);
+}
+
+.ex-tape-head {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.ex-tape-head span:last-child,
+.ex-tape .ex-print span:last-child {
+  text-align: right;
 }
 
 .ex-split h3 {
@@ -462,9 +491,7 @@
   padding: 3px 0;
 }
 
-.ex-tape .ex-print {
-  justify-content: space-between;
-}
+
 
 /* Ticket */
 .ex-sub {
@@ -615,28 +642,20 @@
   font-size: 12px;
 }
 
-.ex-groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: var(--s2);
-  margin-bottom: var(--s2);
-}
-
 .ex-group {
   display: flex;
-  flex-direction: column;
-  padding: var(--s2) var(--s3);
-  background: var(--surface-2);
-  border-radius: var(--r);
-}
-
-.ex-group b {
-  font-size: 18px;
+  justify-content: space-between;
+  padding: 5px 0;
+  font-size: 13px;
+  border-bottom: 1px solid var(--line);
 }
 
 .ex-group span {
-  font-size: 12px;
-  color: var(--muted);
+  color: var(--ink-2);
+}
+
+.ex-who p {
+  margin-top: var(--s2);
 }
 
 .ex-toast {
@@ -663,8 +682,7 @@
   .ex-main {
     grid-template-areas:
       "center trade"
-      "list trade"
-      "who who";
+      "list trade";
     grid-template-columns: minmax(0, 1fr) minmax(260px, 310px);
   }
 }
@@ -674,8 +692,7 @@
     grid-template-areas:
       "center"
       "trade"
-      "list"
-      "who";
+      "list";
     grid-template-columns: minmax(0, 1fr);
     padding-inline: var(--s3);
   }
