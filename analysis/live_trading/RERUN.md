@@ -35,8 +35,8 @@ After midnight every vs-usual market voids (new #1). In a falling evening, City 
 | Bets 1–3 s after close refused | 45/47 (2 = restart) | 37/37 | yes |
 | Ledger reconciliation | 120/120 | final 8/8. Per round 81/91: the 10 misses are one bet the client timed out on but the server filled (#4) | yes (server side) |
 | Ledger audit | clean | clean: entries sum 9,000 = grants, every bet nets to zero | yes |
-| House P&L vs players | **−1,408** | **−183** | better |
-| House vs AI traders (off ledger) | −1,387 | +209 | better |
+| House P&L vs players | **−1,408** | **−177** (final, after the late settles) | better |
+| House vs AI traders (off ledger) | −1,387 | +309 (final) | better |
 | Copycat (Tube Crowd's pick) ROI | +23% ± 27% | **+30% ± 20%** (city_pulse +59%, hub_surge +1%) | still positive |
 | london_vix listed | 17/19 (skipped first round after each start) | 14/15 (skipped the first round; heathrow_stack stood in) | unchanged (bug 4d) |
 | Settle delay after close (crowding) | +243 s | **+543 to +843 s**, so players wait 9–14 min for hub_surge and city_pulse | expected cost of the fix |
@@ -51,7 +51,7 @@ After midnight every vs-usual market voids (new #1). In a falling evening, City 
 | 4 | Medium (new) | **A server stall makes a filled bet look rejected.** From 22:53:56 to 22:54:50, POST /bet took 2.3–10 s and two calls hit the client's 10 s timeout. One of them (longshot, hub_surge-2300) was filled on the server. Any client that does not retry with the same idempotency key believes the bet failed while 10 points sit in escrow. In the same window the multiverse VIX had no frame from about 22:52:30 to 22:56:16, so london_vix-2255 voided ("No data", stakes refunded). *Cause inferred, not measured: machine load or a lock held during the 22:54 round open.* | `trades.jsonl` 335–352 (ms 2297–10089), RECON_MISMATCH lines 788 onwards; `prices.jsonl` london_vix-2255 |
 | 5 | Low | london_vix is skipped in the first round after a start (first-run bug 4d, unchanged). | `/round` at 22:40: heathrow_stack stood in |
 | 6 | Low | The daily loss limit counts gross losses, so a winner gets locked out (first-run #8). Kelly was refused 14 times. | report "Pending bets" |
-| 7 | Low | The AI traders are still off the ledger: house +209 against them, not in `Ledger.house()`. | report "AI traders" |
+| 7 | Low | The AI traders are still off the ledger: house +309 against them, not in `Ledger.house()`. | report "AI traders" |
 
 Not re-tested here: restart (#4 in the first run), the pending desk ordering (#5) and the confirm bypass (#6). This run
 did not use `--edge`.
