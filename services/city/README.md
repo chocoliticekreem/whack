@@ -2,10 +2,12 @@
 
 Live prediction markets across five central-London hotspots (Oxford Circus, King's Cross St Pancras,
 Piccadilly Circus, Waterloo, Bank). Simulated futures set the prices; real recorded TfL and Open-Meteo data settles them.
-Seven rule-based AI traders each read one feed and bet against the players. Each stakes min(100, 10% of the points
-not already staked on unsettled markets) and sits out when that is under 10, so losing every open bet still leaves 0
-or more (sizing on settled points alone took the Contrarian to −181 live). A negative record on file loads as 0 and is
-logged. Their records (points, won/lost, last reason) are appended to the ledger's SQLite
+Seven rule-based AI traders each read one feed and bet against the players. Each stakes quarter Kelly on the LMSR for
+its own probability (its calibrated record in the series, or the Simulation's forecast) against the option's price,
+after the 5% fee and the slippage, on the points not already staked on unsettled markets, at most 100; with no edge,
+or a stake under 10, it sits out. A stake is never more than a quarter of the free points, so losing every open bet
+still leaves 0 or more (sizing on settled points alone took the Contrarian to −181 live). A negative record on file
+loads as 0 and is logged. Details: `docs/traders-and-tops.md`. Their records (points, won/lost, last reason) are appended to the ledger's SQLite
 (`ai_records`) on every settle and reloaded on start. The web app proxies `/api/city/*` here.
 
 ```bash
@@ -199,18 +201,22 @@ brokers are the seven traders, and the loop (`tops.py`) feeds their records back
    the pick becomes a probability from the trader's own record in that series: the futures' price for the pick plus its
    shrunk excess hit rate on past picks (never below the price: a losing trader is trusted less, never faded). With no
    record, the view is the futures' price, so it moves nothing.
-2. **Track record.** At settle, each view scores `log p_view(winner) − log p_futures(winner)`: its skill over the
+2. **Track record.** At settle, each view scores `x = log p_view(winner) − log p_futures(winner)`: its skill over the
    futures prior. The prior, not the blended price, is the baseline, so a right trader doesn't look worse the more it
-   is trusted. Per trader per series, a decayed mean with a half-life of 20 settled markets (≈100 min of 5-minute
-   rounds: long enough to see 20 outcomes, short enough to follow the day's regimes, which flip between afternoon and
-   evening), shrunk toward 0 as `Σw·s / (Σw + 10)`: a normal prior worth 10 markets, so 10 settles earn half credit.
-3. **Trust weights** per series: `softmax(score / 0.01)` (a 0.01-nat edge per market is a 2.7× weight), mixed with a
-   5% floor each so no trader is ignored, each capped at 40%. What the cap cuts stays with the futures (`futuresWeight`),
-   not spread to the other traders: with two or three per series, that would hand the best one's excess to the worst.
-4. **The blend.** Opening prior = `(1 − λ)·futures + λ·(Σ w_i·view_i + w_futures·futures)`, with
-   `λ = 0.3 · S / (S + 0.05)`, S the summed positive skill of the traders with a view. No proven skill: λ = 0 and the
-   price is the futures. The blend rides on the futures as a fixed tilt (blended ÷ prior) while they learn in-round,
-   held in the futures' [3%, 97%] band. The LMSR, the odds floor, the caps and `SIM_WEIGHT` (0) are unchanged.
+   is trusted. Skill model per trader per series: `x ~ N(θ, σ²)`, `θ ~ N(0, τ²)`, with a discounted likelihood (half-life
+   20 settled markets, ≈100 min of 5-minute rounds, so it follows the day's regimes). Posterior
+   `θ ~ N(Σw·x / (Σw + K), σ² / (Σw + K))`, `K = σ²/τ²`. σ² is the series' pooled second moment of the scores; K is
+   empirical Bayes, from how much the traders' mean scores spread beyond noise, capped at the decayed window (29.4).
+   On the replay it settles at K ≈ 23 markets: the records barely differ beyond noise.
+3. **Trust weights** per series ∝ `P(θ > 0)` under that posterior (no temperature to tune), mixed with a 5% floor each
+   so no trader is ignored, each capped at 40%. What the cap cuts stays with the futures (`futuresWeight`), not spread
+   to the other traders: with two or three per series, that would hand the best one's excess to the worst.
+4. **The blend.** Opening prior = `(1 − λ)·futures + λ·pool`, `pool = Σ w_i·view_i + w_futures·futures`. λ comes from
+   the pool's own record: at every settle where the pool differed from the futures, `r = pool(winner)/futures(winner) − 1`
+   is kept per series (same decay), and λ maximises `Σw·log(1 + λr)` to second order, `λ = Σw·r / Σw·r²`, shrunk by
+   `n/(n + 10)` and held in [0, 0.3]. A pool that hasn't beaten the futures on log loss gets λ = 0 and the price is the
+   futures. The blend rides on the futures as a fixed tilt (blended ÷ prior) while they learn in-round, held in the
+   futures' [3%, 97%] band. The LMSR, the odds floor, the caps and `SIM_WEIGHT` (0) are unchanged.
 5. **Kept.** One row per listed market in the ledger's SQLite (`tops_markets`: prior, views, λ, weights, tilt, then the
    winner at settle); the records are rebuilt from it at start, a relisted headline keeps its tilt, and a market settled
    after a restart is still scored. `ai_records` can't rebuild them: it keeps won/lost totals, not per-market views.
@@ -218,15 +224,28 @@ brokers are the seven traders, and the loop (`tops.py`) feeds their records back
 
 `/markets` carries `tops {lambda, weights, contribution}` per market (`contribution` = each option's change at open),
 `/traders` a `trust` per trader (its mean weight over the series it has settled views on), and `GET /tops` per series
-each trader's `score`, `n`, `nEff` and `weight`, `futuresWeight`, `lambdaNow` and the history after every settle.
+each trader's posterior `score` (mean), `sd`, `pSkill`, `n`, `nEff` and `weight`, `futuresWeight`, `lambdaNow` and the
+history after every settle, plus the empirical-Bayes `priorK`.
 
-**Does it help yet? Barely.** `analysis/judge/tops_replay.py` replays 12:40–00:55 UTC from an empty record, so every
-blend is out of sample; per market it compares the opening price with and without the blend. After 17:00 (the futures'
-fit ends at 17:00): City Pulse Brier 0.4860 → 0.4833 (−0.0028 ± 0.0017, n=92, mean λ 0.06); Heathrow −0.0003 ± 0.0005;
-hub_surge +0.0000; hub_hour +0.0004 (n=6, worse on log loss). The Tube Crowd City Pulse leak is shaved, not closed:
-+29.8% → +28.5% (CI +8% to +50%). The caps are why: λ ≤ 0.3 and a 40% weight lean at most 12% of the gap between a
-view and the futures. The Simulation, Camera Eye and Rain Radar have no views in the replay (no recorded sim, no VIX
-round, no rain). The loop does what TOPS should: it leans only where a record is proven, and nowhere else.
+**Does it help? A little, not significantly.** `analysis/judge/tops_replay.py` logs every open and settle of a replay
+(12:40 Nov 7 – 02:35 Nov 8 UTC) and walks each variant of the loop over the same log from an empty record: paired,
+walk-forward, nothing fitted on the window. Log loss vs the futures prior (negative is better), new − old paired:
+
+| window | n | old (PR #93) | new | new − old |
+|---|---|---|---|---|
+| all | 509 | −0.0006 ± 0.0004 | −0.0010 ± 0.0009 | −0.0004 ± 0.0006 |
+| opened ≥ 17:00 | 354 | −0.0009 ± 0.0005 | −0.0018 ± 0.0012 | −0.0009 ± 0.0008 |
+| opened ≥ 00:55 (fresh) | 54 | −0.0006 ± 0.0009 | +0.0003 ± 0.0024 | +0.0008 ± 0.0018 |
+
+The rule set before the run (keep new if new − old ≤ 0 over the whole walk) keeps the new loop; the pooled differences
+are inside 1.2 SE (per series: clean_sheet −2.1 SE on 13 markets, hub_hour +1.5 SE on 12). All of the gain is the λ
+rule (mean λ 0.03 → 0.16); the new weights alone change nothing, since with two traders per series both rules mostly
+sit on the cap and the floor. The Tube Crowd leaks are shaved, not closed (after
+17:00: City Pulse +19.3% → +16.8%, copycat +15.1% → +13.9%). Multiple testing (`tops_permutation.py`, 200 re-walks
+with the outcomes shuffled): of 10 trader-series, 0.5 would pass p < 0.05 by chance and 2 do (Tube Crowd on City
+Pulse, Plane Spotter on Heathrow); none survives Bonferroni or Benjamini–Hochberg, and the posterior calls no one
+skilled (P(θ > 0) > 0.95: 0).
+Full write-up: `docs/traders-and-tops.md`.
 
 ## The central-London simulation
 

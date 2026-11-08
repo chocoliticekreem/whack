@@ -172,6 +172,14 @@ def no_delay(case: unittest.TestCase) -> None:
     case.addCleanup(p.stop)
 
 
+def edge(case: unittest.TestCase, belief: float = 0.9) -> None:
+    """For tests of what an AI bet does, not whether a track record earns one: every trader believes its pick wins
+    with `belief`, so each has an edge and stakes quarter Kelly (the sizing has its own tests in test_tops)."""
+    p = mock.patch.object(traders, "belief", lambda tid, m, ctx, tops, option: belief)
+    p.start()
+    case.addCleanup(p.stop)
+
+
 class TestSeries:
     """Registers series for one test and removes them afterwards."""
 
@@ -630,6 +638,7 @@ class RoundTest(CityCase):
 
     def test_void_refunds_traders(self):
         no_delay(self)
+        edge(self)
         raw = Raw()
         self.addCleanup(raw.dir.cleanup)
         raw.profile()
@@ -853,6 +862,7 @@ class TraderTest(CityCase):
 
     def test_traders_with_nothing_sit_out_with_a_number(self):
         no_delay(self)
+        edge(self)
         ex = self.exchange(self.now)
         ex.tick(self.now)
         why = {t["id"]: t["why"] for t in ex.traders_json(self.now)["traders"]}
@@ -993,7 +1003,7 @@ class SimTest(CityCase):
         ex.record["sim"]["points"] = 1000
         again = mk.build_city_pulse("city_pulse-1530", store, SPOTS, self.now, self.at + 15 * MIN)
         again.decided |= others
-        want = traders.stake_for(1000, ex.ai_open_stakes("sim"))
+        want = traders.stake_for(1000, ex.ai_open_stakes("sim"), 1.0, again.prices()["over"])
         ex.ai_bets(again, self.now)
         self.assertEqual([b["stake"] for b in again.ai_bets if b["trader"] == "sim"], [want])
         self.assertIn("sim", pulse.decided)
@@ -1143,6 +1153,7 @@ class CourtsidingTest(CityCase):
 class PendingBetTest(CityCase):
     def setUp(self):
         super().setUp()
+        edge(self)
         city(self.raw, T0 + 30 * MIN)
         self.ex = self.exchange()
         self.addCleanup(self.ex.ledger.close)

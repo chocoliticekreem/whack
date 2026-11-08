@@ -6,17 +6,18 @@ Adding a series: add `{series_id: decide_fn}` to the PLAYS entry of each trader 
 plays every series."""
 from __future__ import annotations
 
+import math
 import re
 import sys
 
 import signals
 from data import Store, day_name, local_time
 from markets import Market, pulse_of, sim_view
-from pricing import MIN_MS, RAIN_MM, bracket_of
+from pricing import FEE, LMSR_B, MAX_ODDS, MIN_MS, RAIN_MM, bracket_of
 
 STAKE = 100
-STAKE_SHARE = 0.10
 MIN_STAKE = 10
+KELLY_FRACTION = 0.25
 TROUBLE = re.compile(r"cancellations|signal|faulty|points|customer|incident", re.I)
 
 TRADERS = [
@@ -51,13 +52,69 @@ def pct(v: float) -> str:
     return f"{v * 100:.0f}%"
 
 
-def stake_for(points: int, open_stakes: int = 0) -> int:
-    """min(100, 10% of the points not already staked on unsettled markets); 0 under 10, so a busted trader sits out.
-    Sizing on points alone let the Contrarian go to -181 live: points only move at settle, and it held a dozen open
-    bets, each sized on the same pre-loss points, on markets that settle minutes after they close. With the open
-    stakes taken off first, every open stake together is at most the points, so losing all of them ends at >= 0."""
-    stake = min(STAKE, int(STAKE_SHARE * (points - open_stakes)))
+def shares_for(p: float, x: float, b: float = LMSR_B, fee: float = FEE) -> float:
+    """Shares x points buy on an option priced p by the LMSR (pricing.Book.quote in closed form): with y = x (1 - fee)
+    / b, shares = b ln(1 + (e^y - 1) / p), and the option's price after the buy is 1 - (1 - p) e^-y."""
+    return b * math.log1p(math.expm1(x * (1 - fee) / b) / p)
+
+
+def edge_stake(q: float, p: float, b: float = LMSR_B, fee: float = FEE) -> float:
+    """The stake after which the next share costs what the trader thinks it is worth: the marginal cost of a share,
+    price / (1 - fee), reaches the belief q. Solving 1 - (1 - p) e^-y = q (1 - fee) gives
+    x = b / (1 - fee) ln((1 - p) / (1 - q (1 - fee))). 0 with no edge after the fee (q (1 - fee) <= p). Past it every
+    point loses money in expectation, so it is the most any sizing should spend."""
+    if q * (1 - fee) <= p:
+        return 0.0
+    return b / (1 - fee) * math.log((1 - p) / (1 - q * (1 - fee)))
+
+
+def kelly_stake(q: float, p: float, bankroll: float, b: float = LMSR_B, fee: float = FEE) -> float:
+    """Full Kelly on the LMSR: the x in [0, min(bankroll, edge_stake)] maximising the expected log bankroll
+    q ln(W - x + payout(x)) + (1 - q) ln(W - x), with payout = min(shares, MAX_ODDS x) (the odds cap). Concave in x
+    (shares are concave), so a ternary search finds it. Below the edge stake and below the bankroll by construction;
+    with no slippage (b to infinity) it is the textbook W (q o - 1) / (o - 1) at decimal odds o = (1 - fee) / p."""
+    hi = min(bankroll, edge_stake(q, p, b, fee))
+    if hi <= 0 or bankroll <= 0:
+        return 0.0
+
+    def growth(x: float) -> float:
+        rest = bankroll - x
+        if rest <= 0:
+            return -math.inf
+        return q * math.log(rest + min(shares_for(p, x, b, fee), MAX_ODDS * x)) + (1 - q) * math.log(rest)
+
+    lo = 0.0
+    for _ in range(100):
+        a, c = lo + (hi - lo) / 3, hi - (hi - lo) / 3
+        if growth(a) < growth(c):
+            lo = a
+        else:
+            hi = c
+    return (lo + hi) / 2
+
+
+def stake_for(points: int, open_stakes: float, belief: float | None, price: float) -> int:
+    """Fractional Kelly: KELLY_FRACTION of the full-Kelly stake on the LMSR (kelly_stake) for the trader's belief
+    against the option's current price, sized on the points not already staked on unsettled markets, at most STAKE,
+    rounded down; 0 under MIN_STAKE or with no edge after the fee and slippage, so the trader sits out.
+    Never overdraws: the stake is at most KELLY_FRACTION of the free points, so every open stake together is at most
+    the points and losing all of them ends at >= 0 (the Contrarian went to -181 live when stakes were sized on
+    settled points alone, while a dozen bets on the same pre-loss points were still open)."""
+    free = points - open_stakes
+    if belief is None or free < MIN_STAKE:
+        return 0
+    stake = int(min(STAKE, KELLY_FRACTION * kelly_stake(belief, price, free)))
     return stake if stake >= MIN_STAKE else 0
+
+
+def belief(tid: str, m: Market, ctx: dict, tops, option: str) -> float | None:
+    """The trader's probability that `option` wins: the Simulation's forecast, or for a side pick its calibrated view
+    from its own record in the series (tops.Tops.belief: the futures' price plus its shrunk excess hit rate, never
+    below the price). No record means no edge, so no bet."""
+    if tid == "sim":
+        view = ctx.get("sim_view")
+        return float(view["probs"][option]) if view and option in view["probs"] else None
+    return tops.belief(tid, m.sub, m.futures.probs(), option)
 
 
 # ---------------------------------------------------------------- track records, kept in the ledger's SQLite
@@ -253,7 +310,9 @@ SIM_EDGE = 0.05
 
 def sim_trade(m: Market, store: Store, now: int, ctx: dict):
     """The option whose probability under the simulation's forecast beats its price by the most, if by 5+ points."""
-    view = ctx["sim_view"] if "sim_view" in ctx else sim_view(m, store, now)
+    if "sim_view" not in ctx:
+        ctx["sim_view"] = sim_view(m, store, now)
+    view = ctx["sim_view"]
     if not view:
         return None
     prices = m.prices()
