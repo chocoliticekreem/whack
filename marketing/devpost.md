@@ -2,7 +2,7 @@
 title: Devpost submission draft
 event: WHACK 26 (https://warwickhack.co.uk)
 track: Marshall Wace — New Worlds
-status: final draft, checked against main through #81 (e59773b) and the live system on Sat 7 Nov ~23:45. Add every teammate on Devpost and re-check the live link before submitting (Sun 09:00–11:00)
+status: final draft, checked against main through #87 (bbfc214), the replay and tests re-run on it and the live trading re-run (analysis/live_trading/RERUN.md). Add every teammate on Devpost and re-check the live link before submitting (Sun 09:00–11:00)
 ---
 
 # Devpost submission
@@ -78,8 +78,10 @@ The "new world" in the brief is the one nobody can see yet: the London of five m
 - **Futures and pricing (`services/city`):** 50 futures per market, each starting from the latest real reading at
   TfL's own timestamp. City Pulse walks follow TfL's usual-Saturday curve. The hub race uses a relative
   mean-reversion model: each hub follows its usual-day slope, is pulled toward the five-hub average (rate fitted on
-  12:00–17:00) and takes correlated shocks. The VIX and Heathrow bootstrap today's own moves; clean sheet uses a
-  per-line break hazard. Each reading reweights the futures by likelihood and rules out the worst, up to 30 of 50.
+  12:00–17:00) and takes correlated shocks; the first TfL publish inside the round restarts every future from that
+  reading. Heathrow stacks are a Poisson count around a level that reverts toward its 30-minute mean, chosen out of
+  sample. The VIX bootstraps today's own moves; clean sheet uses a per-line break hazard. Each reading reweights the
+  futures by likelihood and rules out the worst, up to 30 of 50.
   An LMSR market maker (b = 1200, 5% fee) prices the result plus the bets.
 - **Agent simulations (`services/multiverse`):** persona groups on the real OpenStreetMap street graph, with Dijkstra
   routing and pavement capacity, 50 worlds with **common random numbers**, so a difference between two worlds comes
@@ -96,13 +98,14 @@ The "new world" in the brief is the one nobody can see yet: the London of five m
   - halts on a stale feed or a 3σ jump; markets close the moment the outcome is decided;
   - a payout never exceeds the market maker's shares, and bets under 1.05x are refused;
   - a house exposure cap that counts the computer traders' stakes.
-- **Testing:** 205 city, 132 simulation and 16 recorder tests, including a randomised 1000-bet ledger invariant and an
-  8-thread hammer. Then we traded it live: seven bot strategies (random, favourite, longshot, signal, copycat, Kelly
-  and a last-second reader) placed 327 bets over 75 minutes on a scratch ledger. 0 voids, 0 fills after close, and
-  120 of 120 wallet reconciliations exact. The bugs it found (restarts, pending bets, a confirm bypass) are fixed with
-  regression tests.
+- **Testing:** 228 city, 132 simulation and 16 recorder tests, including a randomised 1000-bet ledger invariant and an
+  8-thread hammer. Then we pressure-tested it with bots: seven strategies (random, favourite, longshot, signal,
+  copycat, Kelly and a last-second reader) traded live rounds on a scratch ledger, twice: 327 bets over 75 minutes,
+  then 314 more over 65 minutes after our pricing fixes. The bugs they found are fixed with regression tests (40 of
+  them), all but one pricing bias we report below.
 - **Front end:** Next.js 16 on Vercel; a MapLibre map with OpenFreeMap vector tiles and deck.gl layers (a dusk palette,
-  glowing hub columns, arcs between hubs) at 60 fps. The backend runs on our laptop behind Cloudflare tunnels.
+  glowing hub columns, arcs between hubs) at 60 fps. Phones work in portrait and landscape (market column left, map
+  right). The backend runs on our laptop behind Cloudflare tunnels.
 - **Reuse (disclosed, approved by the organisers):** the London twin, the live-feed plumbing, YOLO counting and the
   base forecast engine come from our earlier project Mirrorverse (built 17 Oct 2026). New at WHACK: the recorder,
   both agent simulations and the London VIX, the city and local markets, pricing, the computer traders, the integrity
@@ -134,9 +137,20 @@ changed the product:
 
 The technical challenges:
 - **Our own trader beat the house.** A replay found that copying Tube Crowd's rule (back TfL's usual-Saturday curve)
-  beat our market maker by 32–48% per bet. We put that curve into the futures and rebuilt the hub race model. Out of
-  sample, copying Tube Crowd now makes about +13% on City Pulse (and loses on the hub race), with a confidence interval
-  too wide to call it fixed.
+  beat our market maker by 32–48% per bet. We put that curve into the futures and rebuilt the hub race model. On the
+  hub race the edge is gone (−3% out of sample). On City Pulse it isn't: as the city empties in the late evening,
+  copying Tube Crowd still makes +42% (95% CI +23% to +61%, n=82), because our futures don't carry the evening
+  decline. No fix held up in our fit window, so we left it open and say so.
+- **Bots pressure-tested the exchange, and they found real bugs.** The first live run (75 minutes, 327 bets) caught
+  restart, pending-bet, confirm-bypass and settlement-record bugs, which we fixed. We re-ran the bots on our new pricing
+  for 65 minutes and measured again: all 30 crowding markets settled on TfL readings stamped after close, City Pulse
+  opened at 50–66% instead of up to 97%, no prices froze, and the house lost 177 points to the bots instead of 1,408.
+  The re-run and a re-check of our live and replay numbers then exposed three more leaks, which we fixed and
+  measured out of sample: fading the Heathrow holding stack went from +47% to −7.6% (CI −28% to +14%), backing the
+  hub that had risen most went from +76% to +6% (CI −25% to +42%), and The Contrarian, which had gone to −181 points
+  through a stake-sizing bug, can no longer go below 0. The re-run also found that markets measured against the usual
+  day voided after the midnight profile refresh until a restart, and that a server stall made a filled bet look
+  rejected. The reload and the stall are fixed; a fix for the app's retry is still on a branch.
 - **The forecast lost to "nothing changes".** On real Oxford Circus counts the simulation was first off by 5.49 people
   per camera against 1.54 for persistence. Anchoring every world to the last real count and adding rain, crowding and
   bike likelihoods brought it to a tie.
@@ -144,22 +158,28 @@ The technical challenges:
   Waterloo. Working out which lines serve a station from the whole day fixed it.
 - **Frozen counts, frozen prices.** YOLO was asked to count 83 cameras on 2 workers, so counts were hours old; we count
   only the 13 the markets read. Prices also stopped moving once 30 of 50 futures were ruled out; weighting the
-  survivors cut the stalled markets from 96 to 42.
+  survivors cut the stalled markets from 96 to 42, and on current code none stall in the full-day replay.
 - **Review and a red team found real holes:** anyone could claim any player id, and a price near certainty could pay
   more than the market maker's shares. Both fixed, with tests that fail on the old code.
 
 ## Accomplishments that we're proud of
 - It runs live on real London data at overwatchcapital.vercel.app/multiverse: rounds list, computer traders bet with
   real reasons, and markets settle on real TfL, adsb.lol and simulation readings.
-- A full-day replay of Saturday (91 rounds, 273 markets) settled every market on a real reading: 0 voids.
-- A money path that held up under live bot trading: 120 of 120 wallet reconciliations exact, 0 fills after close,
-  46 of 46 bets on halted markets refused.
+- A full-day replay of Saturday (91 rounds, 275 markets) settled every market on a real reading: 0 voids.
+- A money path that held up under two rounds of live bot trading: 0 fills after close in either (0 of 229 in the
+  re-run), every bet on a halted market refused (46 of 46, then 26 of 26), wallets reconciled exactly (120 of 120, then
+  8 of 8 at the end of the re-run), and a clean ledger audit.
+- Settlement nobody can front-run: in the re-run, 30 of 30 crowding markets settled on readings TfL stamped after
+  betting closed, and our recorder saw none of them before the close.
+- We used the bots to find our own leaks, fixed three, and re-measured each out of sample instead of declaring it
+  fixed. The one we couldn't fix yet, City Pulse in a falling evening, we report.
 - We report accuracy honestly. On the latest 30 real minutes of Oxford Circus (48 camera counts), the people forecast
   ties persistence: MAE 1.37 vs 1.35, with 79% of readings inside the 80% range; persistence wins on bus delay. Out of
-  sample (17:00–21:30), the hub race's opening price beats a uniform guess (Brier 0.755 vs 0.800, n=51, t = 1.7); the
+  sample (17:00–00:05), the hub race's opening price beats a uniform guess (Brier 0.753 vs 0.800, n=83, t = 2.7); the
   other series don't, significantly.
 - Anyone can play: in cold-read tests, fresh readers given only a screenshot could say how to bet ("tap an answer,
-  choose your points, then confirm"), at desktop and phone widths.
+  choose your points, then confirm"), at desktop and phone widths, and you can turn your phone sideways and keep
+  trading.
 
 ## What we learned
 - **Measure before you claim.** Our naive baseline, "nothing changes", was hard to beat, and a quant will ask. The
@@ -179,8 +199,8 @@ The technical challenges:
 ## What's next
 - **The second half of TOPS:** weight each trader's picks into the price by its track record, so the market learns
   which data to trust.
-- **Close the remaining leaks:** fading the Heathrow holding stack still beats the house out of sample, and the Tube
-  Crowd copycat may too.
+- **Close the remaining leak:** City Pulse in a falling evening, by fitting the evening decline on more than one
+  day.
 - **Make the simulation earn a place in the price:** beat persistence on held-out days, then blend it back in.
 - **A real exchange:** a Kalshi-style order book with AI market makers and no house (designed in
   `docs/exchange-design.md`, not built). The ledger is real-money grade; the order book, payments, ID checks,

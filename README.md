@@ -2,8 +2,8 @@
 
 Our build for **WHACK 26** (Warwick, 7–8 Nov 2026) on the **Marshall Wace "New Worlds"** track.
 
-**Status (Sat 7 Nov, ~23:50):** OverWatch is live at **https://overwatchcapital.vercel.app/multiverse**
-(Vercel front end; the backend runs on our laptop behind Cloudflare tunnels). Merged through #81, no open PRs. Details
+**Status (Sun 8 Nov, ~00:50):** OverWatch is live at **https://overwatchcapital.vercel.app/multiverse**
+(Vercel front end; the backend runs on our laptop behind Cloudflare tunnels). Merged through #87, no open PRs. Details
 in [docs/build.md](docs/build.md) §0.
 
 **What it is:**
