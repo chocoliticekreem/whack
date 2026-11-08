@@ -31,12 +31,15 @@ function place(id: string | undefined): string {
 
 const COPY: Record<string, Copy> = {
   hub_surge: {
-    title: (at, m) => `Which of these ${m.options.length} areas will see its crowd grow the most by ${at}?`,
+    title: (at) => `Which area will see the biggest rise in busyness relative to usual by ${at}?`,
     why: () => "its crowd grew the most",
   },
   city_pulse: {
-    title: (at) => `Will London's Tube get busier or quieter by ${at}?`,
-    labels: { over: "Busier", under: "Quieter" },
+    title: (at, m) => {
+      const line = m.options.map((o) => o.label.match(/[\d.]+/)?.[0]).find(Boolean);
+      return `Will Tube activity finish above the expected level${line ? ` (${line})` : ""} by ${at}?`;
+    },
+    labels: { over: "Above", under: "Below" },
     why: (v) => (v == null ? null : `TfL said ${num(v, 1)}`),
     story: (v, l, r) => {
       const over = r.winner === "over";
@@ -45,8 +48,8 @@ const COPY: Record<string, Copy> = {
     },
   },
   london_vix: {
-    title: (at) => `Will London get more unpredictable or calmer by ${at}?`,
-    labels: { over: "More unpredictable", under: "Calmer" },
+    title: (at) => `Will the model become more uncertain by ${at}?`,
+    labels: { over: "More uncertain", under: "Less uncertain" },
     why: (v) => (v == null ? null : `the unpredictability score hit ${num(v, 2)}`),
     story: (v, l, r) => `London got ${r.winner === "over" ? "more unpredictable" : "calmer"} (score ${move(v, l, 2)})`,
   },
