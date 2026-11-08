@@ -1,7 +1,7 @@
 ---
 title: OverWatch markets — every bet we list, and how to change them
 date: 2026-11-08
-status: current on main (through #96)
+status: current on main (through #101), hub_surge model updated on algo/hub-surge
 ---
 
 # Markets catalogue
@@ -24,7 +24,7 @@ Partly. Each bet is a **series**, and three places together define it:
 
 | Series | Question players see | Answers | Settles on | Notes |
 |---|---|---|---|---|
-| `hub_surge` | Which area will see the biggest rise in busyness relative to usual by HH:MM? | Oxford Circus / King's Cross / Piccadilly Circus / Waterloo / Bank | TfL Crowding: each hub's first reading TfL stamped **after** close, compared with its usual-day level | Result in about 14 min (fair settlement). Priced with relative mean reversion plus correlated shocks (#77), and re-simulated after each mid-round TfL publish (#86). Known: the "top riser" rule is narrowed (+6% out of sample) but not proven closed. |
+| `hub_surge` | Which area will see the biggest rise in busyness relative to usual by HH:MM? | Oxford Circus / King's Cross / Piccadilly Circus / Waterloo / Bank | TfL Crowding: each hub's first reading TfL stamped **after** close, compared with its usual-day level | Result in about 14 min (fair settlement). Priced by a relative mean-reversion model refitted every round on today's readings, re-drawn after each mid-round TfL publish. See [hub_surge: the model](#hub_surge-the-model). |
 | `city_pulse` | Will Tube activity finish above the expected level (X) by HH:MM? | Above / Below | Average busyness of 20 TfL stations, first readings stamped after close | The line is the futures' median, on the nearest .0 or .5 (#77). The futures follow the usual day plus 0.30 of the last 10 min's trend vs usual (see [City Pulse model](#city-pulse-model)). Known: the Tube Crowd "pulse leak" is still open in the evening. |
 | `london_vix` | Will the model become more uncertain by HH:MM? | More uncertain / Less uncertain | The Oxford Circus multiverse engine's uncertainty index (VIX) at settle | Needs the engine live with about 1 h of warm-up. When it's unavailable, `heathrow_stack` stands in. |
 | `heathrow_stack` (stand-in) | More or fewer planes circling Heathrow at HH:MM? | More planes / Fewer planes | adsb.lol: aircraft in the 4 Heathrow holding stacks | Listed only when the VIX is down. Poisson count around a mean-reverting level, line centred (#86). |
@@ -109,6 +109,105 @@ Both models are miscalibrated in the middle: the 0.5–0.6 bin hits 28% for the 
 2. **The futures are too narrow.** 39% of outcomes land outside their 90% band. Sizing sigma on real 15–20 min changes over the last 2 h cuts that to 27% and improves the log score of the spread from +0.48 to −0.40. It does not improve Brier or log loss at the listed line, so it is not live.
 3. **Midnight.** `data.band_of` reads the new weekday's profile from 00:00. After midnight on Saturday the live pulse tracked TfL's SAT 00:00–02:00 bands: 12.3 live at 00:21 against SAT 00:15 = 10.25, and 4.8 at 01:41 against SAT 01:30 = 4.3. It did not track the SUN bands the code reads (4.2). That much is confirmed from the data. That TfL's profile day runs past midnight is inferred. Walks that cross 00:00 dive towards 4. The fix belongs in `data.py`, which hub_surge shares, so it is not in this change.
 4. **OU and measurement lag were tried.** Reversion of vs usual toward 0 fits κ ≈ 0. The ~10 min TfL publish lag is already priced: the walk runs from the open reading's TfL stamp to the first stamp after close. The 10-min trend is that lag's footprint.
+
+## hub_surge: the model
+
+Reproduce: `python3 analysis/judge/hub_model.py data/raw 2026-11-07T12:00:00Z 2026-11-08T02:35:00Z 4000` (about
+45 s; read-only). Code: `pricing.fit_relative_ou`, `pricing.RelativeRaceSim`, `markets.build_hub_surge`.
+
+**What the race really is.** TfL stamps every hub every 5 minutes and publishes a reading about 7 minutes after it
+measures it. At the open (6 minutes before the mark) the newest reading is 8 minutes old, and 42% of hub readings are a
+publish older (14 minutes). The settle reading is stamped 2 minutes after close. So each hub's race runs 3 or 4 TfL
+steps (15-20 min) from its open reading, not 5 minutes. A stale open reading was not mispriced (legacy price 0.197,
+won 0.200, n=350), so the lag shows up in the horizon, not as a leak.
+
+**Model.** Per hub *i* and race horizon *k* (TfL steps from its open reading to the settle slot):
+
+    x_i(settle) = x_i + [u_i(settle) − u_i(open)] − b_k·(d_i − ℓ_i) + σ_ik·z_i,   z ~ N(0, R_k)
+    d_i = (x_i − u_i) − mean over hubs,   winner = argmax_i  e^{x_i(settle)} / typical_i(settle band) − vs_i(open)
+
+*x* = log live busyness, *u* = log of TfL's usual day (smooth between 15-min bands). Every term is refitted each round
+on that day's readings polled up to the open, binned by TfL stamp:
+- *b_k*: pooled least squares of the hubs' k-step relative moves on *d − ℓ*, at the race's own horizon.
+- *ℓ_i*, hub level: the mean of *d_i* over the day, shrunk toward 0 with a prior worth 36 slots (3 h). Bank sat 0.15
+  below the other hubs all day and did not catch up; the old model pulled it toward the mean every round.
+- *σ_ik*: each hub's residual sd over the last 3 h, partially pooled across hubs in logs (empirical Bayes).
+- *R_k*: the sample correlation of the residuals.
+- Cold start (fewer than 8 joint steps): b = 1 − e^{−0.0161·5k}, no levels, the old fixed correlation.
+
+The 50 futures are a stratified sample of 2,000 joint draws (each winner gets its share of the 50), so the price
+carries no ±0.06 sampling noise. Open prices are tempered, p ∝ p^0.7 (`HUB_POWER`); after an in-round publish the
+model re-draws from that reading for the steps left, untempered.
+
+**Diagnosis of the old model** (per-minute OU at κ = 0.0161, fixed correlation, 50 plain futures, power 0.5), 166
+races, 12:14-02:10:
+- Per hub: King's Cross priced 0.154, won 0.241; Bank priced 0.279, won 0.241; Waterloo priced 0.215, won 0.163. The
+  pull toward the five-hub mean is the cause: it assumes every hub's normal level is the same.
+- Leader vs riser: the furthest-below hub (Tube Crowd's pick) won 59/166 at 0.29 (+18% ROI); the leader 21/166 at
+  0.13 (−10%). Split by hub, Bank as laggard was fair (36/113 at 0.30, −1%) and every other laggard won 23/53 at 0.26
+  (+58%).
+- Reversion: b over k steps is 0.054, 0.100, 0.164, 0.216 (± 0.015-0.029) for k = 1-4, close to a 1-step rate
+  compounded, so the horizon matters more than the curve. It is flat across the day (k = 3: 0.16, 0.12, 0.17 ± 0.04
+  for 12-17, 17-21, 21-03) but not across hubs (Piccadilly 0.03 ± 0.04, King's Cross 0.39 ± 0.08). Shrunk per-hub b
+  still lost out of sample.
+- Residual autocorrelation of 5-min relative moves at 5/10/15/20 min: +0.02/−0.22/−0.22/+0.28 (12-17),
+  −0.16/−0.26/+0.36/+0.05 (17-21), +0.30/−0.04/−0.03/−0.09 (21-03). No stable sign, so no momentum term (one lost).
+- Shocks: excess kurtosis 7.1, from volatility doubling after 21:00 (sd 0.032 → 0.071). The rolling 3-h sd handles
+  that; Student-t shocks added nothing.
+
+**Out of sample.** Each model is refitted at every round on readings up to its open; 133 races opened 15:00-02:10.
+Paired differences vs the old model, mean ± 1 SE (negative is better). The old model's constants came from
+12:00-17:00, so 15:00-17:00 is in sample for it.
+
+| model | log loss | Brier | Δ log loss | Δ Brier | Δ LL 15-20 (n=60) | Δ LL 20-02 (n=73) |
+|---|---|---|---|---|---|---|
+| old model | 1.498 | 0.756 | | | | |
+| **deployed** (`build_hub_surge`) | **1.458** | **0.738** | **−0.039 ± 0.024** | **−0.017 ± 0.011** | +0.005 ± 0.034 | **−0.076 ± 0.032** |
+| uniform (ln 5) | 1.609 | 0.800 | +0.112 ± 0.029 | +0.044 ± 0.013 | +0.053 ± 0.047 | +0.160 ± 0.036 |
+| frequency each hub has won so far | 1.650 | 0.816 | +0.153 ± 0.029 | +0.060 ± 0.013 | +0.120 ± 0.048 | +0.180 ± 0.035 |
+| OU at the race horizon (4,000 draws) | 1.502 | 0.760 | +0.004 ± 0.029 | +0.005 ± 0.013 | +0.040 ± 0.037 | −0.026 ± 0.043 |
+| + per-hub b, shrunk | 1.505 | 0.767 | +0.008 ± 0.034 | +0.011 ± 0.015 | +0.034 ± 0.044 | −0.014 ± 0.049 |
+| + Ledoit-Wolf correlation | 1.518 | 0.763 | +0.021 ± 0.030 | +0.008 ± 0.013 | +0.031 ± 0.032 | +0.012 ± 0.048 |
+| + Student-t shocks | 1.519 | 0.763 | +0.021 ± 0.032 | +0.007 ± 0.013 | +0.026 ± 0.034 | +0.017 ± 0.052 |
+| + momentum term | 1.536 | 0.768 | +0.038 ± 0.034 | +0.012 ± 0.014 | +0.038 ± 0.042 | +0.038 ± 0.053 |
+| + hub levels, Ledoit-Wolf | 1.470 | 0.746 | −0.028 ± 0.037 | −0.010 ± 0.017 | +0.040 ± 0.050 | −0.083 ± 0.053 |
+| + hub levels, sample correlation (deployed spec) | 1.451 | 0.742 | −0.046 ± 0.036 | −0.014 ± 0.018 | +0.050 ± 0.052 | −0.125 ± 0.048 |
+
+Hub levels are the one addition that wins; the simplest model with them is the deployed one. Ledoit-Wolf shrinkage
+lost 0.019 of log loss to the sample correlation (1.470 vs 1.451): residual variance triples at night, which breaks its iid
+intensity, and at 01:00 it shrank all the way to the constant correlation (δ = 1.0 with 90 joint steps). The
+walk-forward Platt power ran 0.25 early in the day to 0.75 at the end; 0.7 is the end value. In-round, at the first
+publish after the open, the deployed model matches the old one (Δ log loss −0.011 ± 0.031, n=126).
+
+**Leak rules** (10 points at the open model price, odds 0.95/p, 2,000-resample bootstrap 95% CI; 133 out-of-sample
+races; the in-round rule at the price after the first in-round publish):
+
+| rule | old model | deployed |
+|---|---|---|
+| copycat Tube Crowd (hub furthest below usual) | 48/133 at 0.28: +24.0% [−4%, +55%] | 48/133 at 0.30: +18.2% [−9%, +48%] |
+| back the leader (furthest above usual) | 17/133 at 0.14: −19.0% [−54%, +21%] | 17/133 at 0.13: −12.6% [−51%, +30%] |
+| back the top riser at open (last 5-min move) | 24/100 at 0.20: +18.5% [−24%, +64%] | 24/100 at 0.18: +23.9% [−19%, +75%] |
+| back the top riser since open, at the first in-round publish | 58/126 at 0.42: +0.4% [−21%, +22%] | 58/126 at 0.42: +2.6% [−19%, +24%] |
+
+Every CI includes 0 for both models. With the full exchange (`replay_score.py`, 12:00-02:30, AI staking and locked
+odds), Tube Crowd's real hub_surge record goes from +2.8% [−20%, +27%] to −3.2% [−26%, +20%] on 170 bets.
+
+**Known limits.**
+- One recorded day (Saturday 12:00 to Sunday 02:35, 133 scored races, heavily overlapping). The log-loss gain is
+  1.6 SE overall and 2.4 SE on the last 73 races; it is a lean, not proof.
+- The copycat leak is shaved, not closed: a laggard other than Bank still won 21/43 out of sample at a 0.31 price
+  (0.25 before); Bank as laggard is fair (27/90 at 0.29). Per-hub reversion would price that, but it lost out of
+  sample with the data we have.
+- Hub levels need history: with under 3 h of readings the model leans on the cold-start prior, and on the 15:00-20:00
+  block it did no better than the old model.
+- Residual sds are fully pooled across hubs late at night (the empirical-Bayes spread falls below the noise), and
+  the residuals include the city-wide move, so σ and R are dominated by night readings.
+- The typical-day profile is static per weekday and the newest file wins, so a Saturday race read the Sunday file's
+  Saturday profile. TfL's profiles are historical averages, so this is not look-ahead in the race outcome.
+- A hub without a reading or a usual-day value at open is dropped (the race needs 3 hubs). Settlement needs every
+  listed hub's first reading after close, so a hub already missing would most likely void the market for everyone.
+  This listed one extra race on 2026-11-07 (13:05, Waterloo missing) that the old builder skipped.
+- `hub_hour` uses its own level race (`RaceSim`), not this model, and is unchanged.
 
 ## Who trades what (AI traders, `traders.py`)
 

@@ -6,6 +6,7 @@ import json
 import math
 import os
 import random
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -69,20 +70,19 @@ class UsualSlopeTest(CityCase):
         self.assertGreater(finals[len(finals) // 2], m.spec["open"] * 1.03)
         self.assertGreater(m.spec["line"], m.spec["open"] + 0.5, "the line rises with the futures")
 
-    def test_hub_furthest_below_its_usual_drifts_up_relative_to_the_others(self):
-        raw = Raw()
-        self.addCleanup(raw.dir.cleanup)
-        raw.profile()
-        crowd_history(raw, T0, CITY, noise=0.0)
-        store = raw.store(T0)
-        m = mk.build_hub_surge("hub_surge-1505", store, SPOTS, T0, T0 + 5 * MIN)
-        sim = m.futures.sim
-        ids = [s[0] for s in sim.stations]
-        rise = {o: sum(p[j][-1] - p[j][0] - sim.stations[j][3] * sim.m for p in sim.paths) / len(sim.paths)
-                for j, o in enumerate(ids)}
-        vs = m.spec["open"]
-        low, high = min(vs, key=vs.get), max(vs, key=vs.get)
-        self.assertGreater(rise[low] - rise[high], 0.5 * mk.HUB_KAPPA * sim.m * math.log(vs[high] / vs[low]))
+    def test_hub_furthest_below_its_level_drifts_up_relative_to_the_others(self):
+        ids = ["a", "b", "c"]
+        typ = [0.4, 0.3, 0.2]
+        vs = {"a": 1.3, "b": 0.8, "c": 1.0}
+        stations = [(h, h, math.log(t * vs[h]), 0.0, 0.01) for h, t in zip(ids, typ)]
+        fit = pricing.HubFit(0.3, [0.0] * 3, [[float(i == j) for j in range(3)] for i in range(3)], [0.01] * 3, 50)
+        usual = [{s: math.log(t) for s in range(10)} for t in typ]
+        sim = pricing.RelativeRaceSim(stations, 0, 15, random.Random(1), typ, typ, {3: fit}, [0] * 3, 3, usual, 1.0)
+        rise = {h: statistics.fmean(p[j][-1] - p[j][0] for p in sim.paths) for j, h in enumerate(ids)}
+        gap = math.log(vs["a"] / vs["b"])
+        self.assertAlmostEqual(rise["b"] - rise["a"], 0.3 * gap, delta=0.02)
+        probs = pricing.Futures(sim, ids).probs()
+        self.assertEqual(max(probs, key=probs.get), "b", "the laggard is the favourite to rise most")
 
 
 class WeightedFilterTest(unittest.TestCase):
@@ -289,21 +289,25 @@ class PricingRound2Test(CityCase):
     def test_relative_ou_fit_recovers_known_parameters(self):
         ids = ["a", "b", "c"]
         corr = [[1.0, 0.5, -0.2], [0.5, 1.0, 0.1], [-0.2, 0.1, 1.0]]
-        typ = [0.4, 0.3, 0.2]
-        stations = [(h, h, math.log(t * v), 0.0, 0.01) for h, t, v in zip(ids, typ, (1.3, 0.8, 1.0))]
-        sim = pricing.RelativeRaceSim(stations, 0, 1, random.Random(5), typ, typ, 0.03, pricing.cholesky(corr), 1.0)
-        sim.m = 5 * 3000
-        path = sim.walk_all(0.03, pricing.cholesky(corr), random.Random(6))
-        grid = {k: {h: (path[j][5 * k], path[j][5 * k] - math.log(typ[j])) for j, h in enumerate(ids)}
-                for k in range(3000)}
-        kappa, sds, got, n = pricing.fit_relative_ou(grid, ids)
-        self.assertEqual(n, 2999)
-        self.assertAlmostEqual(kappa, 0.03, delta=0.006)
-        for h in ids:
-            self.assertAlmostEqual(sds[h], 0.01, delta=0.0015)  # 2.5-sigma step cap trims a little variance
-        for i in range(3):
-            for j in range(3):
-                self.assertAlmostEqual(got[i][j], corr[i][j], delta=0.08)
+        low = pricing.cholesky(corr)
+        level, b, sd = [0.1, 0.0, -0.1], 0.2, [0.02, 0.03, 0.04]
+        rng = random.Random(6)
+        x = [0.0, 0.0, 0.0]
+        grid = {}
+        for s in range(4000):
+            grid[s] = {h: (x[j], 0.0) for j, h in enumerate(ids)}
+            dev = [v - sum(x) / 3 for v in x]
+            e = [rng.gauss(0, 1) for _ in ids]
+            x = [x[j] - b * (dev[j] - level[j]) + sd[j] * sum(low[j][i] * e[i] for i in range(j + 1))
+                 for j in range(3)]
+        fit = pricing.fit_relative_ou(grid, ids, 1, 0, 0.0, 1e-4)
+        self.assertEqual(fit.pairs, 3999)
+        self.assertAlmostEqual(fit.b, b, delta=0.02)
+        for j in range(3):
+            self.assertAlmostEqual(fit.levels[j], level[j], delta=0.01)
+            self.assertAlmostEqual(fit.sds[j], sd[j], delta=0.003)
+            for i in range(3):
+                self.assertAlmostEqual(fit.corr[i][j], corr[i][j], delta=0.06)
 
     def test_tempering_does_not_worsen_calibration_on_the_recorded_day(self):
         """102 hub_surge races replayed on 2026-11-07 (untempered open prices, power 1). HUB_POWER must not make
