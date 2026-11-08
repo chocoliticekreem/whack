@@ -59,9 +59,7 @@ It opens three doors:
 - **Click anywhere on the map to trade that spot.** If a real sensor is within 400 m (20 TfL stations and about 13
   JamCams with fresh people counts), a local market opens for the round, settled only on that sensor. Elsewhere you
   get a forecast and no bet.
-- **Asks "what if?"** Click a street or station, close it or add a crowd, and our central-London agent simulation runs
-  on copies of the city and shows how the odds would move.
-- **Seven AI traders bet against you**, each reading one live feed: Tube Crowd (station crowding), Camera Eye (the
+- **Seven AI traders bet on the same markets as you**, each reading one live feed: Tube Crowd (station crowding), Camera Eye (the
   London VIX), Line Watcher (Tube status), Rain Radar (rain), Plane Spotter (Heathrow holding stacks), The Contrarian
   (where the points are going) and Simulation (the agent simulation's forecast). Each sizes its bet by its edge, gives
   a reason with a real number, and sits out (and says why) when it has no edge. The traders dropdown ranks them by
@@ -325,7 +323,6 @@ open-meteo · adsb.lol · sqlite · vercel · cloudflare-tunnel
 - [ ] Screenshot: plain market cards ("Bet W100 · win W400") and the ticker
 - [ ] Screenshot: the order log with "Waiting for TfL…"
 - [ ] Screenshot: the traders dropdown with trust bars
-- [ ] Screenshot: scenario mode ("What if Regent Street closes")
 - [ ] Screenshot: the wallet and the portfolio page
 - [ ] Architecture diagram: feeds → recorder → 50 futures → reweighting → LMSR → settlement → ledger, with the TOPS loop
       feeding traders' records back into the opening price
