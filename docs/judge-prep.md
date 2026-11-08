@@ -63,7 +63,7 @@ Memorise the one-liners. The full answers are in section 2.
 | 4 | "Someone on a train sees a line stop before TfL does. Isn't clean sheet an insider market?" | "It's the one single-event market, so it gets the strictest rules: bets fill 45 s after you place them, any line change pauses the market and cancels pending bets, a 10% cap, and betting closes with its first 5-minute round. A head start under 44 s gains nothing." | ok |
 | 5 | "You settle on the 'first reading after bets close'. Is that number already public?" | "No longer. We settle on the first reading TfL itself stamped after the close, and a value measured at or before the close voids. The cost is a 14-minute wait, which the card shows: 'result about 22:00'." | strong |
 | 6 | "What does the agent simulation actually add? Evidence, not adjectives." | "Nothing measurable yet. Oxford Circus ties persistence, central London loses by 9%, the event layer has no skill. So it's out of the price (`SIM_WEIGHT=0`) and trades as the Simulation trader, which is losing live. Its real use today is scenario mode." | weak |
-| 7 | "How is this TOPS? Where's the track-record weighting?" | "Half of it. Every trader has a public, settled record that now survives restarts, and a losing trader's stake shrinks to 10% of its unstaked points. Weighting their picks into the price by that record isn't built." | weak |
+| 7 | "How is this TOPS? Where's the track-record weighting?" | "It's built. Every view a trader states at open is scored at settle against our own futures (log score, half-life 20 markets, shrunk toward zero for small samples). Trust weights come from those scores, capped at 40% each, and the opening price blends them in by up to 30%, scaled by proven skill: none proven, zero lean. On the replay it's honest and small: City Pulse Brier 0.4860 to 0.4833 after 17:00 (−0.0028 ± 0.0017, n=92), the rest within ±0.0005, and the Tube Crowd leak is shaved from +29.8% to +28.5%, not closed. It leans only where a record is proven." | ok |
 | 8 | "Why LMSR rather than an order book? Is this an exchange or a bookmaker?" | "Today it's a bookmaker with a published model: a thin market of strangers needs guaranteed liquidity. The target is a Kalshi-style order book with AI market makers and no house; the design is written (exchange-design.md), not built." | ok |
 | 9 | "What is the London VIX?" | "The spread of predicted crowds across 50 simulated worlds of Oxford Circus. It covers one area and needs an hour to burn in, so call it an uncertainty gauge, not a fear index. Camera Eye fades its moves, and that's 12–12 live." | ok |
 | 10 | "Real money: which regulator, and who on earth hedges footfall?" | "Consumers: the UK Gambling Commission, or the CFTC route Kalshi took. The first paying customer we'd test is a data buyer, not a hedger. Footfall hedging is a hypothesis with zero customer conversations." | ok |
@@ -257,18 +257,33 @@ no face or identity processing.
 
 ### 2.6 The TOPS analogy
 
-**Q6.1 Is the TOPS analogy real?** *(weak)*
-Half of it. TOPS collects broker ideas, scores them on outcomes and weights trust by track record. We have the first
-two: each trader reads one feed, states a reason and settles publicly, and the record now survives restarts (#72,
-checked live tonight). The weighting loop isn't built: traders' picks don't feed the price. Don't say "TOPS-style"
-without saying which half.
+**Q6.1 Is the TOPS analogy real?** *(ok)*
+Yes, all three parts. TOPS collects broker ideas, scores them on outcomes and weights trust by track record. Each
+trader reads one feed and states a view at every open; each view is scored at settle against the futures prior
+(log score, decayed with a half-life of 20 settled markets, shrunk as Σw·s / (Σw + 10)); per series, trust is a
+softmax of those scores with a 5% floor and a 40% cap; the opening price is (1 − λ)·futures + λ·(weighted views),
+λ ≤ 0.3 and 0 without proven skill (`services/city/tops.py`, `GET /tops`). Out of sample on the replay
+(`analysis/judge/tops_replay.py`, 12:40–00:55 UTC, empty record at the start), after 17:00:
+
+| Series | n | mean λ | Brier futures → TOPS | diff ± SE |
+|---|---|---|---|---|
+| city_pulse | 92 | 0.061 | 0.4860 → 0.4833 | −0.0028 ± 0.0017 |
+| heathrow_stack | 93 | 0.025 | 0.4755 → 0.4752 | −0.0003 ± 0.0005 |
+| hub_surge | 92 | 0.018 | 0.7388 → 0.7389 | +0.0000 ± 0.0002 |
+| hub_hour | 6 | 0.022 | 0.9578 → 0.9581 | +0.0004 ± 0.0005 |
+| clean_sheet | 7 | 0.050 | 0.6859 → 0.6843 | −0.0016 ± 0.0038 |
+
+Say it plainly: it helps a little where one trader has a record (City Pulse, t ≈ 1.6, not significant) and does nothing
+elsewhere, which is the right behaviour. The Tube Crowd City Pulse leak goes from +29.8% to +28.5% (CI +8% to +50%):
+the caps (λ ≤ 0.3, 40% per trader) let the price move at most 12% of the way to a trader's view, by design.
 
 **Q6.2 How are traders scored? Decay?** *(weak)*
 Points at locked odds. Each stake is min(100, 10% of the points not already staked on open markets), and a trader
 sits out when that is under 10. That's crude decay by bankroll. The Contrarian's live −181 was a bug: stakes were
 sized on settled points while about 15 minutes of open bets were unsettled, so a dozen bets were each sized on the
 same pre-loss points. Since #86 the open stakes come off first, at decision and at fill, so losing every open bet
-still ends at 0 or more; a negative record on file loads as 0 and is logged. No Sharpe, no per-series weighting.
+still ends at 0 or more; a negative record on file loads as 0 and is logged. No Sharpe. The per-series weighting is
+the TOPS loop (Q6.1): a separate log-score record per trader per series, decayed with a half-life of 20 settles.
 
 **Q6.3 Is "which data has alpha" actually measured? With what sample?** *(ok)*
 On one day, against the house, out of sample after 17:00 (n = 43–84 per series). After #86, Tube Crowd on City Pulse
@@ -371,7 +386,7 @@ cooling-off design.
 | "The sim makes the prices better" | It loses to persistence by 9% and is out of the price | "The sim powers what-ifs and trades as one trader; the market scores it" |
 | "The Tube Crowd leak is fixed" | On City Pulse it made +42% after 17:00 (CI +23% to +61%) | "Fixed on hubs; on City Pulse it still wins in a falling evening, and the leaderboard shows it" |
 | "No public rule beats the house" | Under on City Pulse in a falling evening made +42% | "One public rule still beats it on one day. The Heathrow fade and the hub riser were measured and priced in" |
-| "TOPS-style" (unqualified) | No weighting by track record | "Each trader builds a public track record, the first half of TOPS" |
+| "TOPS fixes the leak" | The blend shaves the City Pulse leak from +29.8% to +28.5%; λ is capped at 0.3 | "The market leans on proven traders, a little and only where they're proven" |
 | "The London VIX is the city's fear index" | One area, 1 h burn-in | "An uncertainty gauge for Oxford Circus: the spread of 50 simulated worlds" |
 | "Points to pounds is a licence, not a rewrite" | A house-banked LMSR is bookmaking | "The ledger is real-money grade; the order book and licensing are the work left" |
 | "City-scale aggregates one person can't move" | Untested; Bank sits at 5–6% of baseline | "Five busy hubs against their own baselines; low-traffic stations are the soft spot" |
@@ -410,7 +425,7 @@ cooling-off design.
 3. The UI makes a new idempotency key when it retries after a client timeout, so a slow fill can look rejected (fix
    on a branch, not merged).
 4. The central sim and event layer have no measured skill.
-5. Track-record weighting into the price (the second half of TOPS).
+5. The TOPS blend is small by design (λ ≤ 0.3, 40% per trader) and has one evening of out-of-sample evidence.
 6. Low-typical stations (Bank) and the `X-Forwarded-For` spoof. Minor: the daily loss limit counts gross losses, and
    AI traders are off the ledger.
 
@@ -457,6 +472,7 @@ RAW=/path/to/data/raw
 python3 analysis/judge/replay_score.py $RAW 2026-11-07T12:40:00Z 2026-11-07T20:10:00Z 30   # full day
 python3 analysis/judge/replay_score.py $RAW 2026-11-07T17:00:00Z 2026-11-07T21:30:00Z 30   # out of sample
 python3 analysis/judge/replay_score.py $RAW 2026-11-07T17:00:00Z 2026-11-08T00:05:00Z 30   # out of sample, #86's window
+python3 analysis/judge/tops_replay.py $RAW 2026-11-07T12:40:00Z 2026-11-08T00:55:00Z 30   # TOPS blend, out of sample
 python3 analysis/judge/crowd_latency.py $RAW                                               # TfL publish lag
 python3 services/multiverse/eval_real.py --raw $RAW --windows 6                           # Oxford Circus vs persistence
 python3 services/multiverse/eval_events.py $RAW 2026-11-07                                 # event layer skill

@@ -241,6 +241,7 @@ class Handler(BaseHTTPRequestHandler):
         routes = {"/health": lambda: {"ok": True, "live": EX.clock.live, "now": EX.clock.now()},
                   "/hotspots": EX.hotspots_json, "/traders": EX.traders_json, "/markets": EX.markets_json,
                   "/leaderboard": EX.leaderboard, "/stats": EX.stats_json, "/round": EX.round_json,
+                  "/tops": EX.tops.json,  # TOPS loop (tops.py)
                   "/signals": lambda: signals.strip(EX.store, EX.spots, EX.clock.now()),
                   "/local": lambda: EX.local.list_json(q.get("round"))}
         if path == "/bet":  # a bet's pending -> filled / cancelled state

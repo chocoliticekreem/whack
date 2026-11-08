@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
 
+import tops
 import traders
 import venue
 import venue_agents
@@ -403,19 +404,28 @@ class CityRoundTest(unittest.TestCase):
 
     def test_api_and_data_calls_do_not_grow_with_the_number_of_agents(self):
         calls = {"refresh": 0, "decide": 0}
-        refresh, decide = Store.refresh, traders.decide
+        refresh, decide, picks = Store.refresh, traders.decide, tops.picks
+        in_tops = [False]
 
         def counting_refresh(self, *a, **k):
             calls["refresh"] += 1
             return refresh(self, *a, **k)
 
         def counting_decide(*a, **k):
-            calls["decide"] += 1
+            calls["decide"] += 0 if in_tops[0] else 1
             return decide(*a, **k)
+
+        def tops_picks(*a, **k):  # the TOPS loop's one view per trader per market at open, not the venue's rules
+            in_tops[0] = True
+            try:
+                return picks(*a, **k)
+            finally:
+                in_tops[0] = False
 
         seen = []
         with mock.patch.object(Store, "refresh", counting_refresh), mock.patch.object(traders, "decide",
-                                                                                      counting_decide):
+                                                                                      counting_decide), \
+                mock.patch.object(tops, "picks", tops_picks):
             for retail, scale in ((20, 1), (400, 5)):
                 calls.update(refresh=0, decide=0)
                 v = self.run_venue(retail=retail, funds={"tier 1": 1, "tier 2": 2 * scale, "tier 3": 2 * scale},

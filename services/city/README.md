@@ -24,7 +24,7 @@ CORS allows localhost:3047, :3349 and :3849.
 
 ## Endpoints
 
-`GET /health /hotspots /traders /markets /round /leaderboard /stats /signals`, `POST /settle {id}`,
+`GET /health /hotspots /traders /markets /round /leaderboard /stats /signals /tops`, `POST /settle {id}`,
 `POST /bet {player, market, option, stake}` (with `X-Player-Token`, see Wallet below). The response shapes are in the city
 contract (shared with the UI); `/stats` is the settled count per series (real reading vs void), calibration tables and
 the favourite's price at open. `/round` lists the current round's markets, the open hourly `headlines` and the previous
@@ -189,6 +189,45 @@ futures, clamped to [3%, 97%]. Bets move prices through LMSR with b = 1200, with
 probabilities as the base (prob_i ∝ model_i · e^(q_i/b)), so a 100-point bet on a 50% option moves it about 4 points.
 A 5% fee keeps the locked payout near the displayed `odds = 0.95/prob`.
 
+## TOPS loop
+
+Marshall Wace's TOPS collects ideas from brokers, scores who has been right and leans on them by track record. Here the
+brokers are the seven traders, and the loop (`tops.py`) feeds their records back into the opening price:
+
+1. **Views at open.** Before a market is listed, every trader that plays the series states a view, with the same rules
+   and feed-freshness checks as its bets. The Simulation trader's is its forecast (`sim_view`). The others pick a side;
+   the pick becomes a probability from the trader's own record in that series: the futures' price for the pick plus its
+   shrunk excess hit rate on past picks (never below the price: a losing trader is trusted less, never faded). With no
+   record, the view is the futures' price, so it moves nothing.
+2. **Track record.** At settle, each view scores `log p_view(winner) − log p_futures(winner)`: its skill over the
+   futures prior. The prior, not the blended price, is the baseline, so a right trader doesn't look worse the more it
+   is trusted. Per trader per series, a decayed mean with a half-life of 20 settled markets (≈100 min of 5-minute
+   rounds: long enough to see 20 outcomes, short enough to follow the day's regimes, which flip between afternoon and
+   evening), shrunk toward 0 as `Σw·s / (Σw + 10)`: a normal prior worth 10 markets, so 10 settles earn half credit.
+3. **Trust weights** per series: `softmax(score / 0.01)` (a 0.01-nat edge per market is a 2.7× weight), mixed with a
+   5% floor each so no trader is ignored, each capped at 40%. What the cap cuts stays with the futures (`futuresWeight`),
+   not spread to the other traders: with two or three per series, that would hand the best one's excess to the worst.
+4. **The blend.** Opening prior = `(1 − λ)·futures + λ·(Σ w_i·view_i + w_futures·futures)`, with
+   `λ = 0.3 · S / (S + 0.05)`, S the summed positive skill of the traders with a view. No proven skill: λ = 0 and the
+   price is the futures. The blend rides on the futures as a fixed tilt (blended ÷ prior) while they learn in-round,
+   held in the futures' [3%, 97%] band. The LMSR, the odds floor, the caps and `SIM_WEIGHT` (0) are unchanged.
+5. **Kept.** One row per listed market in the ledger's SQLite (`tops_markets`: prior, views, λ, weights, tilt, then the
+   winner at settle); the records are rebuilt from it at start, a relisted headline keeps its tilt, and a market settled
+   after a restart is still scored. `ai_records` can't rebuild them: it keeps won/lost totals, not per-market views.
+   No look-ahead: records change only at settle, so a market opening at t only sees settles before t.
+
+`/markets` carries `tops {lambda, weights, contribution}` per market (`contribution` = each option's change at open),
+`/traders` a `trust` per trader (its mean weight over the series it has settled views on), and `GET /tops` per series
+each trader's `score`, `n`, `nEff` and `weight`, `futuresWeight`, `lambdaNow` and the history after every settle.
+
+**Does it help yet? Barely.** `analysis/judge/tops_replay.py` replays 12:40–00:55 UTC from an empty record, so every
+blend is out of sample; per market it compares the opening price with and without the blend. After 17:00 (the futures'
+fit ends at 17:00): City Pulse Brier 0.4860 → 0.4833 (−0.0028 ± 0.0017, n=92, mean λ 0.06); Heathrow −0.0003 ± 0.0005;
+hub_surge +0.0000; hub_hour +0.0004 (n=6, worse on log loss). The Tube Crowd City Pulse leak is shaved, not closed:
++29.8% → +28.5% (CI +8% to +50%). The caps are why: λ ≤ 0.3 and a 40% weight lean at most 12% of the gap between a
+view and the futures. The Simulation, Camera Eye and Rain Radar have no views in the replay (no recorded sim, no VIX
+round, no rain). The loop does what TOPS should: it leans only where a record is proven, and nowhere else.
+
 ## The central-London simulation
 
 Live mode reads the agent simulation (`services/multiverse`, central seed, `SIM_URL`) every 30 s with a 3 s timeout and
@@ -289,6 +328,6 @@ against the forecast alone and an uninformed guess) and the ledger audit.
 `data.py` reads the recorder files into compact snapshots and never returns data after `now`. `pricing.py` holds the
 fits, simulators, particle filter and LMSR. `markets.py` holds the series registry and builds and settles each series. `traders.py` holds the
 seven traders (Tube Crowd → S1/S2/S5, Camera Eye → S3, Plane Spotter → S4, Line Watcher → S6, Rain Radar → S2 only in
-rain, Contrarian → all, Simulation → S1/S2/S5). `eval_sim.py` scores the simulation (below). `signals.py` builds the per-market clues and `/signals`. `exchange.py` runs the rounds, betting, settlement and scores. `integrity.py` holds the bet delay, suspend-on-change and caps. `server.py` is the HTTP layer. `backup.py` copies the ledger every 5 minutes (above).
+rain, Contrarian → all, Simulation → S1/S2/S5). `tops.py` is the TOPS loop (above). `eval_sim.py` scores the simulation (below). `signals.py` builds the per-market clues and `/signals`. `exchange.py` runs the rounds, betting, settlement and scores. `integrity.py` holds the bet delay, suspend-on-change and caps. `server.py` is the HTTP layer. `backup.py` copies the ledger every 5 minutes (above).
 `hotspots.json` lists the hotspots with their JamCams, bus stops and lines; the recorder adds these cams to its
 YOLO list.

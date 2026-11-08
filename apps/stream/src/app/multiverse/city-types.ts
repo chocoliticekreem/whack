@@ -17,6 +17,8 @@ export interface Trader {
   style: string;
   record: { won: number; lost: number };
   points: number;
+  /** TOPS loop (services/city/tops.py): mean trust weight over the series it has settled views on, 0–0.4. */
+  trust?: number;
 }
 
 export interface MarketOption {
@@ -81,6 +83,8 @@ export interface Market {
   /** 1–2 clues from services/city/signals.py; null or missing renders nothing. */
   signals?: Signal[] | null;
   integrity?: Integrity;
+  /** TOPS loop: how far the open leaned on the traders, their weights, and each option's change at open (0–1). */
+  tops?: { lambda: number; weights: Record<string, number>; contribution: Record<string, number> };
 }
 
 export type UsualTrend = "up" | "down" | "flat";
