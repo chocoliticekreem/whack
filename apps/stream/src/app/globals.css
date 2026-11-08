@@ -1,39 +1,5 @@
 @import "tailwindcss";
 
-:root {
-  --bg: #050507;
-  --surface: #0c0c10;
-  --surface-2: #131318;
-  --surface-3: #1a1a21;
-  --border: #1f1f27;
-  --border-strong: #2c2c36;
-  --text: #f4f3f0;
-  --muted: #7d7c88;
-  --dim: #4f4e5a;
-  --ember: #ff4d2e;
-  --ember-soft: #ff4d2e1f;
-  --live: #ff2d55;
-  --ok: #3ddc97;
-  --warn: #ffb020;
-}
-
-@theme inline {
-  --color-bg: var(--bg);
-  --color-surface: var(--surface);
-  --color-surface-2: var(--surface-2);
-  --color-surface-3: var(--surface-3);
-  --color-line: var(--border);
-  --color-line-strong: var(--border-strong);
-  --color-text: var(--text);
-  --color-muted: var(--muted);
-  --color-dim: var(--dim);
-  --color-ember: var(--ember);
-  --color-ember-soft: var(--ember-soft);
-  --color-live: var(--live);
-  --color-ok: var(--ok);
-  --color-warn: var(--warn);
-}
-
 html,
 body {
   height: 100%;
