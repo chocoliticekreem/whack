@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest import mock
 
+import data
 import markets as mk
 import server
 import test_server
@@ -124,6 +125,46 @@ class ProfileReloadTest(unittest.TestCase):
         p.write_bytes(gzip.compress(rows[0].encode()) + bytes(bad))
         self.store.refresh(T0, T0 + 10 * MIN)
         self.assertEqual(self.store.ts["crowding"], [T0])
+
+
+def london(day: int, hh: int, mm: int) -> int:
+    return int(datetime(2026, 11, day, hh, mm, tzinfo=data.LONDON).timestamp() * 1000)
+
+
+class OperatingDayTest(unittest.TestCase):
+    """TfL's typical day runs past midnight: after midnight on Saturday the live pulse tracked SAT's 00:00-03:00 bands
+    (12.3 at 00:21 vs SAT 10.25), while SUN's said ~4. 7 Nov 2026 is a Saturday."""
+
+    # The real profile's pulse means around the Saturday-night seam (x100 -> fraction).
+    SAT = {"23:30": 0.168, "23:45": 0.157, "00:00": 0.121, "00:15": 0.1025, "04:45": 0.014, "05:00": 0.0145}
+    SUN = {"23:45": 0.062, "00:00": 0.0375, "00:15": 0.042, "04:45": 0.0145, "05:00": 0.014, "05:15": 0.0145}
+
+    def setUp(self):
+        raw = Raw()
+        self.addCleanup(raw.dir.cleanup)
+        days = [{"dayOfWeek": d, "timeBands": [{"timeBand": f"{b}-xx", "percentageOfBaseLine": v}
+                                                 for b, v in col.items()]}
+                for d, col in (("SAT", self.SAT), ("SUN", self.SUN))]
+        raw.put("crowding_profile", T0 - 3 * 3_600_000, {"naptan": "N", "daysOfWeek": days})
+        self.store = Store(raw.root, SPOTS)
+        self.store.load_profile()
+
+    def test_saturday_night_after_midnight_reads_saturdays_late_band(self):
+        self.assertEqual(data.band_of(london(8, 0, 21)), ("SAT", "00:15"))
+        self.assertEqual(self.store.typical("N", london(8, 0, 21)), 0.1025)
+        self.assertEqual(data.day_name(london(8, 0, 21)), "Saturday")
+
+    def test_the_next_weekday_starts_at_five(self):
+        self.assertEqual(data.band_of(london(8, 4, 59)), ("SAT", "04:45"))
+        self.assertEqual(data.band_of(london(8, 5, 0)), ("SUN", "05:00"))
+        self.assertEqual(self.store.typical("N", london(8, 5, 0)), 0.014)
+        self.assertEqual(data.day_name(london(8, 5, 0)), "Sunday")
+
+    def test_usual_is_continuous_across_midnight(self):
+        before, after = self.store.usual("N", london(7, 23, 59)), self.store.usual("N", london(8, 0, 1))
+        own_slope = (self.SAT["00:00"] - self.SAT["23:45"]) / 15
+        self.assertAlmostEqual(after - before, own_slope * 2, places=9)
+        self.assertGreater(after, self.SAT["00:15"], "no dive towards SUN's 00:00 band")
 
 
 class RoundOpenStallTest(test_server.HttpCase):
