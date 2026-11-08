@@ -165,6 +165,20 @@
   font-weight: 500;
 }
 
+.lm-nearest {
+  padding: 10px var(--s3);
+  font-weight: 650;
+  color: var(--on-ink);
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+
+.lm-nearest:hover {
+  filter: brightness(1.08);
+}
+
 .lm-why {
   padding: var(--s2) var(--s3);
   border-left: 2px solid var(--muted);
