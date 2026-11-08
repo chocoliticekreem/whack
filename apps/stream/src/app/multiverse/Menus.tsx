@@ -1,13 +1,13 @@
 "use client";
 
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Workflow } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { countdown, fmtW, type MyBet, type Settled } from "./city-store";
-import type { Market, Trader } from "./city-types";
+import { countdown, fmtW, londonClock, type MyBet, type Settled } from "./city-store";
+import type { Feed, Market, Trader } from "./city-types";
 import { MiniSpark, Tick, signedW, toneOf, useCountUp, useDismiss } from "./Live";
 import { Badge, type TipTarget } from "./MarketCard";
 import { CoinText } from "./Coin";
-import { plainLabel, plainTitle, plainWatches, recordText, resultEta } from "./plain";
+import { plainLabel, plainTitle, plainWatches, recordText, resultEta, seriesOf } from "./plain";
 
 const PANEL_POLL_MS = 2500;
 const SESSION_START = typeof window === "undefined" ? 0 : Date.now();
@@ -609,5 +609,154 @@ function OrderLog({
         );
       })}
     </ol>
+  );
+}
+
+const DOCS_URL = "https://github.com/chocoliticekreem/whack/blob/main/docs/pricing-engine.md";
+const DASH = "—";
+
+const ago = (s: number) => (s < 90 ? `${s}s` : `${Math.round(s / 60)} min`);
+
+const fmtLevel = (v: number) => v.toFixed(Math.abs(v) < 10 ? 2 : 1);
+
+/** The current round's City Pulse market: the one that closes last. */
+const pulseOf = (markets: Market[]) =>
+  markets.filter((m) => seriesOf(m) === "city_pulse").sort((a, b) => b.closesAt - a.closesAt)[0];
+
+function feedFreshness(feeds: Record<string, Feed> | undefined): string {
+  const list = Object.values(feeds ?? {});
+  if (!list.length) return DASH;
+  const ages = list.map((f) => f.ageS).filter((a): a is number => a != null);
+  const newest = ages.length ? ` · newest ${ago(Math.min(...ages))} ago` : "";
+  return `${list.filter((f) => f.ok).length}/${list.length} feeds fresh${newest}`;
+}
+
+/** Where the surviving City Pulse futures land at the settle time, and the line they are judged against. */
+function pulseSpan(markets: Market[]): string {
+  const f = pulseOf(markets)?.futures;
+  if (!f) return DASH;
+  const ends = f.paths.filter((p, i) => f.alivePaths[i] && p.length).map((p) => p[p.length - 1][1]);
+  const line = f.lines.length === 1 ? ` · line ${fmtLevel(f.lines[0])}` : "";
+  if (!ends.length) return `futures ${DASH}${line}`;
+  return `futures span ${fmtLevel(Math.min(...ends))}–${fmtLevel(Math.max(...ends))}${line}`;
+}
+
+function nextResult(markets: Market[], now: number): string {
+  const due = markets
+    .filter((m) => m.status !== "settled" && m.status !== "void")
+    .map((m) => resultEta(m).at)
+    .filter((at) => at > now);
+  if (!due.length) return DASH;
+  const at = Math.min(...due);
+  return `next result ${londonClock(at)} · in ${countdown(at - now)}`;
+}
+
+function trustLean(markets: Market[], traders: Trader[]): string {
+  const top = [...traders].sort((a, b) => (b.trust ?? -1) - (a.trust ?? -1))[0];
+  const lead = top?.trust != null ? `${top.name} leads, ${Math.round(top.trust * 100)}% trust` : DASH;
+  const lambda = pulseOf(markets)?.tops?.lambda;
+  return lambda == null ? lead : `${lead} · market leans ${Math.round(lambda * 100)}% on traders`;
+}
+
+/** The header's "Under the hood" panel: the pricing pipeline in five plain steps, each with one live number. */
+export function UnderTheHood({
+  open,
+  onOpenChange,
+  feeds,
+  markets,
+  openCount,
+  traders,
+  now,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  feeds: Record<string, Feed> | undefined;
+  markets: Market[];
+  openCount: number;
+  traders: Trader[];
+  now: number;
+}) {
+  const btn = useRef<HTMLButtonElement>(null);
+  const panel = useRef<HTMLDivElement>(null);
+  useDismiss(open, () => onOpenChange(false), [btn, panel]);
+  const steps = [
+    {
+      name: "Live data",
+      text: "We read London as it happens: TfL crowding, line status, buses, JamCams, rain and flights.",
+      live: feedFreshness(feeds),
+      quant: "A market halts when its feed goes stale (3 min; 6 min for crowding) or jumps 3σ.",
+    },
+    {
+      name: "50 futures",
+      text: "We play out 50 possible next-five-minutes for London.",
+      live: pulseSpan(markets),
+      quant: "Particle filter: each reading reweights the paths; price = weighted share alive, held in 3–97%.",
+    },
+    {
+      name: "Market maker",
+      text: "An automatic market maker turns those odds into prices; it can never lose more than a fixed amount.",
+      live: `${openCount} markets open · 5% fee`,
+      quant: "LMSR, b = 1200, futures as the base; worst case b·ln n per market (W832 on two options).",
+    },
+    {
+      name: "Fair results",
+      text: "Results use only data TfL stamped after betting closed.",
+      live: nextResult(markets, now),
+      quant: "Settles on the source's own timestamp, not our poll time; 2–5 s bet delay, pause on a feed jump.",
+    },
+    {
+      name: "Track record",
+      text: "Computer traders who've been right move the opening odds a little.",
+      live: trustLean(markets, traders),
+      quant: "TOPS: trust ∝ P(θ > 0); λ = Σw·r / Σw·r², shrunk n/(n + 10), capped at 0.3.",
+    },
+  ];
+  return (
+    <>
+      <button
+        ref={btn}
+        type="button"
+        className="ow-menu-btn ow-uth-btn tl-wide"
+        aria-expanded={open}
+        onClick={() => onOpenChange(!open)}
+      >
+        <Workflow size={14} aria-hidden />
+        <span className="tl-desk">Under the hood</span>
+        <ChevronDown size={14} className="ow-chev" aria-hidden />
+      </button>
+      {open && (
+        <>
+          <div className="ow-sheet-scrim" aria-hidden />
+          <div ref={panel} className="ow-drop ow-uth" role="dialog" aria-label="Under the hood">
+            <p className="ow-drop-head">
+              <b>Under the hood.</b> Five steps from live London data to the price on each card.
+            </p>
+            <ol className="ow-uth-steps">
+              {steps.map((s, i) => (
+                <li key={s.name}>
+                  <span className="ow-uth-n tl-data" aria-hidden>
+                    {i + 1}
+                  </span>
+                  <div className="ow-uth-body">
+                    <h4>{s.name}</h4>
+                    <p>{s.text}</p>
+                    <b className="ow-uth-live tl-data" data-empty={s.live === DASH || undefined}>
+                      {s.live}
+                    </b>
+                    <span className="ow-uth-quant">{s.quant}</span>
+                  </div>
+                </li>
+              ))}
+            </ol>
+            <p className="ow-uth-foot">
+              Every model must beat a coin flip on data it wasn&apos;t fitted to.{" "}
+              <a href={DOCS_URL} target="_blank" rel="noreferrer">
+                Read the method
+              </a>
+            </p>
+          </div>
+        </>
+      )}
+    </>
   );
 }

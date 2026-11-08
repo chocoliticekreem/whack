@@ -2158,6 +2158,111 @@
   stroke: var(--no);
 }
 
+/* Under the hood: the pricing pipeline as numbered steps joined by a rule. */
+.ow-uth-btn svg:first-child {
+  color: var(--muted);
+}
+
+.ow-uth-steps {
+  margin: 0;
+  padding: var(--s1) var(--s4) var(--s2);
+  border-top: 1px solid var(--line);
+  list-style: none;
+}
+
+.ow-uth-steps li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  gap: var(--s3);
+  padding: var(--s2) 0;
+}
+
+.ow-uth-steps li:not(:last-child)::after {
+  content: "";
+  position: absolute;
+  top: calc(var(--s2) + 26px);
+  bottom: calc(4px - var(--s2));
+  left: 10.5px;
+  border-left: 1px solid var(--line-strong);
+}
+
+.ow-uth-n {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.ow-uth-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.ow-uth-body h4 {
+  margin: 2px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ow-uth-body p {
+  margin: 0;
+  color: var(--ink);
+  line-height: 1.4;
+}
+
+.ow-uth-live {
+  justify-self: start;
+  margin-top: 2px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: var(--surface-2);
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ow-uth-live[data-empty] {
+  color: var(--muted);
+}
+
+.ow-uth-quant {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.ow-uth-quant::before {
+  content: "For quants: ";
+  font-weight: 600;
+}
+
+.ow-uth-foot {
+  margin: 0;
+  padding: var(--s3) var(--s4);
+  border-top: 1px solid var(--line);
+  background: var(--surface-2);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  line-height: 1.45;
+}
+
+.ow-uth-foot a {
+  color: var(--ink);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  white-space: nowrap;
+}
+
 .ow-drop-foot {
   display: block;
   width: 100%;
