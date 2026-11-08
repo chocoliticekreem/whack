@@ -501,16 +501,18 @@ lags; never wait on the network in silence, say the line and move on.
 
 **0:20 Place a live bet (30 s).**
 - **Show:** the London VIX card ("Will the model become more uncertain by HH:MM?"), or Heathrow if the VIX is down.
-  Tap an answer, W100, confirm. Open the earnings dropdown, Orders tab: "Filling in 2s", then "Result in …".
+  Tap an answer, W100, confirm. The pop-up "W100 on … · Bet placed · fills in 2s", then "Your bets" on the right:
+  "Filling in 2s", then "Result in …".
 - **Say:** "I'll put W100 on it; the button shows what I'd win. It fills after a short delay so nobody can trade on a feed faster
   than ours. On the other side: an LMSR market maker over those 50 futures, and seven AI traders, each reading one live
   feed: TfL crowding, Tube status, street cameras counted by YOLO, planes stacking over Heathrow."
-- **If slow:** if the fill hangs, the bet still shows as pending in Orders: "the delay is the point; it fills or it's
+- **If slow:** if the fill hangs, the bet still shows as filling in "Your bets": "the delay is the point; it fills or it's
   cancelled, never half." If the VIX and Heathrow are both missing, click anywhere on the map ("Detected area: …") and bet on the local
   market it opens.
 
 **0:50 A market settling on real TfL data, and why it's fair (40 s).**
-- **Show:** Orders tab, the T−20 bet: "Won +W…", "Lost −W…", or "Waiting for TfL…". Then the portfolio page, bet
+- **Show:** "Your bets" on the right, the T−20 bet: "Result in … · about HH:MM", or "Won +W…" / "Lost −W…" for
+  10 s once it settles (then it's in the earnings dropdown's Orders tab). Then the portfolio page, bet
   table, column "Settlement reading and source": the frozen TfL reading the market settled on. (Settled cards leave the
   feed since #100, so the reading lives in the portfolio.)
 - **Say:** "This one settled on real TfL data. TfL stamps every crowding reading, then publishes it a couple of
@@ -558,7 +560,7 @@ lags; never wait on the network in silence, say the line and move on.
 - **If slow:** none needed. If over time, cut to the last two sentences.
 
 Rehearsal notes:
-- If the fast bet from 0:20 settles before 2:45, the earnings dropdown updates and a win shows confetti with the
+- If the fast bet from 0:20 settles before 2:45, "Your bets" shows "Won +W…" for 10 s and a win shows confetti with the
   profit; call it out in one line. Start the slot in the last 3 minutes of a round to make that likely.
 - The "+42%" line is n=82 on one evening (replay 17:00–00:05), CI +23% to +61%. If asked, say it.
 - The permutation numbers: 10 trader-series, 200 re-walks, 0.5 expected at p < 0.05, 2 observed under the shuffle

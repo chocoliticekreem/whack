@@ -71,8 +71,10 @@ It opens three doors:
   late, so you wait about 14 minutes. The VIX and Heathrow settle within a minute. The settled reading is frozen and
   shown; no reading means void and a refund.
 - **Feels like a trading app:** a scrolling exchange ticker ("Waterloo +5% · Tube 6/11 · Bakerloo severe delays"),
-  busyness as change vs normal ("Bank −7%"), a feed that holds only open markets, an order log with live countdowns
-  ("Result in 9s", "Waiting for TfL…"), and a short burst of confetti showing your profit when you win.
+  busyness as change vs normal ("Bank −7%"), a feed that holds only open markets, a pop-up when you bet, and "Your bets" on the
+  map's right: every bet awaiting a result, soonest first, with live status ("Filling in 3s", "Result in 15:53 · about
+  08:20"). A result shows for 10 s (a green glow and a short burst of confetti with your profit on a win), then moves to
+  past orders.
 - **A wallet built like a brokerage account:** W play money (everyone starts with W1,000, no login: a nickname and a
   4-digit PIN move you to another device), on an append-only double-entry ledger with a daily loss limit, stake
   confirmation and breaks. The portfolio page has your equity curve, every bet, P&L by series, your record against
@@ -325,7 +327,7 @@ open-meteo · adsb.lol · sqlite · vercel · cloudflare-tunnel
 ## Media checklist (files in `marketing/assets/`)
 - [ ] Cover image / thumbnail (3:2): the OverWatch map with this round's markets
 - [ ] Screenshot: plain market cards ("Bet W100 · win W400") and the ticker
-- [ ] Screenshot: the order log with "Waiting for TfL…"
+- [ ] Screenshot: "Your bets" on the right with "Result in … · about HH:MM"
 - [ ] Screenshot: the traders dropdown with trust bars
 - [ ] Screenshot: the wallet and the portfolio page
 - [ ] Architecture diagram: feeds → recorder → 50 futures → reweighting → LMSR → settlement → ledger, with the TOPS loop
