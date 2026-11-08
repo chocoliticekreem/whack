@@ -4,3 +4,4 @@
 .playwright-mcp/
 data/
 __pycache__/
+.vercel
