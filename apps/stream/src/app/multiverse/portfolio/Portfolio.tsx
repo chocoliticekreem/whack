@@ -3,7 +3,7 @@
 import { ArrowLeft, ArrowUpRight } from "lucide-react";
 import Link from "next/link";
 import { useMemo } from "react";
-import { defaultName, fmtPts, londonClock } from "../city-store";
+import { defaultName, fmtPts, fmtW, londonClock } from "../city-store";
 import type { ServerWallet } from "../Wallet";
 import { BetTable, betRows, type BetRow } from "./BetTable";
 import { HISTORY_LIMIT, pct, seriesOf, signed, tone, usePortfolio, when, type Entry, type Portfolio as Data, type Position, type Versus } from "./data";
@@ -29,18 +29,18 @@ function Summary({ data }: { data: Data }) {
   return (
     <section className="pf-card pf-span">
       <header className="pf-card-head">
-        <h2>Your points at a glance</h2>
+        <h2>Your W at a glance</h2>
         <span className="pf-sub tl-num">As of {londonClock(w.asOf, true)} London</span>
       </header>
       <div className="pf-stats">
-        <Stat label="Cash" value={fmtPts(w.cash)} sub="Available to bet" />
-        <Stat label="In play" value={fmtPts(w.escrow)} sub={`${data.positions.length} open ${data.positions.length === 1 ? "bet" : "bets"}`} />
-        <Stat label="Total equity" value={fmtPts(w.total)} sub={`Started with ${fmtPts(w.totals.granted)}`} />
+        <Stat label="Cash" value={fmtW(w.cash)} sub="Available to bet" />
+        <Stat label="In play" value={fmtW(w.escrow)} sub={`${data.positions.length} open ${data.positions.length === 1 ? "bet" : "bets"}`} />
+        <Stat label="Total equity" value={fmtW(w.total)} sub={`Started with ${fmtW(w.totals.granted)}`} />
         <Stat label="Today's P&L" value={signed(w.pnl.today)} t={tone(w.pnl.today)} sub="Since midnight London" />
-        <Stat label="All-time P&L" value={signed(w.pnl.allTime)} t={tone(w.pnl.allTime)} sub={`Returned ${fmtPts(w.totals.returned)} of ${fmtPts(w.totals.staked)} staked`} />
+        <Stat label="All-time P&L" value={signed(w.pnl.allTime)} t={tone(w.pnl.allTime)} sub={`Returned ${fmtW(w.totals.returned)} of ${fmtW(w.totals.staked)} staked`} />
         <Stat label="Win rate" value={pct(decided ? w.totals.won / decided : null)} sub={`${w.totals.won} won · ${w.totals.lost} lost · ${w.totals.void} void`} />
         <Stat label="Bets" value={fmtPts(w.totals.betsPlaced)} sub={`${w.totals.betsSettled} settled`} />
-        <Stat label="Average stake" value={w.totals.betsPlaced ? fmtPts(w.totals.staked / w.totals.betsPlaced) : "–"} sub="Points per bet" />
+        <Stat label="Average stake" value={w.totals.betsPlaced ? fmtW(w.totals.staked / w.totals.betsPlaced) : "–"} sub="Per bet" />
         <Stat label="Biggest win" value={best == null ? "–" : signed(best)} t={best == null ? undefined : "up"} />
         <Stat label="Biggest loss" value={worst == null ? "–" : signed(worst)} t={worst == null ? undefined : "down"} />
       </div>
@@ -84,10 +84,10 @@ function Positions({ positions, markets }: { positions: Position[]; markets: Dat
                       <span className="pf-tag">{seriesOf(p.market)}</span>
                     </td>
                     <td>{p.label}</td>
-                    <td className="pf-r tl-data">{fmtPts(p.stake)}</td>
+                    <td className="pf-r tl-data">{fmtW(p.stake)}</td>
                     <td className="pf-r tl-data">{p.odds.toFixed(2)}x</td>
                     <td className="pf-r tl-data">
-                      {fmtPts(p.toWin)} <span className="tl-muted">({signed(p.profit)})</span>
+                      {fmtW(p.toWin)} <span className="tl-muted">({signed(p.profit)})</span>
                     </td>
                     <td className="pf-r tl-data">{now ? `${Math.round(now.prob * 100)}% · ${now.odds.toFixed(2)}x` : "–"}</td>
                     <td className="pf-r tl-data">{londonClock(p.settlesAt)}</td>
@@ -167,7 +167,7 @@ function Breakdown({ rows, versus, traders }: { rows: BetRow[]; versus: Versus[]
                         {pct(s.won + s.lost ? s.won / (s.won + s.lost) : null)}
                         <span className="tl-muted"> {s.won}/{s.won + s.lost}</span>
                       </td>
-                      <td className="pf-r tl-data">{fmtPts(s.staked)}</td>
+                      <td className="pf-r tl-data">{fmtW(s.staked)}</td>
                       <td className="pf-r tl-data" data-tone={tone(s.pnl)}>
                         {signed(s.pnl)}
                       </td>
@@ -244,7 +244,7 @@ function Activity({ entries }: { entries: Entry[] }) {
     <section className="pf-card pf-span">
       <header className="pf-card-head">
         <h2>
-          Every points movement <span className="pf-count tl-num">{entries.length}</span>
+          Every W movement <span className="pf-count tl-num">{entries.length}</span>
         </h2>
         <span className="pf-sub">Every ledger entry on your account, newest first. Read-only.</span>
       </header>
@@ -300,18 +300,18 @@ function Limits({ wallet: w }: { wallet: ServerWallet }) {
       </header>
       {w.break.active && w.break.until && <p className="pf-banner tl-num">You are on a break until {when(w.break.until)}. Betting is paused.</p>}
       <div className="pf-stats pf-stats-tight">
-        <Stat label="Daily loss limit" value={fmtPts(w.limits.dailyLoss)} sub={w.limits.pending ? `Raise to ${fmtPts(w.limits.pending.value)} from ${when(w.limits.pending.effectiveAt)}` : "No pending change"} />
-        <Stat label="Lost today" value={fmtPts(w.limits.lostToday)} />
-        <Stat label="In play" value={fmtPts(w.limits.inPlay)} />
-        <Stat label="Can still risk today" value={fmtPts(w.limits.remainingToday)} />
-        <Stat label="Confirm above" value={fmtPts(w.limits.confirmAbove)} sub="Stakes over 25% of cash ask first" />
+        <Stat label="Daily loss limit" value={fmtW(w.limits.dailyLoss)} sub={w.limits.pending ? `Raise to ${fmtW(w.limits.pending.value)} from ${when(w.limits.pending.effectiveAt)}` : "No pending change"} />
+        <Stat label="Lost today" value={fmtW(w.limits.lostToday)} />
+        <Stat label="In play" value={fmtW(w.limits.inPlay)} />
+        <Stat label="Can still risk today" value={fmtW(w.limits.remainingToday)} />
+        <Stat label="Confirm above" value={fmtW(w.limits.confirmAbove)} sub="Stakes over 25% of cash ask first" />
         <Stat label="Break" value={w.break.active ? "Active" : "None"} sub={w.break.active && w.break.until ? `Until ${when(w.break.until)}` : "1 or 24 hours, cannot be cancelled"} />
       </div>
       <div className="pf-meter" role="meter" aria-valuemin={0} aria-valuemax={w.limits.dailyLoss} aria-valuenow={used} aria-label="Daily loss limit used">
         <span style={{ width: `${Math.min(100, (used / Math.max(1, w.limits.dailyLoss)) * 100)}%` }} />
       </div>
       <p className="pf-sub tl-num">
-        {fmtPts(used)} of {fmtPts(w.limits.dailyLoss)} used today. Lowering a limit applies at once; raising one waits 24 hours. Account {w.player.kycStatus}, points only, no real money.
+        {fmtW(used)} of {fmtW(w.limits.dailyLoss)} used today. Lowering a limit applies at once; raising one waits 24 hours. Account {w.player.kycStatus}. W are play money, no real value.
       </p>
     </section>
   );

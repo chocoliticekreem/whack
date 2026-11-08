@@ -2,7 +2,7 @@
 
 import { ArrowDown, ArrowUp, Download } from "lucide-react";
 import { useMemo, useState } from "react";
-import { fmtPts } from "../city-store";
+import { fmtW } from "../city-store";
 import { downloadCsv, iso, seriesOf, signed, tone, when, type Position, type Settled } from "./data";
 
 export type Result = "won" | "lost" | "void" | "open";
@@ -169,7 +169,7 @@ export function BetTable({ rows }: { rows: BetRow[] }) {
                     <span className="pf-tag">{r.series}</span>
                   </td>
                   <td>{r.label}</td>
-                  <td className="pf-r tl-data">{fmtPts(r.stake)}</td>
+                  <td className="pf-r tl-data">{fmtW(r.stake)}</td>
                   <td className="pf-r tl-data">{r.odds.toFixed(2)}x</td>
                   <td>
                     <span className="pf-result" data-r={r.result}>

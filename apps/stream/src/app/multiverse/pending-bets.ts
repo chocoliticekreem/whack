@@ -22,7 +22,7 @@ export function cancelNote(reason: string | undefined): string {
       : why === "stale feed"
         ? "the market paused while its data feed was late"
         : why || "the exchange could not fill it";
-  return `Bet cancelled: ${text}. No points moved.`;
+  return `Bet cancelled: ${text}. Your stake is untouched.`;
 }
 
 /** Polls GET /bet for every pending bet until the exchange fills or cancels it. */

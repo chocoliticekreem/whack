@@ -19,6 +19,7 @@ from collections import deque
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
+import backup
 import signals
 from data import MULTIVERSE_URL, SIM_POLL_S, SIM_URL, SimFeed, Store, feeds, fetch_vix, load_hotspots, raw_root
 from exchange import Clock, Exchange, round_for
@@ -33,7 +34,7 @@ VIX_POLL_S = 15.0
 VIX_BOOT_TIMEOUT_S = 5.0
 MAX_BODY = 16 * 1024
 WALLET_GET = {"/wallet", "/ledger", "/positions", "/history"}
-WALLET_POST = {"/bet", "/limits", "/break", "/player/name"}
+WALLET_POST = {"/bet", "/limits", "/break", "/player/name", "/player/pin"}
 LOOPBACK = {"127.0.0.1", "::1"}
 
 LOCK = threading.Lock()
@@ -78,6 +79,7 @@ class RateLimit:
 # person: a burst limit that lets a room join at once, and a daily ceiling.
 NEW_PLAYERS = RateLimit(int(os.environ.get("CITY_NEWPLAYER_PER_MIN") or 30), 60)
 NEW_PLAYERS_DAY = RateLimit(int(os.environ.get("CITY_NEWPLAYER_PER_DAY") or 500), 86_400)
+RECOVER_IP = RateLimit(20, 600)  # name + PIN tries per network; the ledger also locks a name after 5 misses
 
 
 class TooMany(Exception):
@@ -207,6 +209,11 @@ class Handler(BaseHTTPRequestHandler):
             raise TooMany("Too many new players from this network today, try again tomorrow")
         return EX.ledger.create_player(body.get("name"))
 
+    def recover(self, body: dict) -> dict:
+        if not RECOVER_IP.allow(self.client_ip()):
+            raise TooMany("Too many sign-in tries from this network, try again in a few minutes")
+        return EX.ledger.recover(body.get("name"), body.get("pin"))
+
     def run(self, fn) -> None:
         try:
             with held(f"{self.command} {urllib.parse.urlparse(self.path).path}"):
@@ -269,6 +276,8 @@ class Handler(BaseHTTPRequestHandler):
             self.run(lambda: post_routes(EX.ledger, body, self.player(body.get("player")))[path]())
         elif path == "/player/new":
             self.run(lambda: self.new_player(body))
+        elif path == "/player/recover":
+            self.run(lambda: self.recover(body))
         elif path == "/local":
             self.run(lambda: EX.local.create(body, self.player(body.get("player"))))
         elif path == "/settle":
@@ -298,6 +307,7 @@ def main() -> None:
         threading.Thread(target=vix_poller, daemon=True).start()
         threading.Thread(target=sim_poller, args=(store.sim_feed,), daemon=True).start()
         threading.Thread(target=EX.local.streets.run, args=(round_for, EX.clock.now), daemon=True).start()
+        backup.start(ledger.path)
     mode = (f"replay from {args.replay_from} at 12x" if start
             else f"live, VIX from {MULTIVERSE_URL}, city simulation from {SIM_URL}")
     print(f"city markets on {HOST}:{PORT} ({mode}, data {root}, ledger {ledger.path}, "

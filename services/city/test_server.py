@@ -212,5 +212,78 @@ class Boundary(HttpCase):
                              cwd=os.path.dirname(server.__file__), capture_output=True, text=True, check=True)
         self.assertEqual(out.stdout.strip(), "127.0.0.1")
 
+
+class PinSignIn(HttpCase):
+    def setUp(self):
+        super().setUp()
+        p = mock.patch.object(server, "RECOVER_IP", server.RateLimit(20, 600, lambda: self.clock[0]))
+        p.start()
+        self.addCleanup(p.stop)
+
+    def named(self, name="Ann", pin="4821"):
+        status, out = self.call("/player/new", {"name": name})
+        self.assertEqual(status, 200, out)
+        if pin:
+            self.assertEqual(self.call("/player/pin", {"player": out["player"], "pin": pin}, token=out["token"]),
+                             (200, {"ok": True, "hasPin": True}))
+        return out["player"], out["token"]
+
+    def test_set_pin_needs_the_token_and_change_pin_works(self):
+        pid, token = self.named(pin=None)
+        self.assertEqual(self.call("/player/pin", {"player": pid, "pin": "1234"}, token="wrong")[0], 401)
+        self.assertEqual(self.call("/player/pin", {"player": pid, "pin": "12a4"}, token=token)[0], 400)
+        self.assertEqual(self.call("/player/pin", {"player": pid, "pin": "1234"}, token=token)[0], 200)
+        self.assertTrue(self.call(f"/wallet?player={pid}", token=token)[1]["player"]["hasPin"])
+        self.assertEqual(self.call("/player/pin", {"player": pid, "pin": "9999"}, token=token)[0], 200)
+        self.assertEqual(self.call("/player/recover", {"name": "Ann", "pin": "1234"})[0], 401)
+        self.assertEqual(self.call("/player/recover", {"name": "Ann", "pin": "9999"})[0], 200)
+
+    def test_recover_gives_a_second_token_and_both_devices_work(self):
+        pid, token = self.named()
+        status, out = self.call("/player/recover", {"name": "ann", "pin": "4821"})
+        self.assertEqual((status, out["player"], out["nickname"]), (200, pid, "Ann"))
+        for t in (token, out["token"]):
+            self.assertEqual(self.call(f"/wallet?player={pid}", token=t)[1]["cash"], GRANT)
+        m = self.market()
+        bet = {"player": pid, "market": m.id, "option": m.option_ids()[0], "stake": 50, "idempotency_key": "k1"}
+        self.assertEqual(self.call("/bet", bet, token=out["token"])[0], 200)
+
+    def test_no_account_enumeration(self):
+        self.named("Ann", "4821")
+        self.named("Bea", None)
+        replies = {json.dumps(self.call("/player/recover", body), sort_keys=True)
+                   for body in ({"name": "Ann", "pin": "0000"}, {"name": "Nobody", "pin": "4821"},
+                                {"name": "Bea", "pin": "4821"}, {"name": "Ann"}, {})}
+        self.assertEqual(replies, {json.dumps([401, {"ok": False, "error": "Name or PIN didn't match"}],
+                                              sort_keys=True)})
+
+    def test_five_wrong_pins_lock_the_name(self):
+        self.named()
+        for _ in range(5):
+            self.assertEqual(self.call("/player/recover", {"name": "Ann", "pin": "0000"})[0], 401)
+        status, out = self.call("/player/recover", {"name": "Ann", "pin": "4821"})
+        self.assertEqual((status, out["code"]), (409, "locked"))
+
+    def test_per_ip_limit_is_20_tries_per_10_minutes(self):
+        self.named()
+        venue = {"X-Forwarded-For": "203.0.113.20"}
+        for i in range(20):
+            self.call("/player/recover", {"name": f"guess{i}", "pin": "0000"}, headers=venue)
+        status, out = self.call("/player/recover", {"name": "Ann", "pin": "4821"}, headers=venue)
+        self.assertEqual(status, 429, out)
+        self.assertEqual(self.call("/player/recover", {"name": "Ann", "pin": "4821"},
+                                   headers={"X-Forwarded-For": "203.0.113.21"})[0], 200)
+        self.clock[0] += 600
+        self.assertEqual(self.call("/player/recover", {"name": "Ann", "pin": "4821"}, headers=venue)[0], 200)
+
+    def test_duplicate_name_is_409_taken(self):
+        self.named("Ann", None)
+        status, out = self.call("/player/new", {"name": "ANN"})
+        self.assertEqual((status, out["code"]), (409, "name_taken"))
+        pid, token = self.named("Bea", None)
+        status, out = self.call("/player/name", {"player": pid, "name": "ann"}, token=token)
+        self.assertEqual((status, out["code"], out["error"]), (409, "name_taken", "That name is taken"))
+
+
 if __name__ == "__main__":
     unittest.main()

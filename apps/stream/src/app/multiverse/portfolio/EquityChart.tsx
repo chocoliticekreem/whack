@@ -36,7 +36,7 @@ export function EquityChart({ series }: { series: [number, number][] }) {
           onPointerMove={onMove}
           onPointerLeave={() => setHover(null)}
           role="img"
-          aria-label={`Cumulative P&L over ${pts.length - 1} settled bets, now ${signed(last)} points`}
+          aria-label={`Cumulative P&L over ${pts.length - 1} settled bets, now ${signed(last)}`}
         >
           <path className="pf-area" data-tone={tone(last)} d={area} />
           <line className="pf-zero" x1={0} x2={W} y1={y(0)} y2={y(0)} vectorEffect="non-scaling-stroke" />

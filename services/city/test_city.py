@@ -988,7 +988,7 @@ class SimTest(CityCase):
         capped.decided |= others
         capped.ai_bets.append({"trader": "sim", "option": "under", "why": "earlier", "stake": 70, "odds": 2.0})
         ex.ai_bets(capped, self.now)
-        self.assertIn("position cap 75 points", ex.sat_out["sim"][1])
+        self.assertIn("position cap W75", ex.sat_out["sim"][1])
         self.assertEqual(len([b for b in capped.ai_bets if b["trader"] == "sim"]), 1)
         ex.record["sim"]["points"] = 1000
         again = mk.build_city_pulse("city_pulse-1530", store, SPOTS, self.now, self.at + 15 * MIN)
@@ -1133,7 +1133,7 @@ class CourtsidingTest(CityCase):
 
     def test_the_cap_on_a_locally_observable_series_is_ten_percent(self):
         ex, m = self.opened()
-        with self.assertRaisesRegex(PermissionError, "position cap: max 100 points"):
+        with self.assertRaisesRegex(PermissionError, "position cap: max W100"):
             ex.bet({"player": "courtsider", "market": m.id, "option": "no", "stake": 110}, CLEAN_OPEN)
         ex.bet({"player": "courtsider", "market": m.id, "option": "no", "stake": 60}, CLEAN_OPEN)
         with self.assertRaisesRegex(PermissionError, "60 already staked"):  # pending stakes count

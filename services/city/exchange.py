@@ -301,7 +301,7 @@ class Exchange:
         # The ledger, not m.bets: bets booked before a restart count toward the cap of the market rebuilt after it.
         held = self.ledger.staked(player, m.id, m.settles_at) + self.integrity.held(player, m.id)
         if held + stake > cap:
-            raise PermissionError(f"position cap: max {cap:g} points in this market ({held:g} already staked)")
+            raise PermissionError(f"position cap: max W{cap:g} in this market (W{held:g} already staked)")
         if self.integrity.delay_ms(m.sub):
             self.quote(m, option, stake)  # a price already under the floor can never fill: refuse it now
             confirmed = self.ledger.precheck(player, key, stake, market=m.id, settles_at=m.settles_at, option=option,
@@ -361,17 +361,17 @@ class Exchange:
             open_stakes = self.ai_open_stakes(tid)
             stake = traders.stake_for(self.record[tid]["points"], open_stakes)
             if not stake:
-                self.sat_out[tid] = (m.settles_at, f"Sitting out: {self.record[tid]['points']} points left, "
-                                                   f"{open_stakes:g} of them on unsettled bets, so a 10% stake of the "
-                                                   f"rest is under the {traders.MIN_STAKE}-point minimum")
+                self.sat_out[tid] = (m.settles_at, f"Sitting out: W{self.record[tid]['points']} left, "
+                                                   f"W{open_stakes:g} of it on unsettled bets, so a 10% stake of the "
+                                                   f"rest is under the W{traders.MIN_STAKE} minimum")
                 continue
             cap_pct = self.integrity.cap(m.sub)
             cap = cap_pct * max(0, self.record[tid]["points"])
             held = sum(b["stake"] for b in m.ai_bets if b["trader"] == tid)
             held += self.integrity.ai_pending(tid, m.id) * stake
             if held + stake > cap:
-                self.sat_out[tid] = (m.settles_at, f"Sitting out: position cap {cap:g} points per market "
-                                                   f"({cap_pct:.0%} of its {self.record[tid]['points']} points)")
+                self.sat_out[tid] = (m.settles_at, f"Sitting out: position cap W{cap:g} per market "
+                                                   f"({cap_pct:.0%} of its W{self.record[tid]['points']})")
                 continue
             if self.integrity.delay_ms(m.sub):
                 self.integrity.accept_ai(tid, m, option, why, now)

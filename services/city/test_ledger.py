@@ -234,7 +234,7 @@ class ResponsiblePlay(LedgerCase):
         with self.assertRaises(WalletError) as cm:
             self.bet(stake=51)
         self.assertEqual(cm.exception.code, "loss_limit")
-        self.assertIn("risk 50 more", str(cm.exception))
+        self.assertIn("risk W50 more", str(cm.exception))
         self.assertEqual(self.L.wallet("alice")["limits"]["remainingToday"], 50)
 
     def test_loss_limit_resets_at_london_midnight(self):
@@ -674,7 +674,7 @@ class OddsFloor(unittest.TestCase):
 
 class Hardening(LedgerCase):
     def test_minimum_stake_is_10(self):
-        with self.assertRaisesRegex(ValueError, "at least 10"):
+        with self.assertRaisesRegex(ValueError, "at least W10"):
             self.bet(stake=9)
         self.bet(stake=10)
 
@@ -850,6 +850,130 @@ class Versus(LedgerCase):
         markets = {"m1": self.market("m1", "yes", [{"trader": "tube", "option": "no", "stake": 100, "odds": 2.0}],
                                      settles_at=SETTLES + 86_400_000)}
         self.assertEqual(lg.versus(self.L, "alice", markets), {"versus": []})
+
+
+class PinRecovery(LedgerCase):
+    def player(self, name="Ann", pin="4821"):
+        out = self.L.create_player(name)
+        if pin:
+            self.L.set_pin(out["player"], pin)
+        return out
+
+    def test_start_balance_is_one_grant_of_1000(self):
+        self.assertEqual(GRANT, 1000)
+        self.assertEqual(self.L.cash(self.L.create_player()["player"]), 1000)
+
+    def test_pin_is_salted_hashed_and_verifies(self):
+        a, b = self.player("Ann"), self.player("Bea")
+        rows = {r["player"]: r for r in self.L.db.execute("SELECT * FROM player_pins")}
+        self.assertNotEqual(rows[a["player"]]["salt"], rows[b["player"]]["salt"])
+        self.assertNotIn(b"4821", rows[a["player"]]["pin_hash"])
+        self.assertNotEqual(rows[a["player"]]["pin_hash"], rows[b["player"]]["pin_hash"], "same PIN, other salt")
+        self.assertTrue(self.L.wallet(a["player"])["player"]["hasPin"])
+        self.assertFalse(self.L.wallet(self.L.create_player("Cy")["player"])["player"]["hasPin"])
+        self.assertEqual(self.L.recover("ann", "4821")["player"], a["player"], "names match case-insensitively")
+
+    def test_pin_must_be_four_digits_and_needs_a_name(self):
+        a = self.player(pin=None)
+        for bad in ("", "123", "12345", "abcd", "12 4", None, 1234.5):
+            with self.assertRaises(ValueError):
+                self.L.set_pin(a["player"], bad)
+        nameless = self.L.create_player()
+        with self.assertRaises(WalletError) as err:
+            self.L.set_pin(nameless["player"], "1234")
+        self.assertEqual(err.exception.code, "name_required")
+
+    def test_change_pin_replaces_the_old_one(self):
+        a = self.player(pin="1111")
+        self.L.set_pin(a["player"], "2222")
+        with self.assertRaises(lg.AuthError):
+            self.L.recover("Ann", "1111")
+        self.assertEqual(self.L.recover("Ann", "2222")["player"], a["player"])
+
+    def test_recover_issues_a_new_token_and_the_old_one_still_works(self):
+        a = self.player()
+        out = self.L.recover("Ann", "4821")
+        self.assertEqual((out["player"], out["nickname"]), (a["player"], "Ann"))
+        self.assertNotEqual(out["token"], a["token"])
+        second = self.L.recover("Ann", "4821")["token"]
+        for t in (a["token"], out["token"], second):
+            self.assertEqual(self.L.auth(a["player"], t), a["player"])
+        other = self.player("Bea", "1111")
+        with self.assertRaises(lg.AuthError):
+            self.L.auth(other["player"], out["token"])
+        stored = [r[0] for r in self.L.db.execute("SELECT token_hash FROM player_tokens")]
+        self.assertIn(lg.token_hash(out["token"]), stored)
+        self.assertNotIn(out["token"], stored)
+        self.assertEqual(self.L._sum("kind = 'grant'", ()), 5 * GRANT, "recover grants nothing")
+
+    def test_wrong_pin_unknown_name_and_no_pin_fail_identically(self):
+        self.player("Ann", "4821")
+        self.player("Bea", pin=None)
+        seen = set()
+        for name, pin in (("Ann", "0000"), ("Nobody", "4821"), ("Bea", "4821"), ("", "4821"), ("Ann", ""),
+                          ("Ann", "48211"), (None, None)):
+            with self.assertRaises(lg.AuthError) as err:
+                self.L.recover(name, pin)
+            seen.add(str(err.exception))
+        self.assertEqual(seen, {lg.RECOVER_FAILED})
+
+    def test_five_misses_lock_the_name_for_15_minutes(self):
+        a = self.player()
+        for _ in range(lg.RECOVER_FAILS):
+            with self.assertRaises(lg.AuthError):
+                self.L.recover("Ann", "0000")
+        with self.assertRaises(WalletError) as err:
+            self.L.recover("ANN", "4821")
+        self.assertEqual(err.exception.code, "locked", "even the right PIN is refused while locked")
+        self.clock.ms += lg.RECOVER_WINDOW_MS - 1
+        with self.assertRaises(WalletError):
+            self.L.recover("Ann", "4821")
+        self.clock.ms += 1
+        self.assertEqual(self.L.recover("Ann", "4821")["player"], a["player"])
+
+    def test_misses_spread_over_more_than_15_minutes_do_not_lock(self):
+        self.player()
+        for _ in range(lg.RECOVER_FAILS - 1):
+            with self.assertRaises(lg.AuthError):
+                self.L.recover("Ann", "0000")
+        self.clock.ms += lg.RECOVER_WINDOW_MS
+        with self.assertRaises(lg.AuthError):
+            self.L.recover("Ann", "0000")
+        self.L.recover("Ann", "4821")
+
+    def test_an_unknown_name_locks_the_same_way(self):
+        for _ in range(lg.RECOVER_FAILS):
+            with self.assertRaises(lg.AuthError):
+                self.L.recover("Ghost", "0000")
+        with self.assertRaises(WalletError) as err:
+            self.L.recover("Ghost", "0000")
+        self.assertEqual(err.exception.code, "locked")
+
+    def test_names_are_unique_case_insensitively(self):
+        a = self.player("Ann", pin=None)
+        for name in ("Ann", "ANN", "  ann "):
+            with self.assertRaises(WalletError) as err:
+                self.L.create_player(name)
+            self.assertEqual(err.exception.code, "name_taken")
+        b = self.L.create_player("Bea")
+        with self.assertRaises(WalletError):
+            self.L.set_nickname(b["player"], "aNN")
+        self.assertEqual(self.L.set_nickname(a["player"], "ANN")["nickname"], "ANN", "a player may recase its own")
+        self.L.create_player()
+        self.L.create_player()
+
+    def test_tables_survive_a_restart(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = Path(d) / "ledger.db"
+            first = Ledger(path, now=self.clock)
+            a = first.create_player("Ann")
+            first.set_pin(a["player"], "4821")
+            extra = first.recover("Ann", "4821")["token"]
+            first.close()
+            again = Ledger(path, now=self.clock)
+            self.addCleanup(again.close)
+            self.assertEqual(again.auth(a["player"], extra), a["player"])
+            self.assertEqual(again.recover("Ann", "4821")["player"], a["player"])
 
 
 if __name__ == "__main__":

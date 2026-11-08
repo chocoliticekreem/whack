@@ -14,6 +14,8 @@ Points are integers end to end. Floats never touch the ledger.
 
 Identity: POST /player/new is the only way in. It issues a server-made player id and a random token (stored as a
 SHA-256 hash) and posts the one grant. Every other wallet call proves the token; reads never create a player.
+Nicknames are unique (case-insensitive). A player who sets a 4-digit PIN can sign in on another device with name + PIN:
+POST /player/recover issues an extra token, so every device stays signed in.
 
 Every public method takes the ledger's own lock, so the ledger is safe without the HTTP server's lock.
 """
@@ -32,6 +34,7 @@ import sqlite3
 import threading
 import time
 import uuid
+from collections import deque
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -47,6 +50,13 @@ BREAK_HOURS = (1, 24)
 LONDON = ZoneInfo("Europe/London")
 PLAYER_RE = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 NICK_MAX = 24
+PIN_RE = re.compile(r"^[0-9]{4}$")
+# Why: a 4-digit PIN has 10,000 values, so no KDF cost protects a leaked hash; the online lockout below is the real
+# guard. A cheap PBKDF2 keeps each attempt to a few ms inside the exchange lock.
+PIN_ROUNDS = 20_000
+RECOVER_FAILS = 5
+RECOVER_WINDOW_MS = 15 * 60_000
+RECOVER_FAILED = "Name or PIN didn't match"
 MIN_STAKE = 10
 MIN_ODDS = 1.05
 CONFIRM_TTL_MS = 60_000
@@ -134,6 +144,22 @@ CREATE TABLE IF NOT EXISTS breaks (
   until       INTEGER NOT NULL
 );
 
+-- Extra tokens, one per device signed in with name + PIN. players.token_hash stays the first device's token.
+CREATE TABLE IF NOT EXISTS player_tokens (
+  token_hash  TEXT PRIMARY KEY,
+  player      TEXT NOT NULL REFERENCES players(id),
+  created_at  INTEGER NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS player_pins (
+  player    TEXT PRIMARY KEY REFERENCES players(id),
+  salt      BLOB NOT NULL,
+  pin_hash  BLOB NOT NULL,
+  set_at    INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS players_nickname ON players (nickname COLLATE NOCASE);
+
 CREATE TRIGGER IF NOT EXISTS cash_never_negative AFTER INSERT ON entries
 WHEN NEW.account IN ('player_cash', 'player_escrow')
  AND (SELECT SUM(amount) FROM entries WHERE player = NEW.player AND account = NEW.account) < 0
@@ -171,6 +197,10 @@ def clean_nickname(value) -> str:
     return nick
 
 
+def pin_hash(pin: str, salt: bytes) -> bytes:
+    return hashlib.pbkdf2_hmac("sha256", pin.encode(), salt, PIN_ROUNDS)
+
+
 def payout_of(stake: int, odds: float) -> int:
     """stake x odds, rounded down to a whole point (never half-to-even)."""
     return int(Decimal(str(odds)) * stake)
@@ -203,9 +233,9 @@ def london_midnight(ms: int) -> int:
 
 def as_points(value, field: str = "stake") -> int:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ValueError(f"{field} must be a whole number of points")
+        raise ValueError(f"{field} must be a whole number")
     if isinstance(value, float) and not value.is_integer():
-        raise ValueError(f"{field} must be a whole number of points")
+        raise ValueError(f"{field} must be a whole number")
     return int(value)
 
 
@@ -217,6 +247,10 @@ class Ledger:
         self.ai_exposure: Callable[[], list[tuple]] = list  # the exchange's AI open bets, as _worst_case rows
         self.lock = threading.RLock()
         self.secret = secrets.token_bytes(32)
+        # debt: recovery lockouts live in memory. ceiling: a restart clears them (at most 5 more tries per name).
+        # upgrade: if the server restarts often enough to matter, persist them.
+        self.recover_fails: dict[str, deque] = {}
+        self.recover_locked: dict[str, int] = {}
         self.lockfile = None
         if self.path != ":memory:":
             Path(self.path).parent.mkdir(parents=True, exist_ok=True)
@@ -277,6 +311,8 @@ class Ledger:
     def create_player(self, nickname=None) -> dict:
         """The only call that makes a player: a server-made id, a random token (only its hash is kept), the grant."""
         nick = clean_nickname(nickname) if nickname not in (None, "") else None
+        if nick:
+            self._name_free(nick)
         player, token = f"p_{secrets.token_hex(8)}", secrets.token_urlsafe(32)
         self.open_account(player, nick, token_hash(token))
         return {"player": player, "token": token, "cash": self.cash(player)}
@@ -301,10 +337,64 @@ class Ledger:
         if isinstance(player, str) and PLAYER_RE.match(player):
             row = self.db.execute("SELECT token_hash FROM players WHERE id = ?", (player,)).fetchone()
         stored = (row["token_hash"] if row else None) or "0" * 64
-        ok = hmac.compare_digest(token_hash(str(token or "")), stored)
-        if not (ok and row and row["token_hash"] and token):
+        hashed = token_hash(str(token or ""))
+        ok = hmac.compare_digest(hashed, stored) and bool(row and row["token_hash"])
+        if not ok and row:
+            ok = self.db.execute("SELECT 1 FROM player_tokens WHERE token_hash = ? AND player = ?",
+                                 (hashed, player)).fetchone() is not None
+        if not (ok and row and token):
             raise AuthError("missing or wrong X-Player-Token for this player")
         return player
+
+    def _name_free(self, nick: str, player: str = "") -> None:
+        if self.db.execute("SELECT 1 FROM players WHERE nickname = ? COLLATE NOCASE AND id <> ?",
+                           (nick, player)).fetchone():
+            raise WalletError("name_taken", "That name is taken")
+
+    @_locked
+    def set_pin(self, player, pin) -> dict:
+        """Sets or changes the player's 4-digit PIN (salted PBKDF2). Needs a name only this player holds."""
+        player = self.require(player)
+        pin = str(pin or "")
+        if not PIN_RE.match(pin):
+            raise ValueError("PIN must be 4 digits")
+        nick = self.db.execute("SELECT nickname FROM players WHERE id = ?", (player,)).fetchone()[0]
+        if not nick:
+            raise WalletError("name_required", "Pick a name first")
+        self._name_free(nick, player)
+        salt = secrets.token_bytes(16)
+        self.db.execute("INSERT OR REPLACE INTO player_pins (player, salt, pin_hash, set_at) VALUES (?, ?, ?, ?)",
+                        (player, salt, pin_hash(pin, salt), self.now()))
+        return {"ok": True, "hasPin": True}
+
+    @_locked
+    def recover(self, name, pin) -> dict:
+        """Name + PIN -> a new token for that player; older tokens stay valid. A wrong name and a wrong PIN fail the
+        same way and cost the same time. Five misses on a name lock its recovery for RECOVER_WINDOW_MS."""
+        key, pin, now = str(name or "").strip().casefold()[:64], str(pin or ""), self.now()
+        if self.recover_locked.get(key, 0) > now:
+            raise WalletError("locked", "Too many tries for that name. Try again in 15 minutes.")
+        self.recover_locked.pop(key, None)
+        row = self.db.execute("SELECT p.id, k.salt, k.pin_hash FROM players p JOIN player_pins k ON k.player = p.id "
+                              "WHERE p.nickname = ? COLLATE NOCASE", (str(name or "").strip(),)).fetchone() \
+            if key else None
+        salt, stored = (row["salt"], row["pin_hash"]) if row else (b"\0" * 16, b"\0" * 32)
+        ok = hmac.compare_digest(pin_hash(pin, salt), stored) and bool(row) and bool(PIN_RE.match(pin))
+        if not ok:
+            fails = self.recover_fails.setdefault(key, deque())
+            while fails and fails[0] <= now - RECOVER_WINDOW_MS:
+                fails.popleft()
+            fails.append(now)
+            if len(fails) >= RECOVER_FAILS:
+                self.recover_locked[key] = now + RECOVER_WINDOW_MS
+                del self.recover_fails[key]
+            raise AuthError(RECOVER_FAILED)
+        self.recover_fails.pop(key, None)
+        token = secrets.token_urlsafe(32)
+        self.db.execute("INSERT INTO player_tokens (token_hash, player, created_at) VALUES (?, ?, ?)",
+                        (token_hash(token), row["id"], now))
+        nick = self.db.execute("SELECT nickname FROM players WHERE id = ?", (row["id"],)).fetchone()[0]
+        return {"player": row["id"], "token": token, "nickname": nick}
 
     @_locked
     def require(self, player) -> str:
@@ -315,8 +405,9 @@ class Ledger:
 
     @_locked
     def set_nickname(self, player, nickname) -> dict:
-        player = self.require(player)
-        self.db.execute("UPDATE players SET nickname = ? WHERE id = ?", (clean_nickname(nickname), player))
+        player, nick = self.require(player), clean_nickname(nickname)
+        self._name_free(nick, player)
+        self.db.execute("UPDATE players SET nickname = ? WHERE id = ?", (nick, player))
         return {"ok": True, "nickname": self.db.execute("SELECT nickname FROM players WHERE id = ?",
                                                         (player,)).fetchone()[0]}
 
@@ -426,8 +517,8 @@ class Ledger:
         in_play = self.escrow(player) + reserved
         room = limit - lost_today - in_play
         if stake > room:
-            raise WalletError("loss_limit", f"Daily loss limit: you can risk {max(0, room)} more points today "
-                                            f"(limit {limit}, lost {lost_today}, in play {in_play})")
+            raise WalletError("loss_limit", f"Daily loss limit: you can risk W{max(0, room)} more today "
+                                            f"(limit W{limit}, lost W{lost_today}, in play W{in_play})")
         if stake > CONFIRM_SHARE * cash and not confirm():
             raise WalletError("confirm_required",
                               f"This stake is {round(100 * stake / cash)}% of your balance{held}. Confirm to place it.",
@@ -505,7 +596,7 @@ class Ledger:
             raise ValueError("idempotency_key is required (1-128 chars)")
         stake = as_points(stake)
         if stake < MIN_STAKE:
-            raise ValueError(f"stake must be at least {MIN_STAKE} points")
+            raise ValueError(f"stake must be at least W{MIN_STAKE}")
         prior = self.find_bet(player, key, market, settles_at, option, stake)
         if prior:
             return prior
@@ -548,7 +639,7 @@ class Ledger:
             raise ValueError("idempotency_key is required (1-128 chars)")
         stake = as_points(stake)
         if stake < MIN_STAKE:
-            raise ValueError(f"stake must be at least {MIN_STAKE} points")
+            raise ValueError(f"stake must be at least W{MIN_STAKE}")
         now = self.now()
         confirmed = self._confirmed(confirm_token, player, market, settles_at, option, stake, now)
         self._guard(player, stake, now, lambda: confirmed,
@@ -648,7 +739,9 @@ class Ledger:
         until = self.break_until(player, now)
         out = {
             "player": {"id": player, "nickname": p["nickname"], "kycStatus": p["kyc_status"],
-                       "createdAt": p["created_at"]},
+                       "createdAt": p["created_at"],
+                       "hasPin": self.db.execute("SELECT 1 FROM player_pins WHERE player = ?",
+                                                 (player,)).fetchone() is not None},
             "cash": cash, "escrow": escrow, "total": cash + escrow,
             "totals": {"granted": granted, "staked": int(t["staked"]), "returned": int(t["returned"]),
                        "betsPlaced": t["placed"], "betsSettled": t["settled"], "won": t["won"], "lost": t["lost"],
@@ -846,4 +939,5 @@ def post_routes(ledger: Ledger, body: dict, player: str) -> dict:
     """Wallet writes. `player` has already proved its token."""
     return {"/limits": lambda: ledger.set_limit(player, body.get("dailyLoss")),
             "/break": lambda: ledger.take_break(player, body.get("hours")),
-            "/player/name": lambda: ledger.set_nickname(player, body.get("name"))}
+            "/player/name": lambda: ledger.set_nickname(player, body.get("name")),
+            "/player/pin": lambda: ledger.set_pin(player, body.get("pin"))}

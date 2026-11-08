@@ -25,13 +25,15 @@ export interface Wallet {
   streak: number;
   bets: Record<string, MyBet>;
   seenIntro: boolean;
+  /** The one-time "set a PIN" nudge after the first bet has been shown. */
+  pinNudged: boolean;
 }
 
 export type Settled = Extract<SettleResponse, { settled: true }> & { localVoid?: boolean };
 
 export function freshWallet(): Wallet {
   const id = Math.random().toString(36).slice(2, 10);
-  return { player: `p-${id}`, token: null, name: null, points: START_POINTS, streak: 0, bets: {}, seenIntro: false };
+  return { player: `p-${id}`, token: null, name: null, points: START_POINTS, streak: 0, bets: {}, seenIntro: false, pinNudged: false };
 }
 
 export function loadWallet(): Wallet {
@@ -71,3 +73,9 @@ export function countdown(ms: number): string {
 }
 
 export const fmtPts = (n: number) => Math.round(n).toLocaleString("en-GB");
+/** W is the play-money currency: "W1,000". */
+export const fmtW = (n: number) => `W${fmtPts(n)}`;
+export const signedW = (n: number) => {
+  const r = Math.round(n);
+  return r > 0 ? `+W${fmtPts(r)}` : r < 0 ? `−W${fmtPts(-r)}` : "W0";
+};

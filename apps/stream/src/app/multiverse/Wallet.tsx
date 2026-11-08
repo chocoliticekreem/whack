@@ -2,12 +2,14 @@
 
 import { X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { fmtPts, londonClock } from "./city-store";
+import { Coin } from "./Coin";
+import { PinInput } from "./PinInput";
+import { fmtPts, fmtW, londonClock, signedW } from "./city-store";
 import "./wallet.css";
 
 /** Shapes served by services/city/ledger.py (GET /wallet /positions /history, POST /limits /break). */
 export interface ServerWallet {
-  player: { id: string; nickname: string | null; kycStatus: string; createdAt: number };
+  player: { id: string; nickname: string | null; kycStatus: string; createdAt: number; hasPin: boolean };
   cash: number;
   escrow: number;
   total: number;
@@ -64,7 +66,7 @@ async function get<T>(path: string, token: string | null): Promise<{ status: num
   }
 }
 
-async function post(path: string, body: unknown, token: string | null): Promise<{ ok: boolean; error?: string }> {
+async function post(path: string, body: unknown, token: string | null): Promise<{ ok: boolean; error?: string; code?: string }> {
   try {
     const res = await fetch(`/api/city/${path}`, {
       method: "POST",
@@ -72,8 +74,8 @@ async function post(path: string, body: unknown, token: string | null): Promise<
       body: JSON.stringify(body),
       cache: "no-store",
     });
-    const data = (await res.json()) as { error?: string };
-    return { ok: res.ok, error: data.error };
+    const data = (await res.json()) as { error?: string; code?: string };
+    return { ok: res.ok, error: data.error, code: data.code };
   } catch {
     return { ok: false, error: "Could not reach the exchange" };
   }
@@ -98,6 +100,25 @@ export function createPlayer() {
 }
 
 export const setNickname = (player: string, token: string, name: string) => post("player/name", { player, name }, token);
+export const setPin = (player: string, token: string, pin: string) => post("player/pin", { player, pin }, token);
+
+export type Recovered = { player: string; token: string; nickname: string };
+
+/** POST /player/recover: name + PIN sign this device in as that player with a new token. */
+export async function recoverPlayer(name: string, pin: string): Promise<Recovered | { error: string }> {
+  try {
+    const res = await fetch("/api/city/player/recover", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name, pin }),
+      cache: "no-store",
+    });
+    const data = (await res.json()) as Partial<Recovered> & { error?: string };
+    return data.player && data.token ? { player: data.player, token: data.token, nickname: data.nickname ?? name } : { error: data.error ?? "Name or PIN didn't match" };
+  } catch {
+    return { error: "Could not reach the exchange" };
+  }
+}
 
 /** The player's balance as the server's ledger has it. `null` until the first reply, and always in demo mode.
  *  A 401 means the token no longer matches (a wiped ledger): `onUnauthorized` gets that token so the caller can make a new player. */
@@ -155,7 +176,6 @@ export function useStakeConfirm() {
   return [confirm, element] as const;
 }
 
-const signed = (n: number) => (n > 0 ? `+${fmtPts(n)}` : n < 0 ? `−${fmtPts(-n)}` : "0");
 const tone = (n: number) => (n > 0 ? "up" : n < 0 ? "down" : undefined);
 
 function whenLabel(ms: number) {
@@ -186,7 +206,7 @@ function PnlChart({ series }: { series: [number, number][] }) {
   };
   return (
     <figure className="wl-chart">
-      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" onPointerMove={onMove} onPointerLeave={() => setHover(null)} role="img" aria-label={`Cumulative P&L, now ${signed(last)} points`}>
+      <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" onPointerMove={onMove} onPointerLeave={() => setHover(null)} role="img" aria-label={`Cumulative P&L, now ${signedW(last)}`}>
         <line className="wl-zero" x1={0} x2={W} y1={y(0)} y2={y(0)} />
         <path className="wl-line" data-tone={tone(last)} d={d} vectorEffect="non-scaling-stroke" />
         {hover != null && (
@@ -198,14 +218,14 @@ function PnlChart({ series }: { series: [number, number][] }) {
       </svg>
       {hover != null && (
         <div className="wl-tip tl-num" style={{ left: `${(x(hover) / W) * 100}%` }}>
-          <b>{signed(pts[hover][1])}</b> after bet {hover}
+          <b>{signedW(pts[hover][1])}</b> after bet {hover}
           <span>{whenLabel(pts[hover][0])}</span>
         </div>
       )}
       <figcaption className="wl-axis tl-num">
         <span>Bet 1</span>
         <span>
-          Range {signed(lo)} to {signed(hi)}
+          Range {signedW(lo)} to {signedW(hi)}
         </span>
         <span>Bet {pts.length - 1}</span>
       </figcaption>
@@ -233,7 +253,7 @@ function SessionReminder({ wallet }: { wallet: ServerWallet | null }) {
       <div>
         <b>You have been playing for {minutes} minutes.</b>
         <span className="tl-num">
-          Session P&amp;L <span data-tone={tone(session)}>{signed(session)}</span> points
+          Session P&amp;L <span data-tone={tone(session)}>{signedW(session)}</span>
         </span>
       </div>
       <button type="button" className="wl-btn" onClick={() => setDue(false)}>
@@ -262,14 +282,14 @@ function Limits({ wallet, player, token, onChange }: { wallet: ServerWallet; pla
       <h3>Limits</h3>
       <dl className="wl-kv tl-num">
         <dt>Daily loss limit</dt>
-        <dd>{fmtPts(wallet.limits.dailyLoss)}</dd>
+        <dd>{fmtW(wallet.limits.dailyLoss)}</dd>
         <dt>Lost today</dt>
-        <dd>{fmtPts(wallet.limits.lostToday)}</dd>
+        <dd>{fmtW(wallet.limits.lostToday)}</dd>
         <dt>In play</dt>
-        <dd>{fmtPts(wallet.limits.inPlay)}</dd>
+        <dd>{fmtW(wallet.limits.inPlay)}</dd>
         <dt>Can still risk today</dt>
         <dd>
-          <b>{fmtPts(wallet.limits.remainingToday)}</b>
+          <b>{fmtW(wallet.limits.remainingToday)}</b>
         </dd>
       </dl>
       <div className="wl-meter" aria-hidden>
@@ -277,14 +297,14 @@ function Limits({ wallet, player, token, onChange }: { wallet: ServerWallet; pla
       </div>
       {wallet.limits.pending && (
         <p className="wl-note tl-num">
-          Raise to {fmtPts(wallet.limits.pending.value)} takes effect {whenLabel(wallet.limits.pending.effectiveAt)}.
+          Raise to {fmtW(wallet.limits.pending.value)} takes effect {whenLabel(wallet.limits.pending.effectiveAt)}.
         </p>
       )}
       <form
         className="wl-limit-form"
         onSubmit={(e) => {
           e.preventDefault();
-          if (!Number.isInteger(n) || n <= 0) return setMsg("Enter a whole number of points");
+          if (!Number.isInteger(n) || n <= 0) return setMsg("Enter a whole number");
           void run("limits", { dailyLoss: n }, raising ? "Raise requested. It takes effect in 24 hours." : "Limit lowered. It applies now.");
         }}
       >
@@ -320,6 +340,52 @@ function Limits({ wallet, player, token, onChange }: { wallet: ServerWallet; pla
   );
 }
 
+function Devices({ wallet, player, token, onChange, onSignIn }: { wallet: ServerWallet; player: string; token: string | null; onChange: () => void; onSignIn: () => void }) {
+  const [pin, setPinValue] = useState("");
+  const [msg, setMsg] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const has = wallet.player.hasPin;
+  const save = async () => {
+    if (!token || pin.length !== 4) return setMsg("A PIN is 4 digits.");
+    setBusy(true);
+    const r = await setPin(player, token, pin);
+    setBusy(false);
+    setPinValue("");
+    setMsg(r.ok ? (has ? "PIN changed." : "PIN set.") : (r.error ?? "Could not save the PIN"));
+    onChange();
+  };
+  return (
+    <section className="wl-section">
+      <h3>Play on another device</h3>
+      <p className="wl-note">
+        {has ? (
+          <>
+            Sign in there with <b>{wallet.player.nickname}</b> and your PIN.
+          </>
+        ) : (
+          "Set a 4-digit PIN, then sign in there with your name and PIN."
+        )}
+      </p>
+      <form
+        className="wl-pin-form"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+      >
+        <PinInput value={pin} onChange={setPinValue} label={has ? "New PIN" : "PIN"} />
+        <button type="submit" className="wl-btn" disabled={busy || pin.length !== 4}>
+          {has ? "Change PIN" : "Set PIN"}
+        </button>
+      </form>
+      {msg && <p className="wl-msg">{msg}</p>}
+      <button type="button" className="wl-link" onClick={onSignIn}>
+        Already playing on another device? Sign in
+      </button>
+    </section>
+  );
+}
+
 export function WalletPanel({
   player,
   token,
@@ -327,6 +393,7 @@ export function WalletPanel({
   open,
   onClose,
   refresh,
+  onSignIn,
 }: {
   player: string;
   token: string | null;
@@ -334,6 +401,7 @@ export function WalletPanel({
   open: boolean;
   onClose: () => void;
   refresh: () => void;
+  onSignIn: () => void;
 }) {
   const [positions, setPositions] = useState<Position[]>([]);
   const [history, setHistory] = useState<HistoryRow[]>([]);
@@ -379,7 +447,7 @@ export function WalletPanel({
               <div>
                 <h2>Wallet</h2>
                 <span className="wl-note">
-                  {wallet?.player.nickname ?? player} · points only, no real money
+                  {wallet?.player.nickname ?? player} · W are play money, no real value.
                 </span>
                 <a className="wl-note" href="/multiverse/portfolio">Full portfolio and history</a>
               </div>
@@ -398,35 +466,39 @@ export function WalletPanel({
                 <section className="wl-balance tl-num">
                   <div className="wl-big">
                     <span className="wl-label">Available</span>
-                    <b>{fmtPts(wallet.cash)}</b>
-                    <span className="wl-unit">pts</span>
+                    <b>
+                      <Coin size={22} />
+                      {fmtPts(wallet.cash)}
+                    </b>
                   </div>
                   <dl className="wl-kv">
                     <dt>In play</dt>
-                    <dd>{fmtPts(wallet.escrow)}</dd>
+                    <dd>{fmtW(wallet.escrow)}</dd>
                     <dt>Total</dt>
-                    <dd>{fmtPts(wallet.total)}</dd>
+                    <dd>{fmtW(wallet.total)}</dd>
                   </dl>
                 </section>
+
+                <Devices wallet={wallet} player={player} token={token} onChange={refresh} onSignIn={onSignIn} />
 
                 <section className="wl-section">
                   <div className="wl-stats tl-num">
                     <div>
                       <span className="wl-label">Today</span>
-                      <b data-tone={tone(wallet.pnl.today)}>{signed(wallet.pnl.today)}</b>
+                      <b data-tone={tone(wallet.pnl.today)}>{signedW(wallet.pnl.today)}</b>
                     </div>
                     <div>
                       <span className="wl-label">All time</span>
-                      <b data-tone={tone(wallet.pnl.allTime)}>{signed(wallet.pnl.allTime)}</b>
+                      <b data-tone={tone(wallet.pnl.allTime)}>{signedW(wallet.pnl.allTime)}</b>
                     </div>
                     <div>
                       <span className="wl-label">This session</span>
-                      <b data-tone={tone(wallet.pnl.session ?? 0)}>{signed(wallet.pnl.session ?? 0)}</b>
+                      <b data-tone={tone(wallet.pnl.session ?? 0)}>{signedW(wallet.pnl.session ?? 0)}</b>
                     </div>
                   </div>
                   <PnlChart series={series} />
                   <span className="wl-note tl-num">
-                    Points won or lost, bet by bet · {record}
+                    W won or lost, bet by bet · {record}
                   </span>
                 </section>
 
@@ -454,8 +526,8 @@ export function WalletPanel({
                                 <span className="wl-q">{p.question}</span>
                                 <span className="wl-side">{p.label}</span>
                               </td>
-                              <td className="wl-r">{fmtPts(p.stake)}</td>
-                              <td className="wl-r">{fmtPts(p.toWin)}</td>
+                              <td className="wl-r">{fmtW(p.stake)}</td>
+                              <td className="wl-r">{fmtW(p.toWin)}</td>
                               <td className="wl-r">{londonClock(p.settlesAt)}</td>
                             </tr>
                           ))}
@@ -492,12 +564,12 @@ export function WalletPanel({
                                 <span className="wl-side">{h.label}</span>
                                 <span className="wl-reading">Settled on: {h.reading}</span>
                               </td>
-                              <td className="wl-r">{fmtPts(h.stake)}</td>
+                              <td className="wl-r">{fmtW(h.stake)}</td>
                               <td className="wl-result" data-r={h.result}>
                                 {h.result === "won" ? "Won" : h.result === "lost" ? "Lost" : "Void"}
                               </td>
                               <td className="wl-r" data-tone={tone(h.pnl)}>
-                                {signed(h.pnl)}
+                                {signedW(h.pnl)}
                               </td>
                             </tr>
                           ))}
@@ -510,7 +582,7 @@ export function WalletPanel({
                 <Limits key={wallet.limits.dailyLoss} wallet={wallet} player={player} token={token} onChange={refresh} />
 
                 <footer className="wl-foot tl-num">
-                  Granted {fmtPts(wallet.totals.granted)} · staked {fmtPts(wallet.totals.staked)} · returned {fmtPts(wallet.totals.returned)} ·
+                  Granted {fmtW(wallet.totals.granted)} · staked {fmtW(wallet.totals.staked)} · returned {fmtW(wallet.totals.returned)} ·
                   account {wallet.player.kycStatus}
                 </footer>
               </>
