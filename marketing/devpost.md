@@ -156,7 +156,7 @@ everything after 17:00 is out of sample.
   54 markets after 00:55 that no earlier analysis saw it is slightly worse than the old loop (+0.0008 ± 0.0018).
 - **Nobody has proven skill.** A permutation test re-ran the whole loop 200 times on shuffled outcomes. Of the 10
   trader-series with five or more settled views, about 0.5 would look skilled at p < 0.05 by chance. 2 did (Tube
-  Crowd on City Pulse, Runway72 on Heathrow), and none survives Bonferroni or Benjamini–Hochberg. The loop's own
+  Sigma on City Pulse, Runway72 on Heathrow), and none survives Bonferroni or Benjamini–Hochberg. The loop's own
   verdict agrees: no trader ends with P(skill > 0) above 0.95.
 - **One open leak.** As the city empties in the late evening, copying Tube Sigma on City Pulse still makes +42% (95% CI
   +23% to +61%, n = 82, 17:00–00:05), because in the evening the city moved 1.6× the usual curve and one afternoon can't teach the model that. TOPS shaves the pick's

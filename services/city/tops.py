@@ -234,8 +234,8 @@ def tilted(probs: dict[str, float], tilt: dict[str, float] | None) -> dict[str, 
 
 
 def picks(m, store, now: int, sim: dict | None, fresh) -> dict[str, tuple]:
-    """Each trader's stance on a market at open, before it is listed: ('probs', {option: p}) for the Simulation
-    trader, ('pick', option) for the rest; the same rules and freshness checks the AI bets use (exchange.ai_bets)."""
+    """Each trader's stance on a market at open, before it is listed: ('probs', {option: p}) for Simaissance
+    (the simulation trader), ('pick', option) for the rest; the same rules and freshness checks the AI bets use (exchange.ai_bets)."""
     import traders  # traders imports markets, which imports this module
 
     out: dict[str, tuple] = {}
