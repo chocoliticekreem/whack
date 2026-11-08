@@ -299,7 +299,8 @@ the live LMSR exchange is untouched and a restart starts it clean.
 ```bash
 python3 services/city/venue_server.py                                    # live, beside server.py
 python3 services/city/venue_server.py --replay-from 2026-11-07T15:00:00Z  # replay at 12x
-python3 -m unittest services/city/test_venue.py
+python3 -m unittest discover -s services/city -p test_venue.py
+python3 services/city/venue_demo.py      # walkthrough + pass/fail health report (generated data; --replay-from for recorded)
 ```
 
 Env: `CITY_VENUE_PORT` (8052), `CITY_VENUE_HOST` (127.0.0.1), plus `CITY_RAW` and `MULTIVERSE_URL` as above.
@@ -311,10 +312,10 @@ price, qty, tif, postOnly}`, `POST /cancel {account, order}`.
 |---|---|---|
 | Contracts | `venue.py` | A two-way market is one contract (YES = its first option); a race or ladder is one contract per option. A YES pays 100 points if it happens |
 | Order book | `venue_book.py` | One book per contract: a NO bid at 40 is a YES offer at 60. Price-time priority, trades at the resting price, post-only and immediate-or-cancel orders, self-trade prevention by firm |
-| Gateway | `venue_gateway.py` | The one path for every order, human or AI: the series' speed bump from `integrity.py` (AI also carries 300 ms of latency), cancels never delayed, 1 s minimum rest, a 25-point price collar on orders that can trade on arrival, the 25% / 10% position limit, per-tick message budgets |
+| Gateway | `venue_gateway.py` | The one path for every order, human or AI: the series' speed bump from `integrity.py` on any order that can take liquidity (post-only quotes skip it, as on TSX Alpha; AI also carries 300 ms of latency), cancels never delayed, 1 s minimum rest, a 25-point price collar on orders that can trade on arrival, the 25% / 10% position limit on net risk (closing a position is always allowed), per-tick message budgets |
 | Money | `venue_ledger.py` | Double-entry in whole points; full collateral (a matched pair puts exactly 100 in the pool); Kalshi's taker fee ceil(0.07·C·P·(1−P)), makers free; a YES+NO pair is paid 100 at once; void returns the pool pro rata to cost and refunds fees; `audit()` rechecks every invariant |
 | Lifecycle | `venue.py` | A shadow copy of the live exchange lists, observes and settles the markets. Halts and suspensions cancel every order; close stops trading; settlement pays 100 per winning contract |
-| Market makers | `venue_agents.py` | Two-sided post-only quotes around the forecast, inventory skew, fair value moved by fills, wider before close and on forecast jumps, inventory limits. Obligations: spread ≤ 6, size ≥ 10, 90% uptime after a 10 s grace; those that meet them share 25% of the contract's taker fees |
+| Market makers | `venue_agents.py` | Two-sided post-only quotes around the forecast, inventory skew, fair value moved by fills, wider before close and on forecast jumps, inventory limits. Designated market makers never quote wider than the obligation's 6 points; obligations: spread ≤ 6, size ≥ 10, 90% uptime after a 10 s grace, and those that meet them share 25% of the contract's taker fees |
 | Hedge funds | `venue_agents.py` | Tier 1 platforms run every rule as pods; tier 2 and 3 run one. Each blends its rule's measured hit rate with the forecast, trades only when the edge beats price + fee + a margin, sizes with fractional Kelly on its own equity, and is wound down at half its capital; its tier's investors relaunch a fund when they can |
 | Retail | `venue_agents.py` | Random arrivals with documented biases (long shots, favourites, herding, momentum, home hub, none) and small immediate-or-cancel orders |
 

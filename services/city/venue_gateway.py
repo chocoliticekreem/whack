@@ -1,9 +1,12 @@
 """The order gateway: the only way an order reaches a book on the parallel exchange venue, for a human and for every
 AI account alike. Same checks, same speed bump, same fees, same limits.
 
-- New orders are checked, their collateral is reserved, and they wait the series' speed bump (integrity.py: 45 s on
-  locally observable series, 2-5 s elsewhere) before they reach the book. AI accounts also carry a network latency
-  equal to a typical human's round trip, so being on the same machine as the exchange is no advantage.
+- New orders are checked, their collateral is reserved, and any order that can take liquidity waits the series'
+  speed bump (integrity.py: 45 s on locally observable series, 2-5 s elsewhere) before it reaches the book. Post-only
+  orders, which can only rest, skip it: an asymmetric speed bump, as on TSX Alpha, so the people who see the news
+  first still can't hit a stale price, while liquidity can be replaced at once. The rule is the same for everyone. AI
+  accounts also carry a network latency equal to a typical human's round trip, so being on the same machine as the
+  exchange is no advantage.
 - Orders released in the same tick go to the book in arrival order; exact ties are shuffled.
 - Cancels are never delayed, so a market maker can always pull a stale quote. A resting order can't be cancelled in
   its first second (no flashing quotes); system cancels (halts, close, void) ignore that.
@@ -93,7 +96,8 @@ class Gateway:
             return order
         self.orders[order.id] = order
         self.pending.append(order)
-        self.release_at[order.id] = now + self.v.delay_ms(contract) + acct.latency_ms
+        bump = 0 if order.post_only else self.v.delay_ms(contract)
+        self.release_at[order.id] = now + bump + acct.latency_ms
         return order
 
     def _check(self, acct: Account | None, order: Order, price, qty, now: int) -> str | None:
@@ -120,9 +124,14 @@ class Gateway:
             if (order.side == "yes" and reach > ref + COLLAR) or (order.side == "no" and reach < ref - COLLAR):
                 return f"outside the price collar: the reference is {ref}, at most {COLLAR} points away"
         cap = int(self.v.cap_pct(order.contract) * self.v.clearing.equity_at_cost(acct.id))
-        exposure = self.v.clearing.exposure(acct.id, order.contract)
-        exposure += sum(o.price * o.left for o in self.open_for(acct.id, order.contract))
-        if exposure + price * qty > cap:
+        mine = self.open_for(acct.id, order.contract)
+        exposure = self.v.clearing.exposure(acct.id, order.contract) + sum(o.price * o.left for o in mine)
+        # The limit is on net risk: contracts this order would pair off against what the account holds (selling)
+        # add nothing, so a holder can always close out.
+        yes_held, no_held = self.v.clearing.holding(acct.id, order.contract)
+        closing = (no_held if order.side == "yes" else yes_held) - sum(o.left for o in mine if o.side == order.side)
+        added = price * (qty - max(0, min(qty, closing)))
+        if added and exposure + added > cap:
             return f"position limit: at most {cap} points at risk on this contract ({exposure} already)"
         return None
 

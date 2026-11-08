@@ -298,19 +298,23 @@ class Venue:
                   if o.account == account and o.status in ("pending", "open")]
         return {"account": account, "cash": cl.cash(account), "held": cl.held(account),
                 "equityAtCost": cl.equity_at_cost(account), "realised": cl.realised.get(account, 0),
+                "feesPaid": cl.fees_paid.get(account, 0), "pnl": cl.pnl(account),
                 "positions": rows, "orders": orders}
 
     def stats(self) -> dict:
         cl = self.clearing
         groups: dict[str, dict] = {}
         for a in self.accounts.values():
-            g = groups.setdefault(a.label(), {"accounts": 0, "granted": 0, "equityAtCost": 0, "realised": 0})
+            g = groups.setdefault(a.label(), {"accounts": 0, "granted": 0, "equityAtCost": 0, "realised": 0,
+                                              "feesPaid": 0, "pnl": 0})
             g["accounts"] += 1
             g["granted"] += cl.granted.get(a.id, 0)
             g["equityAtCost"] += cl.equity_at_cost(a.id)
             g["realised"] += cl.realised.get(a.id, 0)
+            g["feesPaid"] += cl.fees_paid.get(a.id, 0)
+            g["pnl"] += cl.pnl(a.id)
         for g in groups.values():
-            g["roiOnGranted"] = round(g["realised"] / g["granted"], 4) if g["granted"] else None
+            g["roiOnGranted"] = round(g["pnl"] / g["granted"], 4) if g["granted"] else None
         uptime = {}
         for agent in self.agents:
             if getattr(agent, "kind", "") != "mm":

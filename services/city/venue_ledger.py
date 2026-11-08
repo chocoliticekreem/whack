@@ -75,7 +75,8 @@ class Clearing:
         self.fees_by_contract: dict[str, int] = defaultdict(int)
         self.maker_volume: dict[tuple[str, str], int] = defaultdict(int)  # (account, contract) -> contracts made
         self.granted: dict[str, int] = defaultdict(int)
-        self.realised: dict[str, int] = defaultdict(int)  # account -> settled P&L in points
+        self.realised: dict[str, int] = defaultdict(int)  # account -> settled P&L in points, before fees
+        self.fees_paid: dict[str, int] = defaultdict(int)  # account -> taker fees paid, net of refunds
 
     def pos(self, account: str, contract: str) -> Position:
         mine = self.positions[account]
@@ -109,6 +110,10 @@ class Clearing:
     def exposure(self, account: str, contract: str) -> int:
         p = self.positions.get(account, {}).get(contract)
         return p.cost() if p else 0
+
+    def pnl(self, account: str) -> int:
+        """Settled P&L after taker fees (rebates are already in `realised`)."""
+        return self.realised.get(account, 0) - self.fees_paid.get(account, 0)
 
     def holding(self, account: str, contract: str) -> tuple[int, int]:
         p = self.positions.get(account, {}).get(contract)
@@ -165,6 +170,7 @@ class Clearing:
             self.ledger.move(f"held:{taker.account}", "fees", due, f"taker fee {taker.id}", f.at)
             taker.held -= due
             taker.fee_paid += due
+            self.fees_paid[taker.account] += due
             self.fees_by_contract[f.contract] += due
             self.pos(taker.account, f.contract).fees += due
         self.maker_volume[(f.maker.account, f.contract)] += f.qty
@@ -223,6 +229,7 @@ class Clearing:
             if pos and pos.fees:
                 self.ledger.move("fees", f"cash:{account}", pos.fees, f"refund fees {contract}", at)
                 self.fees_by_contract[contract] -= pos.fees
+                self.fees_paid[account] -= pos.fees
                 pos.fees = 0
 
     def pay_rebates(self, contract: str, rebate_to: dict[str, int], at: int) -> None:
