@@ -761,6 +761,9 @@ export function UnderTheHood({
                 Read the method
               </a>
             </p>
+            <a className="ow-uth-scenes" href="/multiverse/exchange">
+              View behind the scenes: the live order book, AI market makers and funds →
+            </a>
           </div>
         </>
       )}

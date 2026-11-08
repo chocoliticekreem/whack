@@ -3052,3 +3052,19 @@ button.ow-order:hover {
     flex: 1;
   }
 }
+
+/* "View behind the scenes": the Under the hood panel's link to the order-book exchange. */
+.ow-uth-scenes {
+  display: block;
+  padding: 10px var(--s4);
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--yes-ink);
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.ow-uth-scenes:hover {
+  background: var(--yes-soft);
+}
