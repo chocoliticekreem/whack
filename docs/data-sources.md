@@ -18,7 +18,7 @@ V = fetched today. R = reported in docs, not fetched.
 | Source | Endpoint | Refresh in code |
 |---|---|---|
 | TfL bus arrivals | `/StopPoint?lat,lon,…` → `/StopPoint/{id}/Arrivals` | 25 s |
-| TfL JamCams | `/Place/Type/JamCam` (889 cams, V); clips on `s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/{id}.mp4`, run through local YOLO (`services/yolo`) | clip ~1 min old, **overwritten in place** |
+| TfL JamCams | `/Place/Type/JamCam` (889 cams, V); clips on `s3-eu-west-1.amazonaws.com/jamcams.tfl.gov.uk/{id}.mp4`, run through local YOLO (Mirrorverse's `services/yolo`, run from outside this repo) | clip ~1 min old, **overwritten in place** |
 | TfL road disruptions | `/Road/all/Street/Disruption` (213 segments today, V) | 5 min |
 | TfL stations, line status, live crowding | `/StopPoint?stopTypes=…`, `/Line/Mode/{modes}/Status`, `/crowding/{naptan}/Live` | 1–3 min |
 | Police street crime | `data.police.uk/api/crimes-street/all-crime` | monthly, ~2 months behind (V) |
