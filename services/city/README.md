@@ -289,7 +289,7 @@ break. Undefended (no delay, no suspend), every bet fills at odds 4.05 and retur
 before the feed changes and still pays +305, so on clean_sheet the 10% cap bounds what a longer lead can take. Pending
 bets live in memory, so a restart forgets them (no points move).
 
-## Parallel exchange venue (:8052)
+## Parallel exchange venue (:8062)
 
 The Kalshi-style exchange in `docs/exchange-design.md`, running beside this server: no house, one order book per
 binary contract, and about 2,200 AI accounts (12 market makers, 184 hedge funds in three tiers, 2,000 retail) trading
@@ -303,7 +303,7 @@ python3 -m unittest discover -s services/city -p test_venue.py
 python3 services/city/venue_demo.py      # walkthrough + pass/fail health report (generated data; --replay-from for recorded)
 ```
 
-Env: `CITY_VENUE_PORT` (8052), `CITY_VENUE_HOST` (127.0.0.1), plus `CITY_RAW` and `MULTIVERSE_URL` as above.
+Env: `CITY_VENUE_PORT` (8062), `CITY_VENUE_HOST` (127.0.0.1), plus `CITY_RAW` and `MULTIVERSE_URL` as above.
 Flags: `--retail`, `--market-makers`, `--seed`. Endpoints: `GET /health /contracts /book?contract= /stats
 /leaderboard /positions?account=` (X-Player-Token), `POST /account/new {name}`, `POST /order {account, contract, side,
 price, qty, tif, postOnly}`, `POST /cancel {account, order}`.

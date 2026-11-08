@@ -1,7 +1,7 @@
 """The parallel exchange venue (docs/exchange-design.md): OverWatch's markets traded on order books by AI market makers,
 hedge funds and retail, and by players, with no house.
 
-It runs next to the live LMSR exchange and touches none of it: its own process (venue_server.py, :8052), its own
+It runs next to the live LMSR exchange and touches none of it: its own process (venue_server.py, :8062), its own
 throwaway ledger and order books, reading the same recorder files read-only. A shadow copy of the live exchange lists,
 observes and settles the same markets with the same futures, integrity rules and settlement sources; its LMSR book is
 never traded. Each market becomes Kalshi-style binary contracts: one for a two-way question (YES = its first option),

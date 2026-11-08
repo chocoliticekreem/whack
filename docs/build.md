@@ -33,15 +33,17 @@ round show "Betting closed · result about 00:00, when TfL publishes".
 | **Central-London sim** | 1,017 streets, 50 worlds, live forecasts, safe what-ifs; general event layer (no hardcoded venues) | `services/multiverse/` (#49, #54, #60) |
 | **Accuracy check** | Oxford Circus (`--windows 6`, 30 min to 23:38 UTC, 48 counts): MAE 1.37 vs persistence 1.35, 79% inside the 80% range; persistence wins on bus delay (0.65 vs 0.99 min). Central London: station MAE 3.94 vs persistence 3.61 (#60). Out-of-sample replay (17:00–00:05): hub_surge Brier 0.753 vs uniform 0.800 (t = 2.7, n=83) | `eval_real.py`, `analysis/judge/replay_score.py` |
 | **Pressure test** | Bots traded 75 min of live rounds on a scratch ledger: 0 voids, 0 fills after close, 120/120 reconciliations; bugs fixed in #81. Re-run for 65 min on code with #72 and #77: 30/30 crowding markets settled on TfL readings stamped after close, City Pulse opens 0.50–0.66, 0 frozen prices, 0 of 229 fills after close, house −177 (was −1,408). What it found is fixed in #86 and #87, except the City Pulse evening bias and the UI retry | `analysis/live_trading/` (#79, #84, #85) |
+| **Exchange venue (prototype)** | The Kalshi-style design in `docs/exchange-design.md`, built as a separate process beside the live exchange: one order book per binary contract, no house, 12 AI market makers quoting both sides, 184 hedge funds, 2,000 retail, Kalshi's taker fee (makers free), and the same speed bumps, position limits, halts and settlement sources. Books and ledger are in memory and it reads the recorder files read-only. Run: `python3 services/city/venue_server.py` (:8062; `CITY_VENUE_PORT` overrides), or `python3 services/city/venue_demo.py` for an offline walkthrough and health report. API only, no UI page. Demo on 25 recorded minutes (Sat 15:00 UTC): all 9 health checks pass, median quoted spread 4 points, designated market makers quoting 95–96% of the time, closing price no better calibrated than the forecast alone (Brier 0.1256 vs 0.1255, n=16). **The live site still runs the LMSR house.** Pricing against the LMSR is not yet compared | `services/city/venue*.py` (#67 design, #90, #94) |
 | **Docs** | Market structure today (#58), the exchange design target (#67), judge prep (#57, refreshed), steering log | `docs/`, `marketing/steering-log.md` |
 
-**Merged since the first MVP (#49–#87):** event layer (#49, #60), futures fan (#50), name and icon (#51, #52), central
+**Merged since the first MVP (#49–#87, plus the venue):** event layer (#49, #60), futures fan (#50), name and icon (#51, #52), central
 sim and Simulation trader (#54, #55), market structure (#58), courtsiding defences (#61), claim corrections (#63),
 portfolio (#65), scenario mode (#66), exchange design (#67), 3D map (#68), plain cards (#69, #73), stale-login fix
 (#70), click-anywhere markets (#71), judge fixes (#72), result times (#74), ticker (#75), pricing round 2 (#77),
 earnings and traders dropdowns and confetti (#78, #80), live pressure test (#79) and its fixes (#81), doc refresh
 (#82), phone landscape (#83), live re-run report (#84, #85), Heathrow and mid-round hub pricing and the AI stake cap
-(#86), midnight profile reload, rounds built off the lock and VIX in round one (#87).
+(#86), midnight profile reload, rounds built off the lock and VIX in round one (#87); the parallel exchange venue (#90)
+and the fixes its demo found: selling at the position limit, market-maker quote uptime, P&L after fees (#94).
 
 **In progress:** the UI makes a new idempotency key when it retries after a client timeout; the fix is on a branch,
 not merged.
@@ -70,11 +72,12 @@ not merged.
 scripts/run-data.sh &                                          # recorder + YOLO (:8047) + health (:8052); set YOLO_DIR
 MULTIVERSE_PORT=8349 python3 services/multiverse/server.py &   # Oxford Circus engine + London VIX
 python3 services/city/server.py &                              # city markets + wallet (:8051)
+python3 services/city/venue_server.py &                        # optional: exchange venue prototype (:8062), not on the site
 cd apps/stream && npx next dev -H 0.0.0.0 -p 3349                         # open /multiverse
 cloudflared tunnel --url http://localhost:8051                 # public backend; put the URL in Vercel CITY_URL
 ```
 Replay instead of live: `python3 services/city/server.py --replay-from 2026-11-07T14:00:00Z`. Tests:
-`python3 -m unittest discover -s services/city` (228), `-s services/multiverse` (132), `-s recorder` (16).
+`python3 -m unittest discover -s services/city` (295), `-s services/multiverse` (132), `-s recorder` (16).
 
 ## 1. Code reuse: approved
 - **The organisers confirmed (Sat 7 Nov) that we can build on Mirrorverse.** It's disclosed in

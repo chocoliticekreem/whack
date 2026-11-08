@@ -83,6 +83,10 @@ The "new world" in the brief is the one nobody can see yet: the London of five m
   sample. The VIX bootstraps today's own moves; clean sheet uses a per-line break hazard. Each reading reweights the
   futures by likelihood and rules out the worst, up to 30 of 50.
   An LMSR market maker (b = 1200, 5% fee) prices the result plus the bets.
+- **Exchange venue (prototype, not live):** the team also built the Kalshi-style exchange we designed as a separate
+  process beside the live one: an order book per contract with no house, 12 AI market makers quoting both sides, 184
+  hedge-fund and 2,000 retail agents, Kalshi's taker fee and the same integrity rules. On 25 minutes of recorded data
+  its books never crossed, the ledger audit stayed clean and the median spread was 4 points.
 - **Agent simulations (`services/multiverse`):** persona groups on the real OpenStreetMap street graph, with Dijkstra
   routing and pavement capacity, 50 worlds with **common random numbers**, so a difference between two worlds comes
   from their assumptions, not noise. One covers Oxford Circus and produces the London VIX. A central-London one
@@ -199,14 +203,14 @@ The technical challenges:
   built and saying what was wrong.
 
 ## What's next
-- **The second half of TOPS:** weight each trader's picks into the price by its track record, so the market learns
-  which data to trust.
+- **Let the TOPS loop earn its weight:** the loop is live (#93), but trust starts at 0 and only grows as traders prove
+  skill on settled markets. Next is running it for days, not hours, and reporting how much it moves prices.
 - **Close the remaining leak:** City Pulse in a falling evening, by fitting the evening decline on more than one
   day.
 - **Make the simulation earn a place in the price:** beat persistence on held-out days, then blend it back in.
-- **A real exchange:** a Kalshi-style order book with AI market makers and no house (designed in
-  `docs/exchange-design.md`, not built). The ledger is real-money grade; the order book, payments, ID checks,
-  anti-money-laundering checks and licensing are the work left.
+- **A real exchange:** move live trading from the LMSR house to the order-book venue, once a replay on recorded data
+  shows it prices at least as well. The venue is built as a prototype; that comparison isn't measured yet. The ledger
+  is real-money grade; payments, ID checks, anti-money-laundering checks and licensing are the work left.
 - **Prizes, hedging and data:** sponsored free-entry prizes; footfall and disruption cover for businesses; the London
   VIX and live probabilities as an alternative-data feed.
 - Then more cities. The engine needs a street graph and live public feeds.
