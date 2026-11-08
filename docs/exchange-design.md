@@ -26,6 +26,34 @@ described in [market-structure.md](market-structure.md). This doc is where that 
 own order books and in-memory ledger, so it can be compared with the LMSR without touching it. How to run it and
 what it measures are in [services/city/README.md](../services/city/README.md#parallel-exchange-venue-8062).
 
+## Two markets today, one tomorrow
+
+OverWatch runs **two markets on the same questions**, and this is deliberate for now:
+
+| | The game (`/multiverse`) | The Exchange (`/multiverse/exchange`) |
+|---|---|---|
+| Who sets the price | The house: an LMSR market maker over the 50 futures | The order book: whoever is bidding and offering |
+| Who is on the other side of your bet | The house | Another participant |
+| AI participants | **Seven AI traders** (one live feed each), betting against the house like players | **2,196 AI accounts**: 12 market makers, 184 hedge funds in three tiers, 2,000 retail |
+| Player money | The real-money-grade ledger (SQLite: balances, limits, PINs, history) | An in-memory ledger: a restart starts it clean |
+
+**Why only seven traders on the game.** The game's prices come from the house, not from trading, so there is no
+order book for thousands of agents to trade on. Their strategies are the seven traders' rules: on the Exchange the
+same rules run as hedge funds, with Kelly sizing and capital that follows results.
+
+**Why not one market yet.** Merging means moving the live money path onto the order book: the Exchange's ledger on
+disk, players' balances, limits and PINs onto it, the game's cards placing orders, and the wallet and portfolio
+pages showing positions and sells. That is about half a day of work in the live money path, and two things should
+come first:
+1. **Evidence on real London data.** The known-truth simulation shows the order book prices well (a closing price
+   about half as far from the truth as the forecast, `analysis/exchange/README.md`), but on 25 minutes of recorded
+   data before #113 it was no better calibrated than the forecast (n = 16). A longer real-data replay comes first.
+2. **Trading costs.** Exchange spreads run 4-11 points; the house charges a 5% fee. Players shouldn't pay more to
+   trade after the switch.
+
+**The plan:** once a real-data replay shows the order book pricing at least as well as the house at no higher cost,
+switch the game onto it in one reviewed PR, and retire the house.
+
 ## 1. The exchange
 
 | Rule | Design |
