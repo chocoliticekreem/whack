@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { CircleHelp, Flame, MoreHorizontal, Trophy, WalletIcon, Workflow, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CityMapGL, flyToHotspots, type Pop } from "./CityMapGL";
@@ -607,9 +608,9 @@ export function City() {
         </div>
         <div className="tl-bar-right">
           <HowItWorks />
-          <button type="button" className="tl-board-btn tl-whatif" aria-pressed={scenarioOpen} onClick={() => setScenarioOpen((o) => !o)}>
-            What if…
-          </button>
+          <Link href="/multiverse/exchange" className="tl-board-btn tl-exchange-btn">
+            Exchange
+          </Link>
           <button
             type="button"
             className="tl-health tl-wide"

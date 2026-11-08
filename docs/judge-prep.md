@@ -238,8 +238,9 @@ delay persistence wins (0.65 vs 0.99). The prices are honest about uncertainty, 
 - **Events:** after #60's fix (no more closing busy stations), on vs off is 3.94 vs 3.94: no gain, no harm.
 - **Live:** the Simulation trader is 8–30 and down to 78 points.
 
-So it's out of the price (`SIM_WEIGHT=0`). Its job today is scenario mode: "what if Regent Street closes?" runs on
-copies of the central sim and shows the odds it would imply (#66). That's a what-if, not a forecast claim.
+So it's out of the price (`SIM_WEIGHT=0`). Scenario mode ("what if Regent Street closes?", #66) is built but off the
+trading screen: a public what-if either repeats what the price already knows or hands every player a free edge against
+the house. Its use is planning (TfL, retailers, event operators), not betting.
 
 **Q4.3 The event layer: any skill?** *(weak, so say so)*
 No. Re-run on 12:06–23:42: line disruptions called busyness direction 4/15 against a no-event control (27%, base 47%);

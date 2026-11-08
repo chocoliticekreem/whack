@@ -3052,3 +3052,10 @@ button.ow-order:hover {
     flex: 1;
   }
 }
+
+.tl-exchange-btn {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink);
+  text-decoration: none;
+}
