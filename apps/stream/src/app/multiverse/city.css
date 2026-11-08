@@ -3075,3 +3075,117 @@ button.ow-order:hover {
   color: var(--ink);
   text-decoration: none;
 }
+
+/* "Your bets": always on the map's right edge once you've bet, so a bet never disappears into a menu. */
+.tl-mybets {
+  position: absolute;
+  z-index: 20;
+  top: calc(var(--bar-h) + var(--strip-h) + var(--s4) + env(safe-area-inset-top));
+  right: var(--s4);
+  width: 280px;
+  max-height: calc(100% - var(--bar-h) - var(--strip-h) - 2 * var(--s5));
+  overflow-y: auto;
+  padding: var(--s3);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-l);
+  box-shadow: var(--shadow-tag);
+}
+
+.tl-mybets h2 {
+  margin: 0 0 var(--s2);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.tl-mybets ol {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.tl-mybets button {
+  display: grid;
+  gap: 2px;
+  width: 100%;
+  padding: var(--s2);
+  text-align: left;
+  font: inherit;
+  color: inherit;
+  background: var(--surface-2);
+  border: 0;
+  border-radius: var(--r);
+  cursor: pointer;
+}
+
+.tl-mybets button:hover {
+  background: var(--line);
+}
+
+.tl-mybets li[data-won] button {
+  background: var(--yes-soft);
+  animation: tl-mybets-win 1.2s ease;
+}
+
+.tl-mybets li[data-lost] button {
+  background: var(--no-soft);
+}
+
+@keyframes tl-mybets-win {
+  0% {
+    box-shadow: 0 0 0 0 var(--yes);
+  }
+  100% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+}
+
+.tl-mybets-q {
+  overflow: hidden;
+  font-size: 12px;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tl-mybets-pick {
+  font-size: 13px;
+}
+
+.tl-mybets-state {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.tl-mybets-state[data-tone="up"] {
+  color: var(--yes-ink);
+}
+
+.tl-mybets-state[data-tone="down"] {
+  color: var(--no-ink);
+}
+
+.tl-mybets-state[data-tone="wait"] {
+  color: var(--warn);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tl-mybets li[data-won] button {
+    animation: none;
+  }
+}
+
+@media (max-width: 720px), (orientation: landscape) and (max-height: 500px) {
+  .tl-mybets {
+    display: none;
+  }
+}
+
+.tl-toast[data-small] .tl-toast-big {
+  font-size: 18px;
+  white-space: nowrap;
+}

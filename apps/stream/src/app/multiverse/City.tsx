@@ -27,7 +27,8 @@ import { LocalMarket } from "./LocalMarket";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
 import { EarningsMenu, TradersMenu, UnderTheHood } from "./Menus";
 import { cancelNote, usePendingFills, type Fill } from "./pending-bets";
-import { plainTitle, recordText } from "./plain";
+import { plainLabel, plainTitle, recordText } from "./plain";
+import { MyBets } from "./MyBets";
 import { Scenario, type WhatIfOdds } from "./Scenario";
 import { WalletPanel, createPlayer, setNickname, useServerWallet, useStakeConfirm, type Recovered } from "./Wallet";
 import { Welcome } from "./Welcome";
@@ -145,7 +146,7 @@ export function City() {
   const [scenarioOpen, setScenarioOpen] = useState(false);
   const [whatIf, setWhatIf] = useState<Record<string, WhatIfOdds> | null>(null);
   const [tip, setTip] = useState<TipTarget | null>(null);
-  const [toast, setToast] = useState<{ key: number; text: string; sub: string; good: boolean } | null>(null);
+  const [toast, setToast] = useState<{ key: number; text: string; sub: string; good: boolean; small?: boolean } | null>(null);
   const [pop, setPop] = useState<Pop | null>(null);
   const [glow, setGlow] = useState<string | null>(null);
   const [betError, setBetError] = useState<string | null>(null);
@@ -437,8 +438,14 @@ export function City() {
           setWallet((cur) => ({ ...cur, pinNudged: true }));
           window.setTimeout(() => setNudge(false), 12_000);
         }
+        const placed = (sub: string) => {
+          const key = Date.now();
+          setToast({ key, good: true, small: true, text: `${fmtW(amount)} on ${plainLabel(m, opt.id)}`, sub });
+          window.setTimeout(() => setToast((t) => (t?.key === key ? null : t)), 3500);
+        };
         if (r.data.status === "pending" && r.data.betId && r.data.fillsAt) {
           const pending = { betId: r.data.betId, fillsAt: r.data.fillsAt };
+          placed(`Bet placed · fills in ${Math.max(1, Math.ceil((r.data.fillsAt - Date.now()) / 1000))}s`);
           const bet: MyBet = { market: m.id, option: opt.id, label: opt.label, stake: amount, payout: 0, pending };
           setWallet((cur) => ({ ...cur, bets: { ...cur.bets, [m.id]: bet } }));
           setDraft(null);
@@ -456,6 +463,7 @@ export function City() {
           };
           setBook((b) => absorb(b, [updated]));
         }
+        placed(`Bet placed · to win ${fmtW(payout)}`);
         setWallet((cur) => ({
           ...cur,
           points: r.data.balance ?? cur.points - amount,
@@ -852,8 +860,10 @@ export function City() {
       />
       {stakeDialog}
 
+      {!scenarioOpen && <MyBets bets={wallet.bets} markets={book.markets} now={now} onOpen={openMarket} />}
+
       {toast && (
-        <div key={toast.key} className="tl-toast" role="status" data-good={toast.good || undefined} data-bad={toast.text.startsWith("−") || undefined}>
+        <div key={toast.key} className="tl-toast" role="status" data-small={toast.small || undefined} data-good={toast.good || undefined} data-bad={toast.text.startsWith("−") || undefined}>
           <span className="tl-toast-big tl-num">
             <CoinText text={toast.text} size={26} />
           </span>
