@@ -631,6 +631,14 @@ class Identity(LedgerCase):
                                 {"name": lg.default_name("bob"), "points": 1000, "kind": "human"}])
 
 
+class LeaderboardHidesTests(LedgerCase):
+    def test_test_accounts_never_reach_the_leaderboard(self):
+        self.bet(player="alice", stake=100)
+        self.bet(player="bob", stake=100)
+        self.L.set_nickname("bob", "test-lt-b-4580")
+        self.assertEqual([r["name"] for r in self.L.leaderboard()], [lg.default_name("alice")])
+
+
 class OddsFloor(unittest.TestCase):
     """A bet never pays more than the market maker's shares, so its value at the market price is never above 1."""
 

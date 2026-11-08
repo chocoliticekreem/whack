@@ -799,11 +799,14 @@ class Ledger:
 
     @_locked
     def leaderboard(self, limit: int = 50) -> list[dict]:
-        """Players who have bet, ranked by equity (cash + escrow) straight from the ledger."""
+        """Players who have bet, ranked by equity (cash + escrow) straight from the ledger. Test accounts (a nickname
+        starting "test-", as the live-trading harness in analysis/live_trading names them) stay in the ledger but are
+        never shown."""
         rows = self.db.execute(
             "SELECT p.id, p.nickname, (SELECT COALESCE(SUM(amount), 0) FROM entries e WHERE e.player = p.id "
             "AND e.account IN ('player_cash', 'player_escrow')) AS equity FROM players p "
-            "WHERE EXISTS (SELECT 1 FROM bets b WHERE b.player = p.id) ORDER BY equity DESC LIMIT ?", (limit,))
+            "WHERE EXISTS (SELECT 1 FROM bets b WHERE b.player = p.id) "
+            "AND COALESCE(p.nickname, '') NOT LIKE 'test-%' ORDER BY equity DESC LIMIT ?", (limit,))
         return [{"name": r["nickname"] or default_name(r["id"]), "points": int(r["equity"]), "kind": "human"}
                 for r in rows]
 
