@@ -216,13 +216,38 @@ function Chart({ points, model }: { points: Point[]; model: number }) {
   );
 }
 
-function Ticket({ c, account, holding, onDone }: { c: Contract; account: Account | null; holding: { yes: number; no: number }; onDone: (msg: string) => void }) {
+/** The venue's per-contract position limit (services/city/integrity.py): 10% of equity on clean sheet, which one
+ * person on a platform can see first, 25% everywhere else. */
+const capShare = (series: string) => (series === "clean_sheet" ? 0.1 : 0.25);
+
+/** The most contracts an order on `side` at `px` can be for: what it would pair off against the opposite holding
+ * (selling adds no risk), plus what fits under the limit after this contract's current risk. Mirrors
+ * venue_gateway.Gateway._check. */
+function maxContracts(c: Contract, side: "yes" | "no", px: number, mine: Positions | null): number {
+  if (!mine) return 0;
+  const pos = mine.positions.find((p) => p.contract === c.id) ?? { yes: 0, no: 0, cost: 0 };
+  const open = mine.orders.filter((o) => o.contract === c.id && (o.status === "pending" || o.status === "open"));
+  const atRisk = pos.cost + open.reduce((n, o) => n + o.price * (o.qty - o.filled), 0);
+  const closing = Math.max(0, (side === "yes" ? pos.no : pos.yes) - open.filter((o) => o.side === side).reduce((n, o) => n + o.qty - o.filled, 0));
+  const room = Math.floor(capShare(c.series) * mine.equityAtCost) - atRisk;
+  return Math.min(500, closing + Math.max(0, Math.floor(room / px)));
+}
+
+function Ticket({ c, account, mine, holding, onDone }: { c: Contract; account: Account | null; mine: Positions | null; holding: { yes: number; no: number }; onDone: (msg: string) => void }) {
   const [side, setSide] = useState<"yes" | "no">("yes");
-  const [qty, setQty] = useState(5);
+  // The quantity a player typed belongs to one contract and side; switching either starts from the default again.
+  const [typed, setTyped] = useState<{ key: string; n: number } | null>(null);
   const [limit, setLimit] = useState<number | "">("");
   const best = side === "yes" ? c.ask : c.bid == null ? null : 100 - c.bid;
   const px = limit === "" ? (best == null ? null : Math.min(99, best + 1)) : limit;
   const open = c.status === "open";
+  const max = px == null ? 0 : maxContracts(c, side, px, mine);
+  const key = `${c.id}|${side}`;
+  const qty = typed?.key === key ? typed.n : null;
+  const setQty = (v: number) => setTyped({ key, n: v });
+  // Start at 5 contracts or the most the limit allows, whichever is fewer; the player can change it.
+  const n = qty ?? Math.max(1, Math.min(5, max));
+  const over = n > max;
   const send = async (s: "yes" | "no", q: number, p: number | null, why: string) => {
     if (!account || p == null) return;
     const got = await call<Order & { error?: string }>("order", {
@@ -247,7 +272,12 @@ function Ticket({ c, account, holding, onDone }: { c: Contract; account: Account
       <div className="ex-fields">
         <label>
           Contracts
-          <input type="number" min={1} max={500} value={qty} onChange={(e) => setQty(Math.max(1, Math.min(500, Number(e.target.value) || 1)))} />
+          <input type="number" min={1} max={500} value={n} onChange={(e) => setQty(Math.max(1, Math.min(500, Number(e.target.value) || 1)))} />
+          {mine && px != null && (
+            <button type="button" className="ex-max tl-num" onClick={() => setQty(Math.max(1, max))}>
+              max {max}
+            </button>
+          )}
         </label>
         <label>
           Limit price
@@ -261,11 +291,17 @@ function Ticket({ c, account, holding, onDone }: { c: Contract; account: Account
           />
         </label>
       </div>
-      <p className="ex-note tl-num">
-        {px == null ? "Nobody is offering this side yet." : `Pays 100 if ${side === "yes" ? c.yes : c.no}. Costs up to ${fmtPts(px * qty)}, so you'd win up to ${fmtPts((100 - px) * qty)}.`}
+      <p className="ex-note tl-num" data-warn={over || undefined}>
+        {px == null
+          ? "Nobody is offering this side yet."
+          : over
+            ? max === 0
+              ? `You're at your limit on this contract: at most ${Math.round(capShare(c.series) * 100)}% of your points at risk on one contract.`
+              : `Over your limit: at most ${max} contracts at ${px} (${Math.round(capShare(c.series) * 100)}% of your points at risk on one contract).`
+            : `Pays 100 if ${side === "yes" ? c.yes : c.no}. Costs up to ${fmtPts(px * n)}, so you'd win up to ${fmtPts((100 - px) * n)}.`}
       </p>
-      <button type="button" className="ex-go" disabled={!account || !open || px == null} onClick={() => void send(side, qty, px, `Buy ${qty} ${side.toUpperCase()}`)}>
-        {!account ? "Opening your account…" : !open ? `Market ${c.status}` : `Buy ${qty} ${side.toUpperCase()} at up to ${price(px)}`}
+      <button type="button" className="ex-go" disabled={!account || !open || px == null || over} onClick={() => void send(side, n, px, `Buy ${n} ${side.toUpperCase()}`)}>
+        {!account ? "Opening your account…" : !open ? `Market ${c.status}` : over ? "Over your limit" : `Buy ${n} ${side.toUpperCase()} at up to ${price(px)}`}
       </button>
       {sellSide && (
         <button type="button" className="ex-sell" disabled={!open || sellPx == null} onClick={() => void send(sellSide, sellQty, sellPx, `Sell ${sellQty}`)}>
@@ -484,6 +520,7 @@ export function Exchange() {
               <Ticket
                 c={chosen}
                 account={account}
+                mine={mine}
                 holding={holding(chosen.id)}
                 onDone={(msg) => {
                   setStatus({ msg, at: Date.now() });

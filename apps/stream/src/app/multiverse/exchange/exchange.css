@@ -751,3 +751,24 @@
     font-size: 28px;
   }
 }
+
+.ex-fields label {
+  position: relative;
+}
+
+.ex-max {
+  position: absolute;
+  right: var(--s2);
+  bottom: 7px;
+  padding: 0 var(--s1);
+  font-size: 11px;
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-s);
+  cursor: pointer;
+}
+
+.ex-note[data-warn] {
+  color: var(--no-ink);
+}
