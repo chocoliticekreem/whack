@@ -142,26 +142,67 @@ illiquid, or else α is so large that b is fixed in practice. Fixed b gives 3.8 
 
 Price = LMSR(m, q), and m = `tops.tilted(Futures.probs())`. A reading moves m and leaves q, so the price moves with no
 trade. A quote is never stored: `Exchange.book` re-quotes inside the ledger transaction at fill time, and a pending
-bet (delay 2 to 45 s by series, `integrity.py`) fills at the price then.
+bet (delay 2 to 45 s by series, `integrity.py`) fills at the price then. On a series settled by a feed anyone can read
+at its source (TfL Crowding, adsb.lol), the bet also waits for the fill hold below.
 
 Adversarial tests against a local Exchange (`AdversaryTest`, hub_surge: 5 s delay, 10% suspend):
 - A stale quote can't be filled. A bet placed before a +4% reading fills at the post-reading odds, which are shorter.
 - In a sandwich, a bet placed just before a +15% move is cancelled by the suspension, and no points move.
-- **Known limit.** A reading the exchange ingests after the fill leaves the fill at the old price. The delay only
-  covers readings ingested within it, and TfL stamps a reading 228 to 423 s (p10 to p90) before the recorder polls it
-  (`crowd_latency.py`). A bot that reads TfL or adsb.lol directly and backs the option the next reading favours makes
-  (`analysis/judge/stale_edge.py`, 10-point bets at the stale quote vs the same pick after ingest, bootstrap 95% CI):
+- A bet placed after TfL publishes a reading but before we poll it waits past its delay, then fills at the price
+  our next poll made (+4%), or is cancelled when that poll trips the suspension (+15%). A poll from before the bet
+  does not release it. A bet with no new reading behind it fills at the next poll, within the 30 s stated.
 
-| Series | Bets | ROI at the stale quote | ROI after ingest |
-|---|---|---|---|
-| hub_surge | 118 | +129% [+81%, +176%] | +10% [−13%, +33%] |
-| city_pulse | 100 | +30% [+11%, +50%] | −2% [−16%, +13%] |
-| heathrow_stack | 133 | +33% [+12%, +57%] | −5% [−18%, +9%] |
-| hub_hour | 10 | +343% [+34%, +737%] | +148% [−9%, +322%] |
+**Ingest lag.** TfL stamps each crowding reading (`timeUtc`, every 5 min) but serves it later. Measured by polling
+`/crowding/{naptan}/Live` for three stations every 15 s for 25 min with the recorder's key
+(`analysis/judge/crowd_availability.py`, 2026-11-08 03:12-03:37 UTC, 300 polls, 14 new stamps, no errors), a
+reading first appears 105-135 s after its stamp at King's Cross, 120-150 s at Oxford Circus and 360-375 s at Bank:
+each station keeps its own lag, median 150 s. The recorder polled every 300 s, 423 s after the stamp at the median
+(`crowd_latency.py`). So for about 4.5 min of every 5 a bot reading TfL directly knew a reading the exchange had not
+priced, and the 5 s delay did not cover it. adsb.lol is live, so the radar window was the 60 s poll gap.
 
-This assumes TfL serves a reading from its own stamp, which is the worst case. The book can't fix this. The fix is to
-ingest within the delay: poll TfL Crowding about every 30 s, and set each crowding series' delay to at least the poll
-interval. The alternative is to hold a fill until the reading due before the bet was placed has been ingested.
+Replaying 2026-11-07 13:00 to 2026-11-08 03:00 through the real Exchange (`analysis/judge/stale_edge.py`, the bot backs
+the option the next reading lifts by 5%+, 10 points a bet, bootstrap 95% CI). "Worst case" assumes TfL serves a
+reading at its stamp. "Realistic" keeps the picks the bot could make with TfL serving each reading 150 s after its
+stamp (every reading of the market's stations public) and the bet in before our poll. The last two columns place
+those bets with `Exchange.bet` at the moment the reading is public, once without the fill hold (the old code) and
+once with it:
+
+| Series | Bets (all / filled) | Worst case | Realistic, quotes | Exchange, before the fix | Exchange, after the fix |
+|---|---|---|---|---|---|
+| hub_surge | 119 / 119 | +124% [+78%, +173%] | +124% [+78%, +173%] | +124% [+78%, +173%] | +8% [−14%, +33%] |
+| city_pulse | 101 / 97 | +26% [+8%, +45%] | +28% [+9%, +47%] | +28% [+9%, +47%] | −1% [−16%, +13%] |
+| heathrow_stack | 139 / 114 | +32% [+12%, +54%] | +33% [+9%, +59%] | +32% [+8%, +57%] | −7% [−22%, +8%] |
+| hub_hour | 11 / 8 | +341% [+52%, +690%] | +341% [+52%, +690%] | +248% [+11%, +551%] | +148% [−23%, +358%] |
+
+The worst case did not overstate it: TfL serves a reading 2-6 min after its stamp, and our 5-min poll landed a
+median 7 min after it, so nearly every pick was makeable. With the slowest station's 375 s lag for every station,
+hub_surge still made +120% [+72%, +172%] on 109 bets before the fix and +3% [−18%, +28%] after. Fewer bets fill
+where the bot had no time to bet before our poll or the market was halted. hub_hour's +148% after the fix is not a
+stale quote: it is the same pick at the quote after ingest (+154% on all 11), so it is the model's error on that
+series, over 11 bets.
+
+**The fix.** Two parts, and the first closes the window by construction:
+- *Fill hold* (`Rule.waits_for`, `Integrity.due`). A pending bet on hub_surge, hub_hour, city_pulse and
+  local_station fills only once the store holds a crowding poll taken at or after the bet was placed. heathrow_stack
+  waits the same way for a radar poll. A tick reads new data, runs the suspension scan and moves the futures before
+  it fills anything, so whatever the bettor saw at TfL is in the price the bet fills at, or the move has cancelled
+  it. AI traders' bets wait the same way. The player sees "Bets fill after our next TfL crowding check (every
+  30 s)" (`fillsAfter` in each market's `integrity`).
+- *30 s crowding polls* (`recorder/record.py`). The hold alone would make a bet wait up to 5 min. At 30 s a bet
+  fills within about 30 s, for 40 TfL calls a minute of the key's 300 cap (the recorder used about 10). A
+  repeated poll is a heartbeat: the store keeps it for the hold and the feed's age, but adds no reading
+  (`Store.repeats`). Because TfL publishes station by station, a 30 s poll often moves only a few stations.
+  A market skips a poll that moved none of its own stations (`markets.nothing_new`), a station's fit skips polls
+  that repeat its value (`crowd_series`), and the jump check measures a station's move over TfL's own gap between
+  its stamps, not ours. Without these the futures would count an unchanged reading many times.
+
+After the fix the bot's ROI is the "after ingest" column: what the model's own error leaves, not a stale quote. The
+replay runs on the 5-min data recorded so far; re-run it once the recorder has logged a day of 30 s polls.
+
+Residual: city_pulse reads all 20 stations, so a TfL publish spread over a few polls moves it a few times instead of
+once. Its suspension trigger (3% in one reading) then sees the move in parts. The hold, not the trigger, now keeps
+those fills honest. clean_sheet and the JamCam series also read public feeds polled every 60 s; their 45 s delay
+covers a locally observable event, not a 60 s poll, and they have no hold yet.
 
 ## 4. Invariants and their tests (`test_pricing_props.py`, fixed seeds, 2,000 cases each)
 
@@ -179,7 +220,8 @@ interval. The alternative is to hold a fill until the reading due before the bet
 | Each book reset grants a fresh bound | `test_each_book_reset_grants_a_fresh_loss_bound` |
 | Exact hub_hour / Poisson / exponential probabilities match simulation | `ExactProbabilityTest` |
 | Same market id gives the same futures; heathrow's open is independent of the seed | `SeedTest` |
-| Stale quote, sandwich, ingest-lag limit | `AdversaryTest` |
+| Stale quote, sandwich, ingest-lag attack held to the next poll | `AdversaryTest` |
+| 30 s polls: repeats are heartbeats; per-market skip; jump gap in TfL time | `ThirtySecondPollTest` |
 
 There is no sell, so there is no buy-then-sell round trip. Its equivalent is the bundle test. Mutating the fee to 0,
 or overpaying shares by 2%, fails 3 of the LMSR tests.
@@ -199,4 +241,4 @@ or overpaying shares by 2%, fails 3 of the LMSR tests.
   suspension still covers it in steady state. On a cold start, the scan's first baseline is the newest reading.
 - AI bets settle at `round(stake × odds)`, which can exceed the shares by up to 0.5 point. They are outside the house
   account and the exposure cap.
-- Latency is the main open risk (section 3).
+- Latency: the fill hold closes the ingest-lag window (section 3); clean_sheet and the JamCam series have no hold.

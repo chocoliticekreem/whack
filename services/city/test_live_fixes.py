@@ -179,6 +179,8 @@ class DoomedPendingTest(PendingDeskCase):
     def test_an_earlier_bet_keeps_its_place_ahead_of_a_later_faster_one(self):
         pulse = self.bet("city_pulse", "over", 200, T0)            # 5 s delay: fills at T0 + 5 s
         stack = self.bet("heathrow_stack", "over", 40, T0 + 1_000)  # 2 s delay: fills first, at T0 + 3 s
+        self.raw.repoll("aircraft", T0 + 2_000)  # each waits for a poll of its feed after it was placed
+        self.raw.repoll("crowding", T0 + 4_000)
         self.L.set_limit("p", 220)
         self.ex.tick(T0 + 3_000)
         self.assertEqual(self.order(stack)["status"], "cancelled")

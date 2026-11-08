@@ -490,7 +490,7 @@ class Recorder:
             ("bus", self.poll_bus, 60), ("tube", self.poll_tube, 60),
             ("line_status", self.poll_line_status, 60), ("road_status", self.poll_road_status, 60),
             ("disruptions", self.poll_disruptions, 300), ("bikepoint", self.poll_bikepoint, 120),
-            ("crowding", self.poll_crowding, 300), ("jamcams", self.poll_jamcams, 60),
+            ("crowding", self.poll_crowding, 30), ("jamcams", self.poll_jamcams, 60),
             ("aircraft", self.poll_aircraft, 60), ("grid", self.poll_grid, 300),
             ("rain_now", self.poll_rain_now, 300), ("news", self.poll_news, 300),
             ("wiki_views", self.poll_wiki_views, 6 * 3600), ("wiki_edits", self.stream_wiki_edits, None),

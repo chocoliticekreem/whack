@@ -1,9 +1,12 @@
 """Integrity against courtsiding (latency arbitrage): someone on the spot (a train that has just stopped) sees the
 outcome before the TfL feed that settles the market publishes it, and bets while the market is still open.
 
-Three defences, one table (TABLE, keyed by series):
+Four defences, one table (TABLE, keyed by series):
 - delay_s: a bet is accepted as pending and fills delay_s later at the price then. If the market halts, closes or
   is suspended in between, the bet is cancelled; no escrow is ever held for a pending bet, so a cancel moves nothing.
+- waits_for: a feed anyone can read at its source (TfL Crowding, adsb.lol). The bet also waits until we have polled
+  that feed after it was placed, so it fills at a price built on data at least as fresh as anything the bettor could
+  have seen. Without it, a bot reading TfL between TfL's publish and our poll bet at the old price.
 - suspends_on: when a feed the market depends on publishes a changed value past a threshold, the market halts for
   cool_off_s, pending bets are cancelled and the price restarts from the futures (the LMSR book is reset).
 - cap_pct: the per-player position cap, lower on locally observable series.
@@ -40,6 +43,11 @@ class Rule:
     suspends_on: tuple[Trigger, ...]
     cool_off_s: int
     cap_pct: float
+    waits_for: str | None = None
+
+
+# (what players call the check, seconds between our polls); keep in step with the recorder (recorder/record.py).
+CHECKS = {"crowding": ("TfL crowding check", 30), "aircraft": ("Heathrow radar check", 60)}
 
 
 def hub_moved(m, prev: dict, snap: dict) -> str | None:
@@ -81,15 +89,16 @@ LINES = Trigger("line_status", "any Tube line's status changes", line_changed)
 LOCAL = Rule(45, (LINES,), 20, 0.10)       # one person on a platform can see it first
 AGGREGATE = Rule(5, (HUBS,), 15, 0.25)     # many stations; nobody sees the whole number early
 MODEL = Rule(2, (), 10, 0.25)              # a model output or a radar count: no one sees it before the feed
+CROWD = replace(AGGREGATE, waits_for="crowding")
 TABLE: dict[str, Rule] = {
     "clean_sheet": LOCAL,
-    "hub_surge": AGGREGATE,
-    "hub_hour": AGGREGATE,
-    "city_pulse": replace(AGGREGATE, suspends_on=(PULSE,)),
+    "hub_surge": CROWD,
+    "hub_hour": CROWD,
+    "city_pulse": replace(CROWD, suspends_on=(PULSE,)),
     "london_vix": replace(MODEL, suspends_on=(VIX,)),
-    "heathrow_stack": replace(MODEL, suspends_on=(STACK,)),
+    "heathrow_stack": replace(MODEL, suspends_on=(STACK,), waits_for="aircraft"),
 }
-BY_FEED = {"line_status": LOCAL, "crowding": AGGREGATE}
+BY_FEED = {"line_status": LOCAL, "crowding": CROWD}
 
 
 def rule_for(series: str) -> Rule:
@@ -100,16 +109,26 @@ def rule_for(series: str) -> Rule:
     return BY_FEED.get(feed, MODEL)
 
 
+def fills_after(r: Rule) -> str | None:
+    """When a bet that waits for a poll fills, in words: "our next TfL crowding check (every 30 s)"."""
+    if r.waits_for is None:
+        return None
+    what, every = CHECKS[r.waits_for]
+    return f"our next {what} (every {every} s)"
+
+
 def meta(series: str) -> dict:
     r = rule_for(series)
-    return {"delayS": r.delay_s, "suspendsOn": [t.says for t in r.suspends_on], "coolOffS": r.cool_off_s,
-            "capPct": round(r.cap_pct * 100)}
+    return {"delayS": r.delay_s, "fillsAfter": fills_after(r), "suspendsOn": [t.says for t in r.suspends_on],
+            "coolOffS": r.cool_off_s, "capPct": round(r.cap_pct * 100)}
 
 
 def plain(series: str) -> str:
     r = rule_for(series)
-    out = (f"Bets fill {r.delay_s} s after you place them, at the price then; if the market pauses or closes first "
-           f"the bet is cancelled and your stake is untouched.")
+    when = (f"after {fills_after(r)} and at least {r.delay_s} s after you place them" if r.waits_for
+            else f"{r.delay_s} s after you place them")
+    out = (f"Bets fill {when}, at the price then; if the market pauses or closes first the bet is cancelled and your "
+           f"stake is untouched.")
     if r.suspends_on:
         out += f" The market pauses for {r.cool_off_s} s whenever {' or '.join(t.says for t in r.suspends_on)}."
     return out + f" Max {r.cap_pct:.0%} of your balance in this market."
@@ -200,8 +219,15 @@ class Integrity:
         return o
 
     def accept_ai(self, tid: str, m, option: str, why: str, now: int) -> None:
-        self.ai.append({"trader": tid, "market": m.id, "option": option, "why": why,
+        self.ai.append({"trader": tid, "market": m.id, "option": option, "why": why, "placedAt": now,
                         "fillsAt": now + self.delay_ms(m.sub), "epoch": self.epoch.get(m.id, 0)})
+
+    @staticmethod
+    def due(store, m, o: dict, now: int) -> bool:
+        """Past its delay and, on a market that waits for a feed, polled after it was placed. The scan and the
+        futures run on a new poll before any fill in the same tick, so a move cancels the bet or re-prices it."""
+        feed = rule_for(m.sub).waits_for
+        return now >= o["fillsAt"] and (feed is None or store.polled_since(feed, o["placedAt"], now))
 
     def ai_pending(self, tid: str, market: str) -> int:
         return sum(1 for a in self.ai if a["trader"] == tid and a["market"] == market)
@@ -229,7 +255,7 @@ class Integrity:
                 why = ex.halt_reason(m, now) if status == "halted" else f"market {status}"
                 o.update(status="cancelled", reason=why or "market paused")
                 continue
-            if now < o["fillsAt"]:
+            if not self.due(ex.store, m, o, now):
                 continue
             try:
                 token = ex.ledger.confirm_token(o["player"], m.id, m.settles_at, o["option"], o["stake"]) \
@@ -243,7 +269,7 @@ class Integrity:
             m = ex.markets.get(a["market"])
             if ex.status(m, now) != "open" or self.epoch.get(m.id, 0) != a["epoch"]:
                 self.drop_ai(m)
-            elif now >= a["fillsAt"]:
+            elif self.due(ex.store, m, a, now):
                 self.ai.remove(a)
                 ex.ai_fill(m, a["trader"], a["option"], a["why"])
 

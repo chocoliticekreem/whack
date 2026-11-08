@@ -53,7 +53,7 @@ line each in `data/recorder.log`. A failed poll is logged and retried on the nex
 | `road_status` | `/Road/all/Status` | 60 s | id, displayName, severity, description, bounds |
 | `disruptions` | `/Road/all/Street/Disruption?startDate=today&endDate=tomorrow` | 5 min, **written only when the content changes** | full segments, `$type` stripped |
 | `bikepoint` | `/BikePoint` | 2 min | id, lat, lon, NbBikes, NbEBikes, NbEmptyDocks, modified |
-| `crowding` | `/crowding/{naptan}/Live` for 20 central stations | 5 min | naptan, name, dataAvailable, percentageOfBaseline, timeUtc |
+| `crowding` | `/crowding/{naptan}/Live` for 20 central stations | 30 s (40 TfL calls/min; TfL publishes each station every 5 min, a few minutes after its stamp, so a fast poll keeps the exchange as fresh as TfL. Needs `TFL_APP_KEY`: the keyless cap is 40/min) | naptan, name, dataAvailable, percentageOfBaseline, timeUtc |
 | `crowding_profile` | `/crowding/{naptan}` (typical 15-min profile per weekday) | once per UTC day | one record per station |
 | `jamcams` | `/Place/Type/JamCam` (list cached 1 h), filtered to lat 51.495–51.530, lon -0.175 to -0.100 (~85 cams); HEAD on each S3 clip | 90 s | id, name, lat, lon, view, imageUrl, videoUrl, lastModified, etag, contentLength, `yolo` {people, vehicles, at} with `--yolo` |
 

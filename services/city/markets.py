@@ -206,9 +206,15 @@ def bracket_options(labels: list[str], spot: dict) -> list[dict]:
 
 
 def crowd_series(store: Store, naptan: str, start: int, now: int) -> list[tuple[int, float]]:
-    """(ts, log vs usual) per reading: the usual-day curve is taken out, so a fit sees only the moves around it."""
-    return [(ts, math.log(s[naptan] / (store.usual(naptan, ts) or 1.0)))
-            for ts, s in store.between("crowding", start, now) if naptan in s]
+    """(ts, log vs usual) per reading of this station: the usual-day curve is taken out, so a fit sees only the moves
+    around it. A poll that repeats the station's previous value is not a new reading of it (TfL publishes station by
+    station), so it is left out rather than counted as a zero step."""
+    out, last = [], None
+    for ts, s in store.between("crowding", start, now):
+        if naptan in s and s[naptan] != last:
+            out.append((ts, math.log(s[naptan] / (store.usual(naptan, ts) or 1.0))))
+            last = s[naptan]
+    return out
 
 
 def crowd_station(store: Store, h: dict, snap: dict, now: int, ts0: int | None = None, t_end: int | None = None,
@@ -1003,8 +1009,11 @@ def try_settle(m: Market, store: Store, now: int):
 def observe(m: Market, store: Store, now: int) -> None:
     """Feed new readings of the market's feed (up to settlesAt) to its futures and its jump detector."""
     for ts, snap in store.between(m.feed, m.last_obs_ts + 1, min(now, m.settles_at)):
+        if nothing_new(m, snap):
+            m.last_obs_ts = ts
+            continue
         m.futures.observe(store.measured_at(ts) if m.feed == "crowding" else ts, snap)
-        jump = jump_of(m, ts, snap)
+        jump = jump_of(m, ts, snap, store)
         if jump:
             m.halt_reason, m.clean_ticks = jump, 0
         elif m.halt_reason and m.halt_reason.startswith("jump"):
@@ -1014,16 +1023,28 @@ def observe(m: Market, store: Store, now: int) -> None:
         m.last_obs_ts = ts
 
 
-def jump_of(m: Market, ts: int, snap: dict) -> str | None:
-    """A 3σ one-tick jump in any TfL Crowding station the market reads (spec 'stations' + 'sigmas')."""
+def nothing_new(m: Market, snap: dict) -> bool:
+    """A crowding poll that changed none of the stations this market reads (all of them for City Pulse). TfL publishes
+    station by station over a few minutes, so a 30 s poll often moves other stations only; observing it again would
+    count this market's unchanged readings twice."""
+    if m.feed != "crowding" or m.prev_obs is None:
+        return False
+    prev, naps = m.prev_obs["snap"], m.spec.get("stations", {}).values()
+    return all(prev.get(n) == snap.get(n) for n in naps) if naps else prev == snap
+
+
+def jump_of(m: Market, ts: int, snap: dict, store: Store | None = None) -> str | None:
+    """A 3σ one-tick jump in any TfL Crowding station the market reads (spec 'stations' + 'sigmas'). The gap is TfL's
+    own time between the two readings of that station when both are stamped, else the time between our polls."""
     prev, m.prev_obs = m.prev_obs, {"ts": ts, "snap": snap}
     if prev is None or m.feed != "crowding":
         return None
-    gap = max(1.0, (ts - prev["ts"]) / MIN_MS)
     for oid, nap in m.spec.get("stations", {}).items():
         a, b = prev["snap"].get(nap), snap.get(nap)
         sd = m.spec["sigmas"].get(nap)
         if a and b and sd:
+            sa, sb = (store.tfl_stamp(prev["ts"], nap), store.tfl_stamp(ts, nap)) if store else (None, None)
+            gap = max(1.0, ((sb - sa) if sa and sb and sb > sa else ts - prev["ts"]) / MIN_MS)
             z = (math.log(b) - math.log(a)) / (sd * math.sqrt(gap))
             if abs(z) > JUMP_SIGMA:
                 return f"jump: {m.spec['names'][oid]} {z:+.1f}σ"

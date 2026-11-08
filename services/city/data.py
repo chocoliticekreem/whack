@@ -305,6 +305,7 @@ class Store:
         self.profile_files: dict[Path, tuple[tuple[float, int] | None, dict[str, dict[str, dict[str, float]]]]] = {}
         self.sim_feed: SimFeed | None = None
         self.stamps: dict[int, dict[str, int]] = {}
+        self.polls: dict[str, list[int]] = {s: [] for s in SOURCES}
 
     def sim(self, now: int) -> dict | None:
         """The fresh central-London simulation forecast (live mode only), else None."""
@@ -318,6 +319,7 @@ class Store:
         return self.ctx.get("cam_names", {})
 
     def add(self, source: str, ts: int, snap: dict) -> None:
+        self.poll(source, ts)
         tss = self.ts[source]
         i = bisect.bisect_left(tss, ts)
         if i < len(tss) and tss[i] == ts:
@@ -325,6 +327,23 @@ class Store:
             return
         tss.insert(i, ts)
         self.snap[source].insert(i, snap)
+
+    def poll(self, source: str, ts: int) -> None:
+        """Note that we polled `source` at ts, whether or not the poll brought anything new."""
+        polls = self.polls[source]
+        i = bisect.bisect_left(polls, ts)
+        if i == len(polls) or polls[i] != ts:
+            polls.insert(i, ts)
+
+    def repeats(self, ts: int, snap: dict, stamps: dict[str, int]) -> bool:
+        """A crowding poll that returned exactly the readings of the poll before it (same values, same TfL stamps).
+        Crowding is polled every 30 s and TfL publishes every 5 min, so most polls repeat; adding them would feed the
+        same reading to the futures again and again."""
+        i = bisect.bisect_left(self.ts["crowding"], ts)
+        if not stamps or i == 0:
+            return False
+        prev = self.ts["crowding"][i - 1]
+        return self.snap["crowding"][i - 1] == snap and self.stamps.get(prev) == stamps
 
     def refresh(self, start_ms: int, end_ms: int) -> None:
         for source in REDUCERS:
@@ -429,10 +448,17 @@ class Store:
         except (ValueError, KeyError, TypeError):
             return
         snap = REDUCERS[source](rec.get("payload"), self.ctx)
-        if snap is not None:
+        if snap is None:
+            return
+        if source != "crowding":
             self.add(source, ts, snap)
-            if source == "crowding":
-                self.stamps[ts] = crowding_stamps(rec.get("payload"))
+            return
+        stamps = crowding_stamps(rec.get("payload"))
+        if self.repeats(ts, snap, stamps):
+            self.poll(source, ts)
+            return
+        self.add(source, ts, snap)
+        self.stamps[ts] = stamps
 
     # ------------------------------------------------------------ queries (all capped at `now`)
 
@@ -455,8 +481,16 @@ class Store:
         return list(zip(tss[lo:hi], self.snap[source][lo:hi]))
 
     def age_s(self, source: str, now: int) -> float | None:
-        last = self.latest(source, now)
-        return (now - last[0]) / 1000 if last else None
+        """Seconds since we last polled `source`; a poll that repeated the reading before it still counts."""
+        i = bisect.bisect_right(self.polls[source], now)
+        return (now - self.polls[source][i - 1]) / 1000 if i else None
+
+    def polled_since(self, source: str, since: int, now: int) -> bool:
+        """Did we poll `source` at or after `since` (and by now)? Recorder timestamps are floored to the second, so a
+        poll stamped at or after `since` really started after it."""
+        polls = self.polls[source]
+        i = bisect.bisect_left(polls, since)
+        return i < len(polls) and polls[i] <= now
 
     def fresh(self, source: str, now: int) -> bool:
         age = self.age_s(source, now)

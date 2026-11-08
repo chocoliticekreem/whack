@@ -103,6 +103,13 @@ class Raw:
         with path.open("a") as f:
             f.write(json.dumps({"ts": iso(ts), "source": source, "payload": payload}) + "\n")
 
+    def repoll(self, source: str, ts: int) -> None:
+        """Another poll at ts that returns the newest payload recorded before it, as the recorder writes it."""
+        rows = [json.loads(line) for p in sorted((self.root / source).glob("*/*.ndjson"))
+                for line in p.read_text().splitlines()]
+        at = {data.feeds.parse_ts(r["ts"]): r["payload"] for r in rows}
+        self.put(source, ts, at[max(t for t in at if t < ts)])
+
     def profile(self, typical: dict | None = None) -> None:
         typical = typical or {}
         for h in SPOTS:
@@ -1135,9 +1142,14 @@ class CourtsidingTest(CityCase):
     def test_markets_carry_their_integrity_rules_in_plain_english(self):
         ex, m = self.opened()
         got = {j["series"]: j for j in ex.markets_json(CLEAN_OPEN)["markets"]}
-        self.assertEqual(got["clean_sheet"]["integrity"], {"delayS": 45, "suspendsOn": [
+        self.assertEqual(got["clean_sheet"]["integrity"], {"delayS": 45, "fillsAfter": None, "suspendsOn": [
             "any Tube line's status changes"], "coolOffS": 20, "capPct": 10})
         self.assertIn("Bets fill 45 s after you place them", got["clean_sheet"]["rule"])
+        self.assertEqual(got["hub_surge"]["integrity"]["fillsAfter"], "our next TfL crowding check (every 30 s)")
+        self.assertIn("Bets fill after our next TfL crowding check (every 30 s) and at least 5 s after you place them",
+                      got["hub_surge"]["rule"])
+        self.assertEqual(integrity.meta("heathrow_stack")["fillsAfter"], "our next Heathrow radar check (every 60 s)")
+        self.assertIsNone(integrity.meta("london_vix")["fillsAfter"])
         self.assertIn("pauses for 20 s whenever any Tube line's status changes", got["clean_sheet"]["rule"])
         self.assertEqual(got["hub_surge"]["integrity"]["delayS"], 5)
         self.assertEqual(got["heathrow_stack"]["integrity"]["delayS"], 2)
