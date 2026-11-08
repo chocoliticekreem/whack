@@ -9,8 +9,9 @@ const PAD_Y = 6;
 /** Why: past this index paths are hidden at phone width (city.css), so the fan stays legible at card width. */
 const PHONE_PATHS = 20;
 
-export function fmtValue(v: number, unit: string): string {
-  const n = String(Number(v.toFixed(Math.abs(v) < 10 ? 2 : 1)));
+/** Lines are exact (a City Pulse line can sit on a 0.25 step above 10, e.g. 23.75), so they keep 2 dp. */
+export function fmtValue(v: number, unit: string, digits = Math.abs(v) < 10 ? 2 : 1): string {
+  const n = String(Number(v.toFixed(digits)));
   return unit === "%" ? `${n}%` : unit === "pts" ? `${n} pts` : n;
 }
 
@@ -48,7 +49,7 @@ export function FuturesFan({ f, settled, overUnder }: { f: Futures; settled: boo
   const yOf = (v: number) => H - PAD_Y - ((v - lo) / (hi - lo)) * (H - 2 * PAD_Y);
   const d = (pts: [number, number][]) => pts.map(([t, v], i) => `${i ? "L" : "M"}${xOf(t).toFixed(1)},${yOf(v).toFixed(1)}`).join("");
   const end = real[real.length - 1];
-  const lineText = overUnder && f.lines.length === 1 ? ` · line ${fmtValue(f.lines[0], f.unit)}` : "";
+  const lineText = overUnder && f.lines.length === 1 ? ` · line ${fmtValue(f.lines[0], f.unit, 2)}` : "";
   const caption = settled
     ? `${f.ruledOut} of ${f.n} futures ruled out, here's what happened`
     : `${f.n} simulated futures · ${f.ruledOut} ruled out by live data`;

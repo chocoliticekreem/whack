@@ -273,15 +273,17 @@ if __name__ == "__main__":
 class PricingRound2Test(CityCase):
     """Out-of-sample pricing fixes: hub_surge's relative dynamics and City Pulse's line at the futures' median."""
 
-    def test_city_pulse_line_is_the_futures_median_at_settle_on_a_half_point(self):
+    def test_city_pulse_line_is_the_futures_median_at_settle_on_a_step_no_wider_than_their_spread(self):
         rising_profile(self.raw, T0 + 15 * MIN, 0.30, 0.45)
         crowd_history(self.raw, T0 + 3 * MIN, CITY)
         for now, settles in ((T0 + 3 * MIN, T0 + 5 * MIN), (T0 + 10 * MIN, T0 + 15 * MIN)):
             m = mk.build_city_pulse("city_pulse-x", self.raw.store(now), SPOTS, now, settles)
             finals = sorted(math.exp(p[-1]) for p in m.futures.sim.paths)
             median = (finals[24] + finals[25]) / 2
-            self.assertEqual((m.spec["line"] * 2) % 1, 0)
-            self.assertLessEqual(abs(m.spec["line"] - median), 0.5)
+            q1, _, q3 = statistics.quantiles(finals, n=4)
+            step = next((s for s in mk.PULSE_STEPS if s <= (q3 - q1) / mk.IQR_PER_SD), mk.PULSE_STEPS[-1])
+            self.assertAlmostEqual(m.spec["line"] / step, round(m.spec["line"] / step), places=9)
+            self.assertLessEqual(abs(m.spec["line"] - median), step / 2 + 1e-9)
             self.assertEqual(m.futures.sim.strike, m.spec["line"], "futures settle against the listed line")
             over = sum(f > m.spec["line"] for f in finals)
             self.assertLessEqual(abs(over - 25), 25 - 1, "never a lock either way")

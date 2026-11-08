@@ -3,11 +3,11 @@
     python3 analysis/judge/pulse_model.py <raw_dir> [start ISO] [split ISO] [end ISO] [seeds]
 
 Default window 2026-11-07T12:00Z / 18:00Z / 2026-11-08T00:00Z, 40 seeds. Every 5-min round is built with the live
-builder (markets.build_city_pulse: 50 futures, the line on .0/.5, the [3%, 97%] clamp) at its real open (settle - 6 min)
-and settled with markets.settle_city_pulse. A market's price depends on its 50 random futures (seeded by the market id)
-and the line rounding they feed, and one draw per market moved a model's out-of-sample Brier by ±0.02, as much as the
-models differ. So each round is priced under `seeds` ids (the live id first) and every score is the expected score over
-those draws; standard errors and bootstrap CIs are over markets.
+builder (markets.build_city_pulse: 50 futures, the line on the step their spread allows, the [3%, 97%] clamp) at its
+real open (settle - 6 min) and settled with markets.settle_city_pulse. A market's price depends on its 50 random
+futures (seeded by the market id) and the line rounding they feed, and one draw per market moved a model's
+out-of-sample Brier by ±0.02, as much as the models differ. So each round is priced under `seeds` ids (the live id
+first) and every score is the expected score over those draws; standard errors and bootstrap CIs are over markets.
 
 Candidates differ only in the walk's drift (pricing.fit_pulse, swapped in here) and, for the "2 h sigma" ones, its
 sigma; each falls back to the old walk exactly where the live code does (no usual profile at the open reading or 10 min

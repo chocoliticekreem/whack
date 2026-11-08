@@ -33,7 +33,7 @@ Live at https://overwatchcapital.vercel.app/multiverse. Points only, never real 
 - **hub_surge:** "Which of these 5 areas will see its crowd grow the most by HH:MM?" Oxford Circus, King's Cross,
   Piccadilly Circus, Waterloo, Bank, each against its usual Saturday.
 - **city_pulse:** "Will London's Tube get busier or quieter by HH:MM?" Average busyness across 20 TfL stations, line on
-  the half point nearest the futures' median, so it opens near 50/50.
+  the futures' median, on a step that fits their spread, so it opens near 50/50.
 - **london_vix:** "Will London get more unpredictable or calmer by HH:MM?" When the VIX is down, **heathrow_stack**
   (planes holding over Heathrow) stands in.
 - **Hourly:** hub_hour ("Which area has the busiest evening by 00:00?") and clean_sheet ("Will every Tube line keep

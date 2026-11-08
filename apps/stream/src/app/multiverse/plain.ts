@@ -13,6 +13,12 @@ interface Copy {
 
 const num = (v: number | null, digits: number) => (v == null ? null : v.toFixed(digits));
 
+/** A City Pulse line as the backend writes it (markets.line_label): 2.35, 2.5, 3.0; quiet nights get finer lines. */
+const lineText = (l: number) => {
+  const t = l.toFixed(2);
+  return t.endsWith("0") ? t.slice(0, -1) : t;
+};
+
 /** "3.68, up from 2.87": the settle value against the line the market opened at. */
 function move(v: number | null, line: number | null, digits: number): string {
   if (v == null) return "";
@@ -40,10 +46,10 @@ const COPY: Record<string, Copy> = {
       return `Will Tube activity finish above the expected level${line ? ` (${line})` : ""} by ${at}?`;
     },
     labels: { over: "Above", under: "Below" },
-    why: (v) => (v == null ? null : `TfL said ${num(v, 1)}`),
+    why: (v) => (v == null ? null : `TfL said ${num(v, 2)}`),
     story: (v, l, r) => {
       const over = r.winner === "over";
-      const vs = v == null || l == null ? "" : ` (busyness score ${num(v, 1)}, ${over ? "above" : "not above"} ${num(l, 1)})`;
+      const vs = v == null || l == null ? "" : ` (busyness score ${num(v, 2)}, ${over ? "above" : "not above"} ${lineText(l)})`;
       return `London's Tube got ${over ? "busier" : "quieter"}${vs}`;
     },
   },

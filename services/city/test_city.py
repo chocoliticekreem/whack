@@ -5,6 +5,7 @@ import dataclasses
 import json
 import math
 import random
+import statistics
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -372,13 +373,15 @@ class CityPulseTest(CityCase):
         self.store = self.raw.store(T0)
         self.m = mk.build_city_pulse("city_pulse-1505", self.store, SPOTS, T0, T0 + 5 * MIN)
 
-    def test_line_is_the_futures_median_at_settle_on_a_half_point(self):
+    def test_line_is_the_futures_median_at_settle_on_a_step_no_wider_than_their_spread(self):
         finals = sorted(math.exp(p[-1]) for p in self.m.futures.sim.paths)
         self.assertAlmostEqual(self.m.spec["open"], mk.pulse_of(self.store.latest("crowding", T0)[1]), places=2)
-        self.assertEqual((self.m.spec["line"] * 2) % 1, 0)
-        self.assertLessEqual(abs(self.m.spec["line"] - (finals[24] + finals[25]) / 2), 0.5)
+        q1, _, q3 = statistics.quantiles(finals, n=4)
+        step = next((s for s in mk.PULSE_STEPS if s <= (q3 - q1) / mk.IQR_PER_SD), mk.PULSE_STEPS[-1])
+        self.assertAlmostEqual(self.m.spec["line"] / step, round(self.m.spec["line"] / step), places=9)
+        self.assertLessEqual(abs(self.m.spec["line"] - (finals[24] + finals[25]) / 2), step / 2 + 1e-9)
         self.assertEqual(self.m.option_ids(), ["over", "under"])
-        self.assertIn(f"over or under {self.m.spec['line']:.1f}?", self.m.question)
+        self.assertIn(f"over or under {mk.line_label(self.m.spec['line'])}?", self.m.question)
         self.assertLessEqual(max(self.m.open_model.values()), 0.8)
 
     def test_exactly_on_the_line_is_under_and_too_few_stations_is_void(self):

@@ -38,7 +38,7 @@ the falling late evening).
 | Plane Spotter (fade the Heathrow stack) | after #86: 17:00–00:05 38/64, **−7.6% (CI −28% to +14%)**; 17:00–21:30 24/43, −12%; full day 32/64, −18%. Before #86: +66% (22/34, 17:00–21:30) and +47% (CI −1% to +122%, #86's baseline after 17:00) | `replay_score.py`, #86 |
 | Hub "top riser since open" at the first in-round TfL publish | after #86, 17:00–00:05: 36/78 at a mean price 0.46, **+6% (CI −25% to +42%)**, model Brier 0.723 → 0.649 (#86). Before: +76% (CI +31% to +129%). Full day 12:40–20:10, which includes the fit window: still 44/78, **+48% (CI +8% to +97%)** | `replay_score.py`, `analysis/judge/fit_crowd.py`, #86 |
 | Backing the open favourite | full day: hub_surge −9%, City Pulse −19%, Heathrow +5% (fee plus spread) | same |
-| City Pulse line | the half point (x.0 or x.5) nearest the futures' median at settle. Favourite opens in 30–70% in 86% of all full-day replay markets; live re-run, City Pulse opened at 0.50–0.66 (median 0.54), 0 of 13 above 0.85 | `markets.py`, `RERUN.md` |
+| City Pulse line | the futures' median at settle, on the coarsest of .5/.25/.1/.05/.01 no wider than the futures' spread (IQR/1.349). Replay 12:00–02:35, 175 rounds × 5 seeds: favourite ≤ 70% in 98% (was 87% on the fixed .0/.5), 0 of 875 above 0.85 (was 39), max 0.77 (was 0.97); daytime lines stay on .0/.5 (91–100%, 12:00–19:00). Live 03:20 on 8 Nov: line 2.5, 0 of 50 futures over, 3%/97%; rebuilt: line 2.3, 21 of 50, 42% | `markets.py`, `RERUN.md` |
 | Pruning cap | full day, 73 of 275 markets hit the 60% ruled-out cap; of the 24 with later readings, 0 stop learning (96 of 96 before #72, 42 of 102 before #86) | `replay_score.py` |
 | Favourite-longshot, full day | options priced under 10% won 10.0% (priced 7.7%, n=60); over 70%: n=2 only. No stable bias | same |
 | Settlement timing | station markets settle on the first reading **TfL stamped after betting closed** (#72), so a round takes about 14 min to settle; cards say "result about HH:MM, when TfL publishes" (#74). A value measured at or before close voids (#81). On the old poll-time rule, 2,779 of 2,779 station-rounds would have settled on a number stamped before the close | `markets.py`, `analysis/judge/crowd_latency.py` |
@@ -129,7 +129,8 @@ would fill below that floor is refused when you place it, not later.
 **Q2.1 Where do the probabilities come from?** *(ok)*
 Each market starts 50 futures from the last real reading, at TfL's own stamp:
 - **City Pulse:** a log random walk with sigma and drift fitted on today's changes, plus the usual-Saturday slope over
-  the horizon (#72). The line is the half point nearest the futures' median, so it opens near 50/50 (#77).
+  the horizon (#72). The line is the futures' median on a step that fits their spread (.0/.5 by day, as fine as
+  0.01 on a quiet night), so it opens near 50/50 (#77).
 - **hub_surge:** `RelativeRaceSim` (#77). Each hub follows its usual-day slope, reverts toward the five-hub average
   (κ = 0.0161/min, fitted 12:00–17:00), takes correlated shocks, and the shares are softened p ∝ share^0.5 (a Platt
   fit before 17:00). Since #86, the first TfL publish stamped after the open restarts every future from that reading,
@@ -160,7 +161,8 @@ thin (n=33 and n=7, 17:00–21:30). No stable bias on this sample. Structural li
 and the 3% clamp.
 
 **Q2.5 How are strikes chosen?** *(ok)*
-- City Pulse: the half point nearest the futures' median at settle (#77).
+- City Pulse: the futures' median at settle (#77), on the coarsest step in .5/.25/.1/.05/.01 no wider than their
+  spread, so a quiet night (futures spanning ~0.2) does not open at 3%/97%.
 - Heathrow: the half point next to the futures' median whose Over share is nearest 50% (#86). The VIX: its value at
   open.
 - Brackets are placed on the futures, none under 5%, and a bracket market whose favourite is over 85% isn't listed.
@@ -284,7 +286,8 @@ trader reads one feed and states a view at every open; each view is scored at se
 score, decayed with a half-life of 20 settled markets). Skill per trader per series is a Bayesian posterior with an
 empirical-Bayes prior (strength ≈ 23 markets: the traders barely differ beyond noise). Trust is proportional to
 P(skill > 0), with a 5% floor and a 40% cap. The opening price is (1 − λ)·futures + λ·(pooled views), where λ is
-learned from how much the pool improved log loss on past markets, shrunk n/(n+10) and capped at 0.3
+learned from how much the pool improved log loss on past markets, shrunk by its own significance (λ̂·(1 − 1/t²),
+positive-part James–Stein) and capped at 0.3
 (`services/city/tops.py`, `GET /tops`, `docs/traders-and-tops.md`). Walk-forward, paired, from an empty record
 (`analysis/judge/tops_replay.py`), log loss vs the futures prior:
 
@@ -297,8 +300,10 @@ learned from how much the pool improved log loss on past markets, shrunk n/(n+10
 Say it plainly: the loop is real and principled, but nobody has proven skill yet, so it moves prices very little.
 Permutation test (`analysis/judge/tops_permutation.py`, 200 reruns): of 10 trader-series about 0.5 would look
 skilled at p < 0.05 by chance; 2 do (Tube Crowd on City Pulse, Plane Spotter on Heathrow), and none survives
-Bonferroni or Benjamini–Hochberg. Known limit: λ counts markets, not how far the pool differed, so it can reach the
-cap after a handful of settles where the pool sits close to the futures (tiny price effect; documented, not tuned).
+Bonferroni or Benjamini–Hochberg. Known limit: λ is now shrunk by its evidence (t), not by a count of markets, so
+noise gives λ = 0 (hub_surge and hub_hour went 0.3 → 0 on the live ledger), but λ̂ = Σr/Σr² grows as the pool's
+moves shrink, so weak evidence can still reach the cap: City Pulse at 03:25 on 8 Nov had λ̂ = 1.93, t = 1.38 → 0.3.
+Tiny price effect there (median |pool − futures| 0.024, about 0.7 points at λ = 0.3); documented, not tuned.
 
 **Q6.2 How are traders scored and sized?** *(ok)*
 Points at locked odds. Each stake is quarter-Kelly on the LMSR: the stake that maximises expected log bankroll given
@@ -427,7 +432,7 @@ cooling-off design.
 | Weak spot (#57) | Fix | Evidence |
 |---|---|---|
 | Copying Tube Crowd beat the house by +32–48% | Usual-Saturday slope in the walks (#72); `RelativeRaceSim` for hubs and median City Pulse lines (#77) | Hubs fixed: −3% after 17:00. City Pulse is not: +42% after 17:00 (still open, below) |
-| City Pulse opened lopsided (favourite ~94% in the evening; 97% in the live test) | Line = half point nearest the futures' median (#77) | Live re-run: opens 0.50–0.66, median 0.54, 0 of 13 above 0.85 |
+| City Pulse opened lopsided (favourite ~94% in the evening; 97% in the live test; 97% again at 03:20 on 8 Nov, a quiet night) | Line = the futures' median (#77), on a step that fits their spread | Live re-run: opens 0.50–0.66, median 0.54, 0 of 13 above 0.85. Replay to 02:35: 0 of 875 above 0.85, max 0.77 |
 | Pruning froze 80% of markets | Weighted updating after the cap (#72) | Capped markets that stop learning, full-day replay: 96 → 42 (#72) → 0 of 24 (main after #86); live re-run: 0 frozen of 30 |
 | AI records reset on restart | `ai_records` in the ledger DB (#72) | Live: Tube Crowd 24–18 kept across tonight's restart |
 | Settlement on our poll time; TfL stamped every settling row before the close | Settle on the first reading TfL stamped after close (#72); `measuredAt` on the record, pre-close values void (#81); "result about HH:MM" on cards (#74) | Live re-run: 30/30 settled on readings stamped after close, none seen before close; 0 of 229 fills after close |
