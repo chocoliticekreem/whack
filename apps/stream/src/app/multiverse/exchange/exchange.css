@@ -343,6 +343,51 @@
   border: 1px solid var(--line-strong);
 }
 
+.ex-join {
+  display: inline-flex;
+  flex-direction: column;
+  align-items: flex-start;
+  padding: var(--s2) var(--s4);
+  color: var(--on-ink);
+  line-height: 1.2;
+  background: var(--yes);
+  border: 1px solid var(--yes-ink);
+  border-radius: var(--r);
+  box-shadow: 0 1px 3px rgba(0, 106, 71, 0.35);
+  cursor: pointer;
+  animation: ex-pulse 2.4s ease-in-out infinite;
+}
+
+.ex-join b {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.ex-join span {
+  font-size: 12px;
+  opacity: 0.9;
+}
+
+.ex-join:hover {
+  background: var(--yes-ink);
+}
+
+@keyframes ex-pulse {
+  0%,
+  100% {
+    box-shadow: 0 1px 3px rgba(0, 106, 71, 0.35);
+  }
+  50% {
+    box-shadow: 0 0 0 5px rgba(0, 134, 90, 0.18);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ex-join {
+    animation: none;
+  }
+}
+
 .ex-go:disabled,
 .ex-sell:disabled {
   opacity: 0.45;
