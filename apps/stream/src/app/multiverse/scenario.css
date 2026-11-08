@@ -421,3 +421,42 @@
     font-size: 11px;
   }
 }
+
+/* Phone turned sideways: the bar sits over the map, right of the market column, and scrolls if it runs long. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .sc {
+    top: calc(var(--bar-h) + var(--strip-h) + env(safe-area-inset-top) + var(--s2));
+    left: calc(var(--side-w) + env(safe-area-inset-left, 0px) + var(--s2));
+    right: calc(env(safe-area-inset-right, 0px) + var(--s2));
+    max-height: calc(100dvh - var(--bar-h) - var(--strip-h) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 2 * var(--s2));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: var(--s3);
+  }
+
+  .sc-row {
+    flex-direction: column;
+    gap: var(--s2);
+  }
+
+  .sc-lead {
+    font-size: 14px;
+  }
+
+  .sc-actions {
+    align-self: stretch;
+  }
+
+  .sc-actions button {
+    flex: 1;
+  }
+
+  .sc-chip {
+    padding: 5px var(--s3);
+    font-size: 12px;
+  }
+
+  .sc-small {
+    font-size: 11px;
+  }
+}

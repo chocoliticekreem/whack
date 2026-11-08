@@ -17,7 +17,7 @@ import {
 import type { BetResponse, CitySignals, Hotspot, LeaderRow, Market, MarketsResponse, SettleResponse, Trader } from "./city-types";
 import { CityStrip } from "./Clues";
 import { HowItWorks } from "./HowItWorks";
-import { Confetti, useDismiss } from "./Live";
+import { Confetti, isLandscapePhone, useDismiss } from "./Live";
 import { LocalMarket } from "./LocalMarket";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
 import { EarningsMenu, TradersMenu } from "./Menus";
@@ -54,9 +54,9 @@ async function call<T>(mock: boolean, path: string, body?: unknown, token?: stri
   return { ok: res.ok, status: res.status, data };
 }
 
-const isPhone = () => window.matchMedia("(max-width: 720px)").matches;
+const isPhone = () => window.matchMedia("(max-width: 720px)").matches || isLandscapePhone();
 
-/** A portrait phone cannot fit all of central London; frame the three hubs nearest the middle instead. */
+/** A phone cannot fit all of central London; frame the three hubs nearest the middle instead. */
 function core(hubs: Hotspot[]): Hotspot[] {
   if (hubs.length <= 3) return hubs;
   const lat = hubs.reduce((s, h) => s + h.lat, 0) / hubs.length;

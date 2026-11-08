@@ -509,3 +509,25 @@
     padding: 0 9px;
   }
 }
+
+/* Phone turned sideways: a right-hand panel the full short height, clear of the notch, scrolling inside. */
+@media (orientation: landscape) and (max-height: 500px) {
+  .wl-panel {
+    width: min(480px, 100%);
+    padding: calc(12px + env(safe-area-inset-top)) calc(16px + env(safe-area-inset-right, 0px))
+      calc(20px + env(safe-area-inset-bottom)) 16px;
+  }
+
+  .wl-big b {
+    font-size: 30px;
+  }
+
+  .wl-stats b {
+    font-size: 18px;
+  }
+
+  .wl-open {
+    min-height: 30px;
+    padding: 0 9px;
+  }
+}

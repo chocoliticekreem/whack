@@ -5,6 +5,7 @@ import type { Marker } from "maplibre-gl";
 import { MapPin, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { getCityMap, onMapPick } from "./CityMapGL";
+import { isLandscapePhone } from "./Live";
 import { londonClock } from "./city-store";
 import type { Market } from "./city-types";
 
@@ -38,7 +39,7 @@ const LIST_MS = 5000;
 const CARD_W = 340;
 const GAP = 18;
 
-const isPhone = () => window.matchMedia("(max-width: 720px)").matches;
+const isPhone = () => window.matchMedia("(max-width: 720px)").matches || isLandscapePhone();
 
 function pinElement(className: string, label: string): HTMLDivElement {
   const el = document.createElement("div");

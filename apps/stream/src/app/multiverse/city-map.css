@@ -313,3 +313,24 @@
     animation: none;
   }
 }
+
+/* Phone turned sideways: the legend sits in the map's corner, right of the market column (see city.css). */
+@media (orientation: landscape) and (max-height: 500px) {
+  .cm-legend {
+    left: calc(var(--side-w) + env(safe-area-inset-left, 0px) + var(--s3));
+    bottom: calc(var(--s2) + env(safe-area-inset-bottom));
+    font-size: 11px;
+  }
+
+  .cm-hub-tag {
+    height: 22px;
+    padding: 0 6px;
+    font-size: 11px;
+  }
+
+  .cm-hub[data-active] .cm-hub-tag,
+  .cm-hub[data-win] .cm-hub-tag {
+    height: 24px;
+    font-size: 12px;
+  }
+}

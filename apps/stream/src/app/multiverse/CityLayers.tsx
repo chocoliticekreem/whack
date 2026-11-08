@@ -6,6 +6,7 @@ import type { MapboxOverlay } from "@deck.gl/mapbox";
 import type { Map as MapLibreMap } from "maplibre-gl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Hotspot, HubsVsUsual, MarketsResponse } from "./city-types";
+import { LANDSCAPE_PHONE, isLandscapePhone } from "./Live";
 
 type RGBA = [number, number, number, number];
 
@@ -128,7 +129,7 @@ function useSurgeFutures(enabled: boolean): Record<string, number> | null {
   return byOption;
 }
 
-const isPhone = () => window.matchMedia("(max-width: 720px)").matches;
+const isPhone = () => window.matchMedia("(max-width: 720px)").matches || isLandscapePhone();
 const reducedMotion = () => window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /**
@@ -156,6 +157,7 @@ export function CityLayers({
   useEffect(() => {
     const phone = window.matchMedia("(max-width: 720px)");
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const sideways = window.matchMedia(LANDSCAPE_PHONE);
     const sync = () => {
       setLite(isPhone());
       setStill(reducedMotion());
@@ -163,9 +165,11 @@ export function CityLayers({
     sync();
     phone.addEventListener("change", sync);
     motion.addEventListener("change", sync);
+    sideways.addEventListener("change", sync);
     return () => {
       phone.removeEventListener("change", sync);
       motion.removeEventListener("change", sync);
+      sideways.removeEventListener("change", sync);
     };
   }, []);
 

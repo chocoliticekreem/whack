@@ -2,6 +2,10 @@
 
 import { useEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 
+/** A phone turned sideways: markets in a left column, the map on the right. Matches the CSS in city.css. */
+export const LANDSCAPE_PHONE = "(orientation: landscape) and (max-height: 500px)";
+export const isLandscapePhone = () => window.matchMedia(LANDSCAPE_PHONE).matches;
+
 export const reducedMotion = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
 /** Tweens a number to its new value over `ms`; jumps straight there with reduced motion. */
