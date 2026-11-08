@@ -359,8 +359,11 @@ export function MarketCard({
   const ended = phase === "settled" || phase === "void";
   const race = isRace(m);
   const [asked, setAsked] = useState<string | null>(null);
+  // Chosen once, when the card first shows: re-picking on every 3 s price update flipped the question between two
+  // areas near 50% under the player's finger. It changes only when the player asks about another area.
+  const [first] = useState(() => (race ? headlineOf(m) : ""));
   const optionFor = (hub: string) => m.options.find((o) => (o.hotspot ?? o.id) === hub)?.id;
-  const ask = bet?.option ?? (draft && m.options.some((o) => o.id === draft) ? draft : null) ?? (asked && optionFor(asked) ? optionFor(asked)! : null) ?? headlineOf(m);
+  const ask = bet?.option ?? (draft && m.options.some((o) => o.id === draft) ? draft : null) ?? (asked && optionFor(asked) ? optionFor(asked)! : null) ?? first;
   useEffect(() => (race ? onHubPick((hub) => setAsked(hub)) : undefined), [race]);
   const asking = m.options.find((o) => o.id === ask);
   // "Not this one" walks the areas in the headline's order: closest to 50% first, then outwards. It is not a bet.
