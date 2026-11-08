@@ -7,6 +7,9 @@ const nextConfig: NextConfig = {
   // Private LAN ranges let a phone on the same Wi-Fi play /multiverse against `next dev -H 0.0.0.0`.
   allowedDevOrigins: ["*.trycloudflare.com", "10.*.*.*", "192.168.*.*", "172.*.*.*"],
   partialPrefetching: true,
+  redirects() {
+    return [{ source: "/", destination: "/multiverse", permanent: false }];
+  },
   turbopack: {
     rules: {
       "*.css": {

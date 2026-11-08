@@ -1,24 +1,15 @@
 import type { Metadata } from "next";
-import { Figtree } from "next/font/google";
 import "./globals.css";
 
-const figtree = Figtree({
-  variable: "--font-figtree",
-  subsets: ["latin"],
-});
-
 export const metadata: Metadata = {
-  title: "Mirrorverse",
-  description: "IRL streaming with eyes on the city around you.",
+  title: "OverWatch",
+  description: "Bet points on what London does in the next few minutes, against six AI traders. Real TfL data settles every bet.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html
-      lang="en"
-      className={`${figtree.variable} h-full antialiased`}
-    >
-      <body className="h-full overflow-hidden bg-bg text-text">{children}</body>
+    <html lang="en" className="h-full antialiased">
+      <body className="h-full overflow-hidden">{children}</body>
     </html>
   );
 }

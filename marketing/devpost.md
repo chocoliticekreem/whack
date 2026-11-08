@@ -106,8 +106,11 @@ The "new world" in the brief is the one nobody can see yet: the London of five m
 - **Front end:** Next.js 16 on Vercel; a MapLibre map with OpenFreeMap vector tiles and deck.gl layers (a dusk palette,
   glowing hub columns, arcs between hubs) at 60 fps. Phones work in portrait and landscape (market column left, map
   right). The backend runs on our laptop behind Cloudflare tunnels.
-- **Reuse (disclosed, approved by the organisers):** the London twin, the live-feed plumbing, YOLO counting and the
-  base forecast engine come from our earlier project Mirrorverse (built 17 Oct 2026). New at WHACK: the recorder,
+- **Reuse (disclosed, approved by the organisers):** from our earlier project Mirrorverse (built 17 Oct 2026), the
+  street-graph agent simulation in `services/multiverse` builds on Mirrorverse's predict engine, and the YOLO camera
+  counter runs from the original Mirrorverse service. Mirrorverse's three.js London twin and its live-feed routes
+  remain only behind the superseded `/multiverse/oxford` game and the seed builder; the OverWatch pages don't use
+  them. New at WHACK: the recorder,
   both agent simulations and the London VIX, the city and local markets, pricing, the computer traders, the integrity
   rules, the wallet and portfolio, scenario mode and the OverWatch UI.
 

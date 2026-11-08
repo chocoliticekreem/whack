@@ -80,6 +80,17 @@ Replay instead of live: `python3 services/city/server.py --replay-from 2026-11-0
 - **The organisers confirmed (Sat 7 Nov) that we can build on Mirrorverse.** It's disclosed in
   the Devpost draft and in the reused READMEs. We get judged on the new layer.
 - Brought in with #24: `services/predict`, `services/yolo`, `apps/stream`.
+- **What remains after the OverWatch-only cleanup:**
+  - `services/predict`: the street-graph agent simulation. `services/multiverse` imports its seed, personas,
+    simulate and LLM modules (`worlds.py`, `brokers.py`), so the Oxford Circus engine and the London VIX build on it.
+  - YOLO: the camera counter runs from the original Mirrorverse service outside this repo (`YOLO_DIR` in
+    `scripts/run-data.sh`). The in-repo copy of `services/yolo` is removed.
+  - `apps/stream`: the three.js twin (`src/twin`) and its routes (`/api/around/*`, `/api/twin/*`, `/api/predict`,
+    `/api/live/stream`), used only by the superseded `/multiverse/oxford` game and by `real_seed.py` when it rebuilds
+    the seed. `/multiverse` and `/multiverse/portfolio` import none of it.
+  - Removed: the streaming app (persona chat, phone streaming, "around me", copilot, the `/twin` page) and its
+    routes (`/api/agent/*`, `/api/chat/scene`, `/api/route`, `/api/live/state`, `/api/live/signal`, and
+    `/api/around/{air,crime,livecams,stations,tide}`).
 
 ## 2. What Mirrorverse already has
 | Need | Status | Where in `chocoliticekreem/mirrorverse` |

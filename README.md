@@ -23,9 +23,25 @@ MULTIVERSE_PORT=8349 python3 services/multiverse/server.py &   # Oxford Circus e
 python3 services/city/server.py &                       # city markets + wallet (:8051); polls the VIX on :8349
 cd apps/stream && MULTIVERSE_URL=http://127.0.0.1:8349 npx next dev -H 0.0.0.0 -p 3349   # open /multiverse
 ```
-`run-data.sh` expects the YOLO server at `$YOLO_DIR` (it defaults to a path on Anson's laptop; point it at
-`services/yolo` with its `.venv`). For the public site, run `cloudflared tunnel --url http://localhost:8051` and set
-Vercel's `CITY_URL` to the tunnel URL.
+`run-data.sh` expects the YOLO server at `$YOLO_DIR`. It is Mirrorverse's `services/yolo`, which is not in this repo:
+point `YOLO_DIR` at a [mirrorverse](https://github.com/chocoliticekreem/mirrorverse) checkout's `services/yolo` with
+its `.venv` (the default is a path on Anson's laptop). For the public site, run
+`cloudflared tunnel --url http://localhost:8051` and set Vercel's `CITY_URL` to the tunnel URL. `/` redirects to
+`/multiverse`.
+
+## Reused from Mirrorverse (disclosed, approved by the organisers)
+Our earlier project [Mirrorverse](https://github.com/chocoliticekreem/mirrorverse) (built 17 Oct 2026). What still
+runs from it:
+- **The street-graph agent simulation** in `services/predict` (seed, personas, simulate, LLM wrapper). The Oxford
+  Circus engine in `services/multiverse`, which produces the London VIX, runs 50 forked copies of it.
+- **The YOLO camera counter** runs from the original Mirrorverse service, outside this repo (see `$YOLO_DIR` above).
+- **The three.js London twin** (`apps/stream/src/twin`) and its API routes (`/api/around/*`, `/api/twin/*`,
+  `/api/predict`, `/api/live/stream`). Only the superseded `/multiverse/oxford` game uses them, and
+  `services/multiverse/real_seed.py` calls them when it rebuilds the Oxford Circus seed (the committed seeds are the
+  fallback). The OverWatch pages, `/multiverse` and `/multiverse/portfolio`, import none of it.
+
+The Next.js app itself started as Mirrorverse's. Its streaming product (persona chat, phone streaming, the "around
+me" map, the `/twin` page) is removed.
 
 ## Docs, in reading order
 | Doc | Read it for |
