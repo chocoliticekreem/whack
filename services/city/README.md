@@ -219,6 +219,40 @@ break. Undefended (no delay, no suspend), every bet fills at odds 4.05 and retur
 before the feed changes and still pays +305, so on clean_sheet the 10% cap bounds what a longer lead can take. Pending
 bets live in memory, so a restart forgets them (no points move).
 
+## Parallel exchange venue (:8052)
+
+The Kalshi-style exchange in `docs/exchange-design.md`, running beside this server: no house, one order book per
+binary contract, and about 2,200 AI accounts (12 market makers, 184 hedge funds in three tiers, 2,000 retail) trading
+against players. It reads the same recorder files read-only and keeps its books, ledger and accounts in memory, so
+the live LMSR exchange is untouched and a restart starts it clean.
+
+```bash
+python3 services/city/venue_server.py                                    # live, beside server.py
+python3 services/city/venue_server.py --replay-from 2026-11-07T15:00:00Z  # replay at 12x
+python3 -m unittest services/city/test_venue.py
+```
+
+Env: `CITY_VENUE_PORT` (8052), `CITY_VENUE_HOST` (127.0.0.1), plus `CITY_RAW` and `MULTIVERSE_URL` as above.
+Flags: `--retail`, `--market-makers`, `--seed`. Endpoints: `GET /health /contracts /book?contract= /stats
+/leaderboard /positions?account=` (X-Player-Token), `POST /account/new {name}`, `POST /order {account, contract, side,
+price, qty, tif, postOnly}`, `POST /cancel {account, order}`.
+
+| Piece | File | Rules |
+|---|---|---|
+| Contracts | `venue.py` | A two-way market is one contract (YES = its first option); a race or ladder is one contract per option. A YES pays 100 points if it happens |
+| Order book | `venue_book.py` | One book per contract: a NO bid at 40 is a YES offer at 60. Price-time priority, trades at the resting price, post-only and immediate-or-cancel orders, self-trade prevention by firm |
+| Gateway | `venue_gateway.py` | The one path for every order, human or AI: the series' speed bump from `integrity.py` (AI also carries 300 ms of latency), cancels never delayed, 1 s minimum rest, a 25-point price collar on orders that can trade on arrival, the 25% / 10% position limit, per-tick message budgets |
+| Money | `venue_ledger.py` | Double-entry in whole points; full collateral (a matched pair puts exactly 100 in the pool); Kalshi's taker fee ceil(0.07·C·P·(1−P)), makers free; a YES+NO pair is paid 100 at once; void returns the pool pro rata to cost and refunds fees; `audit()` rechecks every invariant |
+| Lifecycle | `venue.py` | A shadow copy of the live exchange lists, observes and settles the markets. Halts and suspensions cancel every order; close stops trading; settlement pays 100 per winning contract |
+| Market makers | `venue_agents.py` | Two-sided post-only quotes around the forecast, inventory skew, fair value moved by fills, wider before close and on forecast jumps, inventory limits. Obligations: spread ≤ 6, size ≥ 10, 90% uptime after a 10 s grace; those that meet them share 25% of the contract's taker fees |
+| Hedge funds | `venue_agents.py` | Tier 1 platforms run every rule as pods; tier 2 and 3 run one. Each blends its rule's measured hit rate with the forecast, trades only when the edge beats price + fee + a margin, sizes with fractional Kelly on its own equity, and is wound down at half its capital; its tier's investors relaunch a fund when they can |
+| Retail | `venue_agents.py` | Random arrivals with documented biases (long shots, favourites, herding, momentum, home hub, none) and small immediate-or-cancel orders |
+
+Cost: every agent is rules, so there are no language-model calls; data comes from the recorder files plus the same
+local VIX and simulation polls as `server.py`. Measured: 12.4 ms of CPU per one-second tick and about 60 MB with 2,188
+AI accounts. `/stats` reports P&L by group, market-maker uptime, fees, calibration (Brier of the closing price
+against the forecast alone and an uninformed guess) and the ledger audit.
+
 ## Files
 
 `data.py` reads the recorder files into compact snapshots and never returns data after `now`. `pricing.py` holds the

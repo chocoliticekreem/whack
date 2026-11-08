@@ -1,7 +1,7 @@
 ---
 title: Exchange design — a Kalshi-style live exchange with AI market makers, hedge funds and retail
 date: 2026-11-07
-status: target design (proposal) · what is built today is in market-structure.md
+status: built as a parallel venue beside the live exchange (services/city/venue*.py, :8052) · the live site still runs the LMSR in market-structure.md
 sources:
   - Kalshi fees, https://help.kalshi.com/trading/fees (taker 0.07·C·P·(1−P), makers free on standard series)
   - Kalshi Market Maker Program filings at the CFTC (quoting obligations on spread, size, uptime and coverage; fee rebates)
@@ -20,6 +20,11 @@ the information in the market allows.
 
 What runs today (the LMSR house that quotes every market, and seven AI traders staking a flat 100) is
 described in [market-structure.md](market-structure.md). This doc is where that goes.
+
+**Built as a parallel venue.** `services/city/venue_server.py` (:8052) runs this design beside the live exchange
+(:8051): the same markets, futures, integrity rules and settlement sources, read from the same recorder files, on its
+own order books and in-memory ledger, so it can be compared with the LMSR without touching it. How to run it and
+what it measures are in [services/city/README.md](../services/city/README.md#parallel-exchange-venue-8052).
 
 ## 1. The exchange
 
