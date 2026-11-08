@@ -18,6 +18,7 @@
   --no-soft: rgba(240, 81, 107, 0.14);
   --warn: #f5b041;
   --ex-accent: #3ddc97;
+  --ex-row: 30px;
 
   height: 100dvh;
   overflow-y: auto;
@@ -377,23 +378,15 @@
   gap: var(--s5);
 }
 
-.ex-asks,
-.ex-bids {
-  display: flex;
-  flex-direction: column;
-  min-height: calc(5 * 27px);
-}
-
-.ex-asks {
-  justify-content: flex-end;
-}
-
 .ex-tape-head,
 .ex-tape .ex-print {
+  box-sizing: border-box;
   display: grid;
   grid-template-columns: 3em 3em minmax(0, 1fr);
+  align-items: center;
   gap: var(--s2);
-  padding: 3px var(--s2);
+  height: var(--ex-row);
+  padding: 0 var(--s2);
 }
 
 .ex-tape-head {
@@ -412,9 +405,12 @@
 
 .ex-ladder-head,
 .ex-level {
+  box-sizing: border-box;
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  padding: 3px var(--s2);
+  height: var(--ex-row);
+  padding: 0 var(--s2);
 }
 
 .ex-ladder-head {
@@ -432,9 +428,9 @@
 
 .ex-bar {
   position: absolute !important;
-  top: 1px;
+  top: 2px;
   right: 0;
-  bottom: 1px;
+  bottom: 2px;
   border-radius: var(--r-s);
 }
 
@@ -466,10 +462,11 @@
 }
 
 .ex-spread {
+  box-sizing: border-box;
   display: flex;
-  align-items: baseline;
+  align-items: center;
   justify-content: space-between;
-  margin: var(--s1) 0;
+  height: var(--ex-row);
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
 }
@@ -670,6 +667,42 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--r);
   transform: translateX(-50%);
+}
+
+/* Desktop: a full-screen terminal. The three columns share one top and bottom edge and scroll inside themselves. */
+@media (min-width: 1101px) {
+  .ex {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+
+  .ex-main {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    grid-template-rows: minmax(0, 1fr);
+    padding-bottom: var(--s4);
+  }
+
+  .ex-left,
+  .ex-center,
+  .ex-trade {
+    position: static;
+    align-self: stretch;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .ex-left .ex-list {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  .ex-center .ex-split {
+    flex: 1;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
