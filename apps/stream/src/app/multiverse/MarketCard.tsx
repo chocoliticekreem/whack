@@ -249,6 +249,12 @@ function Details({
           </section>
         )}
 
+        <section className="tl-d-sec">
+          <h3>Do independent sources agree?</h3>
+          <p>Compare the available clues before placing a bet. Do separate sources support the same prediction, or do they disagree?</p>
+          <p className="tl-muted">Check how recent each reading is. Feeds that share the same underlying data do not count as independent confirmation.</p>
+        </section>
+
         {m.aiBets.length > 0 && (
           <section className="tl-d-sec">
             <h3>AI traders</h3>
