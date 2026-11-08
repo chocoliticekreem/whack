@@ -150,8 +150,8 @@ Each market runs 50 futures. Every future starts from the last real reading:
   reading. Sigma is fitted on today's changes around TfL's usual day; the drift carries 0.30 of the last 10 min's
   change in City Pulse vs usual (`pricing.fit_pulse`, fitted out of sample by `analysis/judge/pulse_model.py`; half
   the last hour's trend, capped, when the usual profile is missing). The walk adds the usual day's slope (a smooth curve through the 15-min bands) over its horizon; without it,
-  copying the usual curve beat the house by 32-48% a bet. The line is the half point (x.0 or x.5) nearest the futures'
-  median at the settle reading, so the market opens near 50/50 (the old line, open + the median 5-min change, ignored that slope and opened
+  copying the usual curve beat the house by 32-48% a bet. The line is the futures' median at the settle reading, on the
+  coarsest of .5/.25/.1/.05/.01 no wider than their spread (.0/.5 by day), so the market opens near 50/50 (the old line, open + the median 5-min change, ignored that slope and opened
   evening markets at a 94% favourite). Steps are capped at 2.5σ.
 - hub_surge: refitted every round on today's readings up to the open, binned by TfL stamp (`markets.hub_fits`,
   `pricing.fit_relative_ou`). Each hub runs 3-4 TfL steps from its open reading to the settle reading (TfL publishes
@@ -217,8 +217,8 @@ brokers are the seven traders, and the loop (`tops.py`) feeds their records back
    to the other traders: with two or three per series, that would hand the best one's excess to the worst.
 4. **The blend.** Opening prior = `(1 − λ)·futures + λ·pool`, `pool = Σ w_i·view_i + w_futures·futures`. λ comes from
    the pool's own record: at every settle where the pool differed from the futures, `r = pool(winner)/futures(winner) − 1`
-   is kept per series (same decay), and λ maximises `Σw·log(1 + λr)` to second order, `λ = Σw·r / Σw·r²`, shrunk by
-   `n/(n + 10)` and held in [0, 0.3]. A pool that hasn't beaten the futures on log loss gets λ = 0 and the price is the
+   is kept per series (same decay), and λ maximises `Σw·log(1 + λr)` to second order, `λ̂ = Σw·r / Σw·r²`, shrunk by
+   its significance, `λ̂·max(0, 1 − 1/t²)` with `t = Σw·r / √(Σw²·r²)`, and held in [0, 0.3]. A pool that hasn't beaten the futures on log loss gets λ = 0 and the price is the
    futures. The blend rides on the futures as a fixed tilt (blended ÷ prior) while they learn in-round, held in the
    futures' [3%, 97%] band. The LMSR, the odds floor, the caps and `SIM_WEIGHT` (0) are unchanged.
 5. **Kept.** One row per listed market in the ledger's SQLite (`tops_markets`: prior, views, λ, weights, tilt, then the

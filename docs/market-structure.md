@@ -25,8 +25,8 @@ citations below point at 1053c8d.
   a big feed move; caps 10% on locally observable series, 25% elsewhere.
 - **Crowding settles on the first reading TfL stamped after close** (#72), and the settlement record holds
   `measuredAt`; a value measured at or before the close voids (#81). Station rounds take about 14 min to settle.
-- **Pricing:** City Pulse walks follow the usual-Saturday curve and its line is the half point nearest the futures'
-  median (#72, #77); hub_surge uses `RelativeRaceSim` (#77). After the 60% ruled-out cap, likelihood weights keep
+- **Pricing:** City Pulse walks follow the usual-Saturday curve and its line is the futures' median on a step that
+  fits their spread (#72, #77); hub_surge uses `RelativeRaceSim` (#77). After the 60% ruled-out cap, likelihood weights keep
   moving the price (#72). `SIM_WEIGHT` defaults to 0.
 - **Local markets** (#71) on 33 real sensors use the same LMSR, the strictest integrity setting (45 s, 10%), at most 12
   per round.

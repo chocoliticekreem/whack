@@ -25,7 +25,7 @@ Partly. Each bet is a **series**, and three places together define it:
 | Series | Question players see | Answers | Settles on | Notes |
 |---|---|---|---|---|
 | `hub_surge` | Which area will see the biggest rise in busyness relative to usual by HH:MM? | Oxford Circus / King's Cross / Piccadilly Circus / Waterloo / Bank | TfL Crowding: each hub's first reading TfL stamped **after** close, compared with its usual-day level | Result in about 14 min (fair settlement). Priced by a relative mean-reversion model refitted every round on today's readings, re-drawn after each mid-round TfL publish. See [hub_surge: the model](#hub_surge-the-model). |
-| `city_pulse` | Will Tube activity finish above the expected level (X) by HH:MM? | Above / Below | Average busyness of 20 TfL stations, first readings stamped after close | The line is the futures' median, on the nearest .0 or .5 (#77). The futures follow the usual day plus 0.30 of the last 10 min's trend vs usual (see [City Pulse model](#city-pulse-model)). Known: the Tube Crowd "pulse leak" is still open in the evening. |
+| `city_pulse` | Will Tube activity finish above the expected level (X) by HH:MM? | Above / Below | Average busyness of 20 TfL stations, first readings stamped after close | The line is the futures' median, on the coarsest of .5/.25/.1/.05/.01 no wider than their spread: .0/.5 by day, finer on a quiet night (#77; a fixed .5 opened 03:20 on 8 Nov at 3%/97%). The futures follow the usual day plus 0.30 of the last 10 min's trend vs usual (see [City Pulse model](#city-pulse-model)). Known: the Tube Crowd "pulse leak" is still open in the evening. |
 | `london_vix` | Will the model become more uncertain by HH:MM? | More uncertain / Less uncertain | The Oxford Circus multiverse engine's uncertainty index (VIX) at settle | Needs the engine live with about 1 h of warm-up. When it's unavailable, `heathrow_stack` stands in. |
 | `heathrow_stack` (stand-in) | More or fewer planes circling Heathrow at HH:MM? | More planes / Fewer planes | adsb.lol: aircraft in the 4 Heathrow holding stacks | Listed only when the VIX is down. Poisson count around a mean-reverting level, line centred (#86). |
 
@@ -52,7 +52,7 @@ Partly. Each bet is a **series**, and three places together define it:
 
 `log P_settle = log P0 + [log U(t1) − log U(t0)] + 0.30 · [d(t0) − d(t0 − 10 min)] + σ·√h·ε`
 
-`P0` is City Pulse at the open reading. `t0` is that reading's TfL stamp, and `t1` is the first stamp after close (`h` = 15–20 min). `U` is the usual-day pulse. `d = log(P / U)` is City Pulse vs usual at a TfL stamp. `σ` is the one-step sigma fitted on today's changes (unchanged), and `ε` is a normal capped at 2.5σ. The line is the futures' median on .0/.5.
+`P0` is City Pulse at the open reading. `t0` is that reading's TfL stamp, and `t1` is the first stamp after close (`h` = 15–20 min). `U` is the usual-day pulse. `d = log(P / U)` is City Pulse vs usual at a TfL stamp. `σ` is the one-step sigma fitted on today's changes (unchanged), and `ε` is a normal capped at 2.5σ. The line is the futures' median, rounded to the coarsest step in .5/.25/.1/.05/.01 no wider than the futures' spread (IQR / 1.349), so it sits at most half an SD from the median and the favourite opens at most ~69% (`markets.pulse_line`).
 
 The drift used to be half the last hour's mean change in `d`, capped at σ/5. It is now 0.30 of the last 10 min's change (`pricing.fit_pulse`). Without the usual profile at `t0` or at `t0 − 10 min`, the builder falls back to the old drift.
 

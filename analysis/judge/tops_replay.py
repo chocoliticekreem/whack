@@ -11,6 +11,7 @@ look-ahead) and every variant sees exactly the same markets, priors and stances 
   new          P(skill > 0) weights from the empirical-Bayes posterior, lam from the pool's record   (tops.py now)
   new-weights  the new weights with the old lam rule
   new-lambda   the old weights with the new lam rule
+  lam-102      the new weights with PR #102's lam: sum r / sum r^2 shrunk by n / (n + 10), capped at 0.3
 
 Nothing is fitted on the window: every constant is fixed in tops.py before the walk. For every settled market it
 compares each variant's opening price with the plain futures prior (Brier and log loss, paired diff ± 1 SE per series)
@@ -43,6 +44,7 @@ LEAKS = {"copycat": "hub_surge", "pulse leak": "city_pulse"}
 OLD_TEMP = 0.01
 OLD_S_HALF = 0.05
 OLD_K = 10.0
+K_102 = 10.0
 
 
 def ms(iso: str) -> int:
@@ -115,7 +117,18 @@ class NewLambda(tops.Tops):
         return old_weights({t: old_skill(self.records.get((t, series))) for t in tids}), super().lean(series, tids)[1]
 
 
-VARIANTS = {"old": Old, "new": tops.Tops, "new-weights": NewWeights, "new-lambda": NewLambda}
+def lam_102(rec: dict | None) -> float:
+    if not rec or rec["r2"] <= 0:
+        return 0.0
+    return min(tops.LAMBDA_MAX, max(0.0, rec["r1"] / rec["r2"] * rec["n"] / (rec["n"] + K_102)))
+
+
+class Lam102(tops.Tops):
+    def lean(self, series, tids):
+        return super().lean(series, tids)[0], lam_102(self.pools.get(series))
+
+
+VARIANTS = {"old": Old, "new": tops.Tops, "new-weights": NewWeights, "new-lambda": NewLambda, "lam-102": Lam102}
 
 
 # ---------------------------------------------------------------- the event log and the walk
@@ -223,14 +236,15 @@ def report(rows: list[dict], runs: dict[str, dict], label: str) -> None:
             dl, sl = mean_se([b - a for a, b in zip(lp, lv)])
             print(f"{'':15} {v:12} {n:4d} {sum(x > 0 for x in lams):5d} {sum(lams) / n:8.4f} {sum(bv) / n:7.4f} "
                   f"{db:+.4f} ± {sb:.4f}  {sum(lv) / n:7.4f} {dl:+.4f} ± {sl:.4f}")
-    print(f"\n[{label}] new - old, paired per market (negative: new is better)")
-    for s in sorted(by) + ["ALL"]:
-        got = rows if s == "ALL" else by[s]
-        old = [runs["old"][r["key"]]["model"] for r in got]
-        new = [runs["new"][r["key"]]["model"] for r in got]
-        db, sb = mean_se([brier(b, r["winner"]) - brier(a, r["winner"]) for a, b, r in zip(old, new, got)])
-        dl, sl = mean_se([logloss(b, r["winner"]) - logloss(a, r["winner"]) for a, b, r in zip(old, new, got)])
-        print(f"  {s:15} n={len(got):4d}  Brier {db:+.5f} ± {sb:.5f}   log loss {dl:+.5f} ± {sl:.5f}")
+    for base in ("old", "lam-102"):
+        print(f"\n[{label}] new - {base}, paired per market (negative: new is better)")
+        for s in sorted(by) + ["ALL"]:
+            got = rows if s == "ALL" else by[s]
+            old = [runs[base][r["key"]]["model"] for r in got]
+            new = [runs["new"][r["key"]]["model"] for r in got]
+            db, sb = mean_se([brier(b, r["winner"]) - brier(a, r["winner"]) for a, b, r in zip(old, new, got)])
+            dl, sl = mean_se([logloss(b, r["winner"]) - logloss(a, r["winner"]) for a, b, r in zip(old, new, got)])
+            print(f"  {s:15} n={len(got):4d}  Brier {db:+.5f} ± {sb:.5f}   log loss {dl:+.5f} ± {sl:.5f}")
     print(f"\n[{label}] leaks: {STAKE} points on Tube Crowd's pick at the opening quote, ROI [95% bootstrap CI]")
     for name, s in LEAKS.items():
         bets = [r for r in by.get(s, []) if r["tube"]]

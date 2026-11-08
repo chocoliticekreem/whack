@@ -19,10 +19,12 @@ Here the brokers are the seven rule-based traders (traders.py). Per market:
 4. The opening prior is (1 - lam) * futures + lam * pool, pool = sum_i w_i view_i + w_futures * futures. lam is
    estimated from the evidence: at every settle where the pool differed from the futures, r = pool(winner) /
    futures(winner) - 1 is recorded per series; the log-likelihood sum log(1 + lam r) is maximised to second order
-   (lam = sum r / sum r^2), shrunk by n / (n + K_SHRINK) and held in [0, LAMBDA_MAX]. A pool that has not improved
-   log loss gets lam = 0, and the price is the futures. The blend is kept as a fixed tilt (blended / prior) on the
-   futures as they learn in-round, held in the same [3%, 97%] band the futures use; the LMSR, the odds floor and
-   SIM_WEIGHT are untouched.
+   (lam^ = sum r / sum r^2), then shrunk by its own significance, positive-part James-Stein: lam = lam^ (1 - 1/t^2)
+   held in [0, LAMBDA_MAX], t = lam^ / SE. If the futures are calibrated, E[r] = 0, so SE comes from the r themselves:
+   SE = sqrt(sum w^2 r^2) / sum w r^2 and t = sum w r / sqrt(sum w^2 r^2). A pool whose gains are noise (|t| <= 1) or
+   that has not improved log loss gets lam = 0, and the price is the futures. The blend is kept as a fixed tilt
+   (blended / prior) on the futures as they learn in-round, held in the same [3%, 97%] band the futures use; the LMSR,
+   the odds floor and SIM_WEIGHT are untouched.
 
 The baseline is the futures prior, not the blended price: scored against a price it had already moved, a right
 trader would look less skilled the more it was trusted, and its weight would oscillate.
@@ -40,7 +42,6 @@ import pricing
 
 HALF_LIFE = 20
 DECAY = 0.5 ** (1 / HALF_LIFE)
-K_SHRINK = 10.0
 K_MAX = 1 / (1 - DECAY)
 K_CAL = 5.0
 FLOOR = 0.05
@@ -177,24 +178,35 @@ def weights(p: dict[str, float]) -> dict[str, float]:
 
 def new_pool_record() -> dict:
     """Decayed sums of r = pool(winner) / prior(winner) - 1 over a series' settles where the pool moved off the
-    prior: r1 = sum(w r), r2 = sum(w r^2), n = sum(w)."""
-    return {"r1": 0.0, "r2": 0.0, "n": 0.0, "count": 0}
+    prior: r1 = sum(w r), r2 = sum(w r^2), v = sum(w^2 r^2) (the variance of r1 when E[r] = 0), n = sum(w)."""
+    return {"r1": 0.0, "r2": 0.0, "v": 0.0, "n": 0.0, "count": 0}
 
 
 def update_pool(rec: dict, r: float) -> None:
     rec["r1"] = rec["r1"] * DECAY + r
     rec["r2"] = rec["r2"] * DECAY + r * r
+    rec["v"] = rec["v"] * DECAY * DECAY + r * r
     rec["n"] = rec["n"] * DECAY + 1.0
     rec["count"] += 1
 
 
+def lam_t(rec: dict | None) -> tuple[float, float]:
+    """(lam^, t): the lam maximising sum w log(1 + lam r) to second order, sum(w r) / sum(w r^2), and its t-statistic
+    against lam = 0, sum(w r) / sqrt(sum(w^2 r^2)). (0, 0) with no record."""
+    if not rec or rec["r2"] <= 0 or rec["v"] <= 0:
+        return 0.0, 0.0
+    return rec["r1"] / rec["r2"], rec["r1"] / math.sqrt(rec["v"])
+
+
 def lam_of(rec: dict | None) -> float:
-    """How far the price leans on the pool, from the evidence: the lam maximising sum w log(1 + lam r), to second
-    order sum(w r) / sum(w r^2), shrunk by n / (n + K_SHRINK) and held in [0, LAMBDA_MAX]. 0 with no record, and 0
-    when the pool has not beaten the futures on log loss."""
-    if not rec or rec["r2"] <= 0:
+    """How far the price leans on the pool: lam^ shrunk by its own significance, lam^ max(0, 1 - 1/t^2) (positive-part
+    James-Stein), held in [0, LAMBDA_MAX]. 0 with no record, when the pool's gains are within noise (|t| <= 1) and
+    when the pool has not beaten the futures on log loss. One market gives |t| = 1, so 0; m equal gains give t^2 =
+    their effective count, so lam^ (1 - 1/m): no extra n / (n + K) shrink is needed."""
+    lam, t = lam_t(rec)
+    if lam <= 0 or t * t <= 1:
         return 0.0
-    return min(LAMBDA_MAX, max(0.0, rec["r1"] / rec["r2"] * rec["n"] / (rec["n"] + K_SHRINK)))
+    return min(LAMBDA_MAX, lam * (1 - 1 / (t * t)))
 
 
 def pool_of(prior: dict[str, float], views: dict[str, dict[str, float]], w: dict[str, float]) -> dict[str, float]:
@@ -392,5 +404,5 @@ class Tops:
                                   for t in tids},
                       "futuresWeight": round(w[FUTURES], 4),
                       "history": self.history.get(s, [])[-HISTORY_SHOWN:]}
-        return {"halfLife": HALF_LIFE, "priorK": round(prior_k(self.groups().values()), 2), "lambdaShrinkK": K_SHRINK,
+        return {"halfLife": HALF_LIFE, "priorK": round(prior_k(self.groups().values()), 2),
                 "floor": FLOOR, "cap": CAP, "lambdaMax": LAMBDA_MAX, "series": out}

@@ -42,6 +42,8 @@ HUB_ORDER = "Oxford Circus, King's Cross, Piccadilly Circus, Waterloo, Bank"
 PULSE_STATIONS = 20
 PULSE_MIN_STATIONS = 18
 PULSE_TREND_MS = 30 * MIN_MS
+PULSE_STEPS = (0.5, 0.25, 0.1, 0.05, 0.01)
+IQR_PER_SD = 1.349
 READING_MAX_AGE_MS = 2 * MIN_MS
 SETTLE_LAG_MS = 30_000
 GRACE_MS = 3 * MIN_MS
@@ -628,17 +630,31 @@ def pulse_devs(store: Store, start: int, now: int) -> list[tuple[int, float]]:
 
 
 def pulse_line(sim: pricing.ScalarSim) -> float:
-    """The half point (x.0 or x.5) nearest the futures' median final City Pulse, so markets open close to 50/50."""
-    return round(statistics.median(math.exp(p[-1]) for p in sim.paths) * 2) / 2
+    """The futures' median final City Pulse rounded to the coarsest step in PULSE_STEPS no wider than the futures'
+    spread (IQR / 1.349, an SD robust to the few sim-blended outliers), else the finest. The line then sits at most half
+    an SD from the median, so the opening favourite is at most ~69%: a quiet night's futures span ~0.2 and a fixed .5
+    line put all 50 on one side (3%/97% at 03:20 on 8 Nov). Daytime futures spread ~0.6-0.9, so .0/.5 lines stay;
+    0.01 is only reached when the spread is under 0.05."""
+    finals = [math.exp(p[-1]) for p in sim.paths]
+    q1, _, q3 = statistics.quantiles(finals, n=4)
+    spread = (q3 - q1) / IQR_PER_SD
+    step = next((s for s in PULSE_STEPS if s <= spread), PULSE_STEPS[-1])
+    return round(round(statistics.median(finals) / step) * step, 2)
+
+
+def line_label(line: float) -> str:
+    """2.35 -> "2.35", 2.5 -> "2.5", 3.0 -> "3.0": the line as written, never float noise."""
+    text = f"{line:.2f}"
+    return text[:-1] if text.endswith("0") else text
 
 
 def build_city_pulse(mid: str, store: Store, spots: list[dict], now: int, settles_at: int) -> Market | None:
-    """Over/under on City Pulse; line = the futures' median City Pulse at the settle reading, on a .5, so the market
-    opens near 50/50 (the old line, open + the median 5-min change, missed the usual-day slope the futures drift along
-    and opened evening markets at a 94% favourite). The futures run from the newest reading's TfL stamp to the first
-    stamp after close along the usual day, plus the last 10 min's trend in vs usual (pricing.fit_pulse;
-    analysis/judge/pulse_model.py). Without the usual profile at those two readings they fall back to the plain
-    walk's drift, half the last hour's mean change."""
+    """Over/under on City Pulse; line = the futures' median City Pulse at the settle reading, on a step that fits their
+    spread (pulse_line), so the market opens near 50/50 (the old line, open + the median 5-min change, missed the
+    usual-day slope the futures drift along and opened evening markets at a 94% favourite). The futures run from the
+    newest reading's TfL stamp to the first stamp after close along the usual day, plus the last 10 min's trend in vs
+    usual (pricing.fit_pulse; analysis/judge/pulse_model.py). Without the usual profile at those two readings they fall
+    back to the plain walk's drift, half the last hour's mean change."""
     last = store.latest("crowding", now)
     p0 = pulse_of(last[1]) if last else None
     if not p0:
@@ -653,12 +669,13 @@ def build_city_pulse(mid: str, store: Store, spots: list[dict], now: int, settle
     sim = pricing.ScalarSim(p0, mu, sd, m0, minutes, random.Random(seed_of(mid)), pulse_of, p0)
     blend_pulse(sim, store, last, now, t_end, mid)
     line = sim.strike = pulse_line(sim)
+    label = line_label(line)
     hhmm = local_time(settles_at)
     rule = (f"City Pulse = 100 × the mean live TfL busyness (% of baseline) over the {PULSE_STATIONS} TfL Crowding "
             f"stations, in {crowd_settle_rule(settles_at)}. Fewer than {PULSE_MIN_STATIONS} stations reporting → "
-            f"void. Over = above {line:.1f}; exactly {line:.1f} or below counts as Under.")
-    return Market(mid, "city_pulse", "overunder", f"City Pulse at {hhmm}: over or under {line:.1f}?", [], now,
-                  settles_at, over_under_options(f"{line:.1f}"), sim,
+            f"void. Over = above {label}; exactly {label} or below counts as Under.")
+    return Market(mid, "city_pulse", "overunder", f"City Pulse at {hhmm}: over or under {label}?", [], now,
+                  settles_at, over_under_options(label), sim,
                   f"TfL Crowding API · {PULSE_STATIONS} stations · {settle_stamp(settles_at)}", rule,
                   {"line": line, "open": round(p0, 2), "openTs": last[0], "sigma": sd})
 

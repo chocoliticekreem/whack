@@ -146,13 +146,18 @@ class MathsTest(unittest.TestCase):
         prior = {"a": 0.6, "b": 0.4}
         self.assertEqual(tops.blend(prior, {"x": {"a": 0.1, "b": 0.9}}, {"x": 1.0}, 0.0), prior)
 
-    def test_lambda_is_the_shrunk_second_order_fit_and_is_capped(self):
+    def test_lambda_is_the_second_order_fit_shrunk_by_its_significance_and_is_capped(self):
         rec = tops.new_pool_record()
-        for r in (0.1, -0.05, 0.08, 0.02):
+        rs = (0.1, -0.05, 0.08, 0.02, 0.12, 0.06, -0.02, 0.09)
+        for r in rs:
             tops.update_pool(rec, r)
-        want = rec["r1"] / rec["r2"] * rec["n"] / (rec["n"] + tops.K_SHRINK)
-        self.assertGreater(want, 0)
-        self.assertAlmostEqual(tops.lam_of(rec), min(tops.LAMBDA_MAX, want))
+        w = [tops.DECAY ** (len(rs) - 1 - k) for k in range(len(rs))]
+        hat = sum(wk * r for wk, r in zip(w, rs)) / sum(wk * r * r for wk, r in zip(w, rs))
+        t = sum(wk * r for wk, r in zip(w, rs)) / math.sqrt(sum(wk * wk * r * r for wk, r in zip(w, rs)))
+        self.assertGreater(t * t, 1)
+        self.assertAlmostEqual(tops.lam_t(rec)[0], hat)
+        self.assertAlmostEqual(tops.lam_t(rec)[1], t)
+        self.assertAlmostEqual(tops.lam_of(rec), min(tops.LAMBDA_MAX, hat * (1 - 1 / t ** 2)))
         rng = random.Random(11)
         for _ in range(2000):
             rec = tops.new_pool_record()
@@ -163,6 +168,44 @@ class MathsTest(unittest.TestCase):
         for _ in range(200):
             tops.update_pool(big, 0.5)
         self.assertEqual(tops.lam_of(big), tops.LAMBDA_MAX)
+
+    def test_lambda_is_zero_when_the_pools_gains_are_noise(self):
+        """r with mean 0: the pool moved the price but did not improve it. The old n / (n + 10) rule leaned on it."""
+        noise = tops.new_pool_record()
+        for k in range(60):
+            tops.update_pool(noise, (0.3 if k % 2 else -0.3) * (1 + 0.5 * math.sin(k)))
+        self.assertLess(abs(tops.lam_t(noise)[1]), 1)
+        self.assertEqual(tops.lam_of(noise), 0.0)
+        one = tops.new_pool_record()
+        tops.update_pool(one, 0.4)
+        self.assertAlmostEqual(abs(tops.lam_t(one)[1]), 1.0)
+        self.assertEqual(tops.lam_of(one), 0.0, "one lucky market is no evidence")
+        rng = random.Random(5)
+        hits = []
+        for _ in range(400):
+            rec = tops.new_pool_record()
+            for _ in range(22):
+                tops.update_pool(rec, rng.choice((-1, 1)) * rng.uniform(0.05, 0.4))
+            hits.append(tops.lam_of(rec))
+        self.assertGreater(sum(x == 0 for x in hits) / len(hits), 0.6, "|t| <= 1 about 68% of the time")
+        self.assertLess(sum(hits) / len(hits), 0.1)
+        self.assertLess(sum(x == tops.LAMBDA_MAX for x in hits) / len(hits), 0.25)
+
+    def test_lambda_approaches_the_fit_when_t_is_large(self):
+        rec = tops.new_pool_record()
+        for k in range(400):
+            tops.update_pool(rec, 0.1 + 0.05 * math.sin(k))
+        hat, t = tops.lam_t(rec)
+        self.assertGreater(t, 5, "decay caps the effective count at (1 + DECAY) / (1 - DECAY) ~ 58 markets")
+        self.assertGreater(tops.lam_of(rec), 0.95 * min(tops.LAMBDA_MAX, hat))
+        small = tops.new_pool_record()
+        for k in range(400):
+            tops.update_pool(small, 4.0 if k % 2 else -0.9)
+        hat, t = tops.lam_t(small)
+        self.assertLess(hat, tops.LAMBDA_MAX)
+        self.assertGreater(t, 4)
+        self.assertAlmostEqual(tops.lam_of(small), hat * (1 - 1 / t ** 2))
+        self.assertGreater(tops.lam_of(small), 0.9 * hat)
 
     def test_lambda_maximises_the_log_likelihood_to_second_order(self):
         rs = [0.5, -0.4, 0.6, -0.5, 0.3, 0.4, -0.3]
@@ -424,7 +467,7 @@ class TopsRouteTest(unittest.TestCase):
         with urllib.request.urlopen(f"http://127.0.0.1:{httpd.server_address[1]}/tops", timeout=5) as res:
             out = json.loads(res.read())
         self.assertEqual(res.status, 200)
-        for key in ("halfLife", "priorK", "lambdaShrinkK", "floor", "cap", "lambdaMax", "series"):
+        for key in ("halfLife", "priorK", "floor", "cap", "lambdaMax", "series"):
             self.assertIn(key, out)
         s = out["series"]["city_pulse"]
         self.assertEqual(set(s), {"lambdaNow", "traders", "futuresWeight", "history"})

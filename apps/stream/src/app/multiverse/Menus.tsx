@@ -636,7 +636,7 @@ function pulseSpan(markets: Market[]): string {
   const f = pulseOf(markets)?.futures;
   if (!f) return DASH;
   const ends = f.paths.filter((p, i) => f.alivePaths[i] && p.length).map((p) => p[p.length - 1][1]);
-  const line = f.lines.length === 1 ? ` · line ${fmtLevel(f.lines[0])}` : "";
+  const line = f.lines.length === 1 ? ` · line ${String(Number(f.lines[0].toFixed(2)))}` : "";
   if (!ends.length) return `futures ${DASH}${line}`;
   return `futures span ${fmtLevel(Math.min(...ends))}–${fmtLevel(Math.max(...ends))}${line}`;
 }
@@ -708,7 +708,7 @@ export function UnderTheHood({
       name: "Track record",
       text: "Computer traders who've been right move the opening odds a little.",
       live: trustLean(markets, traders),
-      quant: "TOPS: trust ∝ P(θ > 0); λ = Σw·r / Σw·r², shrunk n/(n + 10), capped at 0.3.",
+      quant: "TOPS: trust ∝ P(θ > 0); λ = Σw·r / Σw·r², shrunk by 1 − 1/t² (James–Stein), capped at 0.3.",
     },
   ];
   return (

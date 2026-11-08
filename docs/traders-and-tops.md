@@ -88,13 +88,25 @@ The opening price is `(1 − λ)·futures + λ·pool`. λ is how much the pool h
 every settle where the pool differed from the futures, `r = pool(winner) / futures(winner) − 1` is kept per series
 (same decay). The log likelihood of a λ-blend on those markets is `Σw·log(1 + λr)`; to second order it peaks at
 
-    λ̂ = Σw·r / Σw·r²,    then   λ = clamp(λ̂ · n/(n + 10), 0, 0.3)
+    λ̂ = Σw·r / Σw·r²,    t = Σw·r / √(Σw²·r²),    λ = clamp(λ̂ · max(0, 1 − 1/t²), 0, 0.3)
 
-`n/(n + 10)` is the same small-sample shrink as before (a prior worth 10 markets) and 0.3 is the old hard cap. A
-pool that has not beaten the futures gets λ = 0. The old rule, `0.3·S/(S + 0.05)` on the summed positive skill, was a
-guess about how skill should map to trust; this one measures it. The test
-`test_lambda_maximises_the_log_likelihood_to_second_order` checks λ̂ against a grid search of the quadratic and of
-the exact log likelihood.
+λ̂ is then shrunk by its own significance (positive-part James–Stein): `t = λ̂ / SE`. If the futures are calibrated,
+`E[r] = Σ_o futures(o)·(pool(o)/futures(o) − 1) = 0`, so the variance of `Σw·r` is `Σw²·r²` and
+`SE = √(Σw²·r²) / Σw·r²`, computed from the r themselves. A pool whose gains are within noise (`|t| ≤ 1`, about 68%
+of the time when they are pure noise) gets λ = 0; λ approaches λ̂ as t grows. 0.3 is the old hard cap. A pool that has
+not beaten the futures gets λ = 0. The rule was fixed before looking at any outcome (2026-11-08), after live /tops
+showed City Pulse at the 0.3 cap with every trader at P(θ > 0) 0.47–0.71 after 22 markets.
+
+- **Why not the fitted residuals** `e = 1 − λ̂·r` (the regression's sandwich SE)? With one market `e = 0`, so SE = 0,
+  t = ∞ and λ jumps to the cap on a single settle, the defect itself. Under the null-variance SE one market gives
+  `|t| = 1` and λ = 0. With more data the two agree to within the size of λ̂·r.
+- **The old `n/(n + 10)` shrink is dropped.** It counted markets, not evidence: live City Pulse's 22 markets (15.7
+  after decay) kept 61% of λ̂ whatever the r looked like. The James–Stein factor already does the small-sample work: m equal gains give `t² = m`
+  (its effective count under the decay), so `λ = λ̂·(1 − 1/m)`, and noise gives 0.
+- The old rule before that, `0.3·S/(S + 0.05)` on the summed positive skill, was a guess about how skill should map
+  to trust. The test `test_lambda_maximises_the_log_likelihood_to_second_order` checks λ̂ against a grid search of the
+  quadratic and of the exact log likelihood; `test_lambda_is_zero_when_the_pools_gains_are_noise` and
+  `test_lambda_approaches_the_fit_when_t_is_large` check the shrink.
 
 ## 5. Out of sample: old vs new
 
@@ -139,6 +151,21 @@ loop. The improvement is all λ.
 
 Shaved, not closed. The caps are why: λ ≤ 0.3 and a 40% weight move the price at most 12% of the way to one view.
 
+The tables above are the #102 run, where `new` was λ̂·n/(n + 10). **The significance shrink (§4), same command,
+2026-11-08** (City Pulse lines on the spread-fitted step by then, so the priors differ slightly from the tables
+above): `tops_replay.py` keeps the #102 rule as the variant `lam-102` and pairs `new` (now the James–Stein λ)
+against it, log loss per market, mean ± 1 SE, negative = James–Stein better:
+
+| window | n | new − lam-102 | mean λ lam-102 → new | λ > 0, lam-102 → new |
+|---|---|---|---|---|
+| all | 509 | −0.0001 ± 0.0005 | 0.132 → 0.065 | 253 → 116 |
+| opened ≥ 17:00 | 354 | −0.0000 ± 0.0006 | 0.153 → 0.088 | 206 → 109 |
+| opened ≥ 00:55 | 54 | +0.0008 ± 0.0011 | 0.123 → 0.083 | 36 → 17 |
+
+Both still beat the futures prior by the same amount (all: −0.0025 ± 0.0010 vs −0.0024 ± 0.0011). The rule halves
+the lean at no cost in log loss: Heathrow's λ > 0 count drops 107 → 31 (the tiny-r cap case in §7), hub_hour's mean
+λ 0.066 → 0, and City Pulse is unchanged within noise (+0.0002 ± 0.0007). Kept, as decided before the run.
+
 ## 6. Multiple testing: how many "skilled" traders by chance?
 
 10 trader-series have 5 or more settled views. `tops_permutation.py` re-walks the whole loop (views, records,
@@ -176,11 +203,13 @@ nothing). Statistic: the trader's undecayed mean log score over the day; p = sha
 - **One day of data.** 509 settled markets, five series, two traders with views on most of them (the Simulation,
   Camera Eye and Rain Radar have none in the replay: no recorded sim, no VIX round, no rain). Nothing here is
   significant after multiple-testing correction; the comparison can only say "not worse".
-- **λ is scale-free.** `Σr / Σr²` is set by the sign pattern of r, not its size: where the pool barely differs from
-  the futures (Heathrow at night), a run of tiny positive r drives λ to the 0.3 cap. Harmless there (the pool is
-  the futures, so the blend is too), but the cap is doing the work. The principled fix is a prior on λ with
-  precision in units of r² (so evidence is measured in information, not markets); not applied, because choosing
-  that prior after seeing this window would be tuning on it.
+- **λ̂ is scale-free; the shrink now measures evidence, the cap still binds.** `Σr / Σr²` grows as the pool's
+  moves shrink, so where the pool barely differs from the futures λ̂ is large. The James–Stein factor stops noise
+  from reaching the cap (a run of tiny r with |t| ≤ 1 now gives 0, not 0.3), but weak evidence times a large λ̂ still
+  can: the live ledger at 03:25 on 8 Nov had City Pulse at λ̂ = 1.93, t = 1.38 (decayed; 0.87 undecayed), so
+  `1.93 × (1 − 1/1.38²) = 0.92` → 0.3, and London VIX λ̂ = 1.71, t = 1.29 → 0.3. hub_surge (t = 0.59) and hub_hour
+  (one market, |t| = 1) went from 0.3 to 0. The price effect at the cap is small: City Pulse's median
+  |pool − futures| is 0.024, so λ = 0.3 moves its opening price about 0.7 points.
 - **The weights don't matter yet.** With two traders per series, a 5% floor and a 40% cap, any monotone rule gives
   nearly the same pool. The P(θ > 0) rule removes a tuned constant; it will matter with more traders.
 - **The Normal skill model is an approximation.** Log-score differences are skewed (a confident wrong view scores

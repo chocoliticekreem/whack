@@ -13,6 +13,22 @@ from test_city import CITY, MIN, OTHERS, SPOTS, T0, CityCase, Raw, crowding, pro
 
 MID = "city_pulse-1505"
 SETTLES = T0 + 5 * MIN
+NIGHT = 2.47 / 29.1  # CITY + 15 others at 0.30 is a pulse of 29.1; this scales it to the 03:20 reading
+
+
+def spread_sd(finals: list[float]) -> float:
+    q1, _, q3 = statistics.quantiles(finals, n=4)
+    return (q3 - q1) / mk.IQR_PER_SD
+
+
+def chosen_step(finals: list[float]) -> float:
+    """The coarsest step no wider than the futures' spread, else the finest."""
+    return next((s for s in mk.PULSE_STEPS if s <= spread_sd(finals)), mk.PULSE_STEPS[-1])
+
+
+class Paths:
+    def __init__(self, finals: list[float]):
+        self.paths = [[math.log(v)] for v in finals]
 
 
 def history(raw: Raw, level, until: int = T0, skip: tuple[int, ...] = ()) -> None:
@@ -60,6 +76,35 @@ class FitPulseTest(unittest.TestCase):
         self.assertIsNone(pricing.fit_pulse([], T0, 10))
 
 
+class PulseLineTest(unittest.TestCase):
+    def test_the_opening_favourite_stays_under_85_percent_down_to_a_spread_of_the_finest_step(self):
+        """Below an SD of ~0.01 even the 0.01 step can sit most of an SD from the median."""
+        rng = random.Random(7)
+        for sd in (0.01, 0.02, 0.03, 0.05, 0.1, 0.2, 0.4, 0.8, 1.5, 3.0):
+            for _ in range(200):
+                centre = rng.uniform(1.5, 40.0)
+                finals = [max(0.1, rng.gauss(centre, sd)) for _ in range(pricing.N_FUTURES)]
+                line = mk.pulse_line(Paths(finals))
+                over = sum(f > line for f in finals)
+                fav = max(pricing.smooth({"over": over, "under": len(finals) - over}).values())
+                self.assertLessEqual(fav, 0.85, (sd, centre, line))
+
+    def test_step_is_the_coarsest_no_wider_than_the_spread(self):
+        rng = random.Random(3)
+        for sd, step in ((2.0, 0.5), (0.6, 0.5), (0.3, 0.25), (0.15, 0.1), (0.07, 0.05), (0.02, 0.01)):
+            finals = [rng.gauss(20.0, sd) for _ in range(pricing.N_FUTURES)]
+            want = chosen_step(finals)
+            self.assertEqual(want, step, (sd, spread_sd(finals)))
+            line = mk.pulse_line(Paths(finals))
+            self.assertAlmostEqual(line, round(statistics.median(finals) / step) * step, places=9)
+            self.assertEqual(line, round(line, 2))
+
+    def test_label_is_the_line_as_written(self):
+        for line, text in ((2.5, "2.5"), (3.0, "3.0"), (2.35, "2.35"), (2.4, "2.4"), (2.25, "2.25"),
+                           (round(round(2.351 / 0.05) * 0.05, 2), "2.35"), (0.1 * 3, "0.3"), (12.75, "12.75")):
+            self.assertEqual(mk.line_label(line), text)
+
+
 class PulseTrendTest(CityCase):
     def build(self, store, now: int = T0, settles_at: int = SETTLES, mid: str = MID) -> mk.Market:
         return mk.build_city_pulse(mid, store, SPOTS, now, settles_at)
@@ -93,23 +138,52 @@ class PulseTrendTest(CityCase):
         self.assertEqual((later.spec["line"], later.open_model), (clean.spec["line"], clean.open_model))
         self.assertTrue(all(ts <= T0 for ts, _ in mk.pulse_devs(store, T0 - mk.PULSE_TREND_MS, T0)))
 
-    def test_prices_stay_in_the_odds_band_sum_to_one_and_the_line_is_on_a_half_point(self):
-        flat_profile(self.raw)
+    def test_prices_stay_in_the_odds_band_sum_to_one_and_the_line_is_on_the_step_the_spread_allows(self):
         for name, level in (("surge", lambda k: 1.6 if k == 0 else 1.0), ("crash", lambda k: 0.5 if k == 0 else 1.0),
-                            ("flat", lambda k: 1.0)):
+                            ("flat", lambda k: 1.0), ("night", lambda k: NIGHT * (1 + 0.004 * k)),
+                            ("day", lambda k: 1.0 + 0.04 * (k % 3))):
             with self.subTest(name):
                 raw = Raw()
                 self.addCleanup(raw.dir.cleanup)
                 flat_profile(raw)
                 history(raw, level)
                 m = self.build(raw.store(T0))
-                self.assertEqual((m.spec["line"] * 2) % 1, 0)
+                finals = [math.exp(p[-1]) for p in m.futures.sim.paths]
+                step = chosen_step(finals)
+                self.assertAlmostEqual(m.spec["line"], round(statistics.median(finals) / step) * step, places=9)
+                self.assertEqual(m.spec["line"], round(m.spec["line"], 2))
                 self.assertAlmostEqual(sum(m.open_model.values()), 1.0, places=9)
+                if statistics.pstdev(finals) > 0:
+                    self.assertLessEqual(max(m.open_model.values()), 0.85, (step, m.spec["line"], m.open_model))
                 for o, p in m.open_model.items():
                     self.assertTrue(pricing.P_FLOOR <= p <= pricing.P_CEIL, (o, p))
                     self.assertTrue(pricing.MIN_ODDS <= pricing.odds_of(p) <= pricing.MAX_ODDS)
                     odds = pricing.locked_odds(m.book.quote(m.open_model, o, 10), 10)
                     self.assertTrue(odds is None or pricing.MIN_ODDS <= odds <= pricing.MAX_ODDS, odds)
+
+    def test_a_quiet_night_gets_a_finer_line_than_a_half_point_and_the_label_shows_it(self):
+        """The 03:20 market on 8 Nov: pulse ~2.47 and falling, futures ~2.33-2.55, line 2.5, all 50 under (3%/97%)."""
+        flat_profile(self.raw)
+        history(self.raw, lambda k: NIGHT * (1 + 0.004 * k))
+        m = self.build(self.raw.store(T0))
+        finals = [math.exp(p[-1]) for p in m.futures.sim.paths]
+        self.assertLess(max(finals) - min(finals), 0.5, "a night-sized spread")
+        self.assertLess(chosen_step(finals), 0.5)
+        self.assertNotEqual((m.spec["line"] * 2) % 1, 0, m.spec["line"])
+        self.assertLessEqual(max(m.open_model.values()), 0.85, m.open_model)
+        label = mk.line_label(m.spec["line"])
+        self.assertEqual(m.options[0]["label"], f"Over {label}")
+        self.assertIn(f"over or under {label}?", m.question)
+        self.assertIn(f"exactly {label} or below counts as Under", m.rule)
+        self.assertEqual(float(label), m.spec["line"])
+
+    def test_a_wide_daytime_spread_keeps_the_half_point(self):
+        flat_profile(self.raw)
+        history(self.raw, lambda k: 1.0 + 0.04 * (k % 3))
+        m = self.build(self.raw.store(T0))
+        finals = [math.exp(p[-1]) for p in m.futures.sim.paths]
+        self.assertGreaterEqual(spread_sd(finals), 0.5)
+        self.assertEqual((m.spec["line"] * 2) % 1, 0)
 
     def test_without_the_usual_profile_it_is_the_old_walk(self):
         history(self.raw, lambda k: {0: 1.10, 1: 1.05}.get(k, 1.0))
