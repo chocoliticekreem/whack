@@ -24,6 +24,7 @@ import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import venue_agents
+import venue_ledger
 from data import MULTIVERSE_URL, SIM_POLL_S, SimFeed, Store, feeds, fetch_vix, load_hotspots, raw_root
 from exchange import Clock
 from server import RateLimit
@@ -194,7 +195,9 @@ def main() -> None:
     ap.add_argument("--retail", type=int, default=2000)
     ap.add_argument("--market-makers", type=int, default=12)
     ap.add_argument("--seed", type=int, default=11)
+    ap.add_argument("--fees", choices=("off", "kalshi"), default="kalshi" if venue_ledger.FEE_RATE_X100 else "off")
     args = ap.parse_args()
+    venue_ledger.FEE_RATE_X100 = venue_ledger.KALSHI_FEE_X100 if args.fees == "kalshi" else 0
     start = feeds.parse_ts(args.replay_from) if args.replay_from else None
     root, hotspots = raw_root(), load_hotspots()
     store = Store(root, hotspots)
@@ -212,7 +215,7 @@ def main() -> None:
     if start is None:
         threading.Thread(target=vix_poller, args=(store,), daemon=True).start()
         threading.Thread(target=sim_poller, args=(store.sim_feed,), daemon=True).start()
-    mode = f"replay from {args.replay_from} at 12x" if start else "live"
+    mode = (f"replay from {args.replay_from} at 12x" if start else "live") + f", fees {args.fees}"
     print(f"exchange venue on {HOST}:{PORT} ({mode}, data {root}, {len(V.accounts)} AI accounts, no house)",
           file=sys.stderr)
     ThreadingHTTPServer((HOST, PORT), Handler).serve_forever()

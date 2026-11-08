@@ -9,18 +9,22 @@ The exchange never takes a side. Every point sits in one of these accounts, and 
   price plus the NO side's, and settlement pays exactly 100 per contract to the winning side;
 - `fees`: taker fees, the exchange's only income, out of which qualifying market makers are paid rebates.
 
-Fees follow Kalshi's published schedule: a taker pays ceil(0.07 · C · P · (1 − P)) for C contracts at price P,
-worked in points here (1 point = 1 cent, a contract pays 100). Makers pay nothing. An account holding both YES and
+Fees are off by default: OverWatch is a points game with no exchange to fund. CITY_VENUE_FEE_X100=7 turns on Kalshi's
+published schedule, where a taker pays ceil(0.07 · C · P · (1 − P)) for C contracts at price P, worked in points
+here (1 point = 1 cent, a contract pays 100), makers pay nothing, and market makers that meet their obligations get a
+rebate out of the fees. An account holding both YES and
 NO on one contract is paid 100 per pair at once, which is how a holder sells: buying NO against a YES you hold
 returns the YES price.
 """
 from __future__ import annotations
 
+import os
 from collections import defaultdict
 
 from venue_book import PAYOUT, Fill, Order
 
-FEE_RATE_X100 = 7     # Kalshi's 0.07, with prices in points: fee = ceil(7 · C · P · (100 − P) / 10_000)
+FEE_RATE_X100 = int(os.environ.get("CITY_VENUE_FEE_X100") or 0)  # 7 = Kalshi's 0.07: ceil(7 · C · P · (100 − P) / 10_000)
+KALSHI_FEE_X100 = 7
 FEE_DIV = 10_000
 REBATE_SHARE = 0.25   # of a contract's taker fees, to the market makers that met their obligations on it
 

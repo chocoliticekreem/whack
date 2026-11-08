@@ -12,6 +12,7 @@ import tops
 import traders
 import venue
 import venue_agents
+import venue_ledger
 from data import Store
 from exchange import Clock
 from test_city import MIN, SPOTS, T0, Raw, city, vix_payload
@@ -22,6 +23,13 @@ from venue_ledger import FEE_DIV, ceil_div, fee_cap, fee_units
 
 HERE = Path(__file__).resolve().parent
 DELAY = 5_000  # city_pulse's speed bump (integrity.AGGREGATE)
+
+
+def kalshi_fees(case: unittest.TestCase) -> None:
+    """Fees are off by default; these tests check the fee and rebate maths with Kalshi's schedule on."""
+    p = mock.patch.object(venue_ledger, "FEE_RATE_X100", venue_ledger.KALSHI_FEE_X100)
+    p.start()
+    case.addCleanup(p.stop)
 
 
 def order(oid, side, price, qty, account="a", firm=None, tif="gtc", post_only=False) -> Order:
@@ -131,6 +139,19 @@ class BookTest(unittest.TestCase):
 
 
 class MoneyTest(unittest.TestCase):
+    def setUp(self):
+        kalshi_fees(self)
+
+    def test_fees_are_off_unless_switched_on(self):
+        with mock.patch.object(venue_ledger, "FEE_RATE_X100", 0):
+            m = FakeMarket("pulse")
+            v = venue_with(m, points=10_000)
+            self.trade(v, T0, ("b", "pulse", "no", 40, 10))
+            self.trade(v, T0 + DELAY + MIN_REST_MS, ("a", "pulse", "yes", 60, 10))
+            self.assertEqual((v.clearing.cash("a"), v.clearing.cash("b")), (9_400, 9_600))
+            self.assertEqual(v.clearing.ledger.get("fees"), 0)
+            self.assertEqual(fee_cap(10), 0)
+
     def test_fees_follow_kalshis_curve(self):
         self.assertEqual(ceil_div(fee_units(1, 50), FEE_DIV), 2)      # 1.75 rounds up
         self.assertEqual(ceil_div(fee_units(100, 50), FEE_DIV), 175)  # $1.75 per 100 contracts at 50c
@@ -337,6 +358,27 @@ class AgentTest(unittest.TestCase):
         self.assertLess(bid, 58)
         self.assertLess(100 - ask, 62)
 
+    def test_one_sided_flow_flags_a_fast_market_and_market_makers_widen_against_it(self):
+        m = FakeMarket("pulse", probs={"over": 0.5, "under": 0.5})
+        v = venue_with(m, people=("maker", "informed"), points=100_000)
+        bound = venue_agents.MarketMaker("bound", random.Random(1), half=2.0, designated=True)
+        v.add_agent(bound, 200_000)
+        v.gateway.submit("maker", "pulse", "no", 45, 200, T0)          # deep YES offer at 55
+        v.tick(T0 + DELAY)
+        calm = bound.quote_for(v, v.snapshot(T0 + DELAY)["contracts"]["pulse"], T0 + DELAY)
+        self.assertFalse(v.fast("pulse", T0 + DELAY))
+        for k in range(5):                                             # someone keeps buying YES
+            v.gateway.submit("informed", "pulse", "yes", 60, 10, T0 + DELAY + k * 1_000, tif="ioc")
+        v.tick(T0 + 2 * DELAY + 5_000)
+        now = T0 + 2 * DELAY + 5_000
+        self.assertTrue(v.fast("pulse", now), "one-sided flow is announced as a fast market")
+        c = v.snapshot(now)["contracts"]["pulse"]
+        bound.last_f["pulse"] = 50.0
+        toxic = bound.quote_for(v, c, now)
+        spread = lambda q: (100 - q["no"]) - q["yes"]  # noqa: E731
+        self.assertGreater(spread(toxic), spread(calm))
+        self.assertLessEqual(spread(toxic), venue.MAX_SPREAD_FAST)
+
     def test_a_designated_market_maker_never_quotes_wider_than_its_obligation(self):
         m = FakeMarket("pulse", probs={"over": 0.5, "under": 0.5}, closes=T0 + 60_000)
         v = venue_with(m, people=())
@@ -353,6 +395,7 @@ class AgentTest(unittest.TestCase):
         self.assertLessEqual(spread["bound"], venue.MAX_SPREAD)
 
     def test_a_market_maker_that_meets_its_obligations_earns_a_share_of_the_taker_fees(self):
+        kalshi_fees(self)
         m = FakeMarket("pulse", probs={"over": 0.5, "under": 0.5})
         v = venue_with(m, people=("taker",), points=100_000)
         steady = venue_agents.MarketMaker("steady", random.Random(1), half=2, size=40)

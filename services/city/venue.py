@@ -30,6 +30,9 @@ MAX_SPREAD = 6      # market-maker obligations (Kalshi Market Maker Program styl
 MIN_SIZE = 10       # smallest size on each side,
 UPTIME = 0.9        # and the share of open time quoted, to earn the rebate
 GRACE_MS = 10_000   # obligations start 10 s after a contract opens or reopens: no quote reaches a book sooner
+MAX_SPREAD_FAST = 12  # fast-market relief: the widest quote the obligation allows while a contract is fast
+FAST_IMBALANCE, FAST_VOLUME = 0.6, 20  # fast = one-sided flow (|net taker YES| / volume, last minute, >= 20 traded)
+FAST_MOVE = 0.03                       # or the forecast moved 3 points in the last minute
 
 
 class ShadowExchange(Exchange):
@@ -76,7 +79,9 @@ class Contract:
     close_last: int | None = None
     close_forecast: float | None = None
     open_ticks: int = 0
+    fast_ticks: int = 0
     quoted_ok: dict[str, int] = field(default_factory=lambda: defaultdict(int))
+    forecasts: list = field(default_factory=list)  # (ts, forecast) over the last minute
 
     def public(self) -> dict:
         m = self.market
@@ -144,6 +149,30 @@ class Venue:
         if tape and now - tape[-1].at <= FLOW_WINDOW_MS:
             return tape[-1].yes_price
         return max(1, min(99, round(100 * self.forecast(cid))))
+
+    def flow(self, cid: str, now: int) -> tuple[int, int]:
+        """(net taker YES contracts, contracts traded) over the last minute: public, from the tape."""
+        flow = volume = 0
+        for f in reversed(self.books[cid].tape):
+            if now - f.at > FLOW_WINDOW_MS:
+                break
+            flow += f.qty if f.taker_bought_yes else -f.qty
+            volume += f.qty
+        return flow, volume
+
+    def note_forecast(self, c: Contract, now: int) -> None:
+        c.forecasts.append((now, self.forecast(c.id)))
+        while c.forecasts and now - c.forecasts[0][0] > FLOW_WINDOW_MS:
+            c.forecasts.pop(0)
+
+    def fast(self, cid: str, now: int) -> bool:
+        """A fast market, announced to everyone: one-sided flow or a forecast jump in the last minute. Designated market
+        makers may then quote up to MAX_SPREAD_FAST wide and still meet their obligation."""
+        flow, volume = self.flow(cid, now)
+        if volume >= FAST_VOLUME and abs(flow) / volume >= FAST_IMBALANCE:
+            return True
+        seen = [f for _, f in self.contracts[cid].forecasts]
+        return bool(seen) and max(seen) - min(seen) >= FAST_MOVE
 
     def option_volume(self, m) -> dict[str, float]:
         """Contracts bought on each of a market's options so far (what the Contrarian fades)."""
@@ -248,9 +277,13 @@ class Venue:
         for cid, c in self.contracts.items():
             if c.done or c.closed or c.halted or self.src.status(c.market, now) != "open":
                 continue
+            self.note_forecast(c, now)
             if now - max(c.market.opened_at, c.reopened_at) < GRACE_MS:
                 continue
             c.open_ticks += 1
+            fast = self.fast(cid, now)
+            c.fast_ticks += fast
+            limit = MAX_SPREAD_FAST if fast else MAX_SPREAD
             best: dict[str, list] = {}
             for o in self.books[cid].resting.values():
                 if self.accounts[o.account].kind != "mm" or o.left < MIN_SIZE:
@@ -262,7 +295,7 @@ class Venue:
                     ask = PAYOUT - o.price
                     q[1] = ask if q[1] is None else min(q[1], ask)
             for mm, (bid, ask) in best.items():
-                if bid is not None and ask is not None and ask - bid <= MAX_SPREAD:
+                if bid is not None and ask is not None and ask - bid <= limit:
                     c.quoted_ok[mm] += 1
 
     def snapshot(self, now: int) -> dict:
@@ -273,18 +306,14 @@ class Venue:
             if c.done or self.src.status(c.market, now) != "open":
                 continue
             book = self.books[cid]
-            flow = volume = 0
-            for f in reversed(book.tape):
-                if now - f.at > FLOW_WINDOW_MS:
-                    break
-                flow += f.qty if f.taker_bought_yes else -f.qty
-                volume += f.qty
+            flow, volume = self.flow(cid, now)
             bid, ask = book.bid(), book.ask()
             out[cid] = {"id": cid, "market": c.market, "series": c.series, "option": c.option,
                         "outcomes": len(c.market.options), "forecast": self.forecast(cid), "bid": bid, "ask": ask,
                         "bidSize": book.size_at("yes", bid) if bid is not None else 0,
                         "askSize": book.size_at("no", PAYOUT - ask) if ask is not None else 0,
-                        "last": book.last, "flow": flow, "volume": volume, "closesAt": c.market.closes_at,
+                        "last": book.last, "flow": flow, "volume": volume, "fast": self.fast(cid, now),
+                        "closesAt": c.market.closes_at,
                         "openedAt": c.market.opened_at}
         return {"now": now, "contracts": out, "store": self.src.store}
 
