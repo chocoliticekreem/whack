@@ -56,9 +56,11 @@ It opens three doors:
     stands in.
   - **Hourly headlines:** which area has the busiest evening by the hour, and whether every Tube line keeps running
     smoothly.
-- **Click anywhere on the map to trade that spot.** If a real sensor is within 400 m (20 TfL stations and about 13
-  JamCams with fresh people counts), a local market opens for the round, settled only on that sensor. Elsewhere you
-  get a forecast and no bet.
+- **Click anywhere on the map to trade that area.** The pin finds the nearest real sensor (20 TfL stations and about
+  13 JamCams with fresh people counts) and opens its market for the round, settled only on that sensor: "Detected
+  area: Waterloo · 440 m".
+- **Switch to the Exchange** (top bar): the same markets on a live order book with no house, against 2,196 AI
+  accounts. A dark trading-terminal screen with a price chart, the book, trades, and your orders and positions.
 - **Seven AI traders bet on the same markets as you**, each reading one live feed: Tube Crowd (station crowding), Camera Eye (the
   London VIX), Line Watcher (Tube status), Rain Radar (rain), Plane Spotter (Heathrow holding stacks), The Contrarian
   (where the points are going) and Simulation (the agent simulation's forecast). Each sizes its bet by its edge, gives
@@ -195,7 +197,7 @@ everything behind it runs on one laptop.
   Circus and central-London street seeds were built once from Mirrorverse's three.js London twin; the twin itself is
   no longer in the repo. New at WHACK: the recorder, both agent simulations and the London VIX, the city and local
   markets, pricing, the AI traders and the TOPS loop, the integrity rules, the wallet and portfolio, scenario mode, the
-  order-book venue prototype and the OverWatch UI.
+  order-book exchange and the OverWatch UI.
 
 ## Challenges we ran into
 We built with a small team and many parallel AI coding agents. The agents wrote code fast; the hard part was
@@ -217,7 +219,9 @@ changed the product:
   meant settling on a number someone could already see. The owner chose fair, and to show the wait.
 - **"What do the twin and the simulation add besides looking cool?"** An honest answer was "nothing measurable yet":
   our central-London simulation loses to "nothing changes". So we took it out of the prices, let it trade as one more
-  trader, and gave it the job data can't do: what-ifs.
+  trader, and built what-ifs on it. Then we took the what-if panel off the trading screen too: a public what-if
+  either repeats what the price knows or hands everyone a free edge against the house. Its use is planning, not
+  betting.
 - **"Marshall Wace really likes loop engineering."** The traders kept public records that fed into nothing. We closed
   the loop (#93). Later the owner pushed us to "double down on technicality behind the scenes… the algos", not more
   infrastructure: quarter-Kelly stakes in place of a flat 10%, a Bayesian skill estimate in place of a softmax whose

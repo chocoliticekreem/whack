@@ -32,11 +32,11 @@ citations below point at 1053c8d.
   per round.
 - **Restart** rebuilds open hourly markets from their records and reads the position cap from the ledger (#81).
 
-**An order-book venue now implements [exchange-design.md](exchange-design.md), as a prototype beside this one** (#90,
-#94). `services/city/venue_server.py` (:8062) lists the same markets on one order book per binary contract with no
+**An order-book venue implements [exchange-design.md](exchange-design.md), live at `/multiverse/exchange` beside this
+one** (#90, #94, #112, #121). `services/city/venue_server.py` (:8062) lists the same markets on one order book per binary contract with no
 house: AI market makers quote both sides, hedge-fund and retail agents trade, takers pay Kalshi's fee and makers pay
 none, and the same speed bumps, position limits, halts and settlement sources apply. It keeps its books and ledger in
-memory and reads the recorder files read-only, so nothing in this document changes: the live site still runs the LMSR
+memory and reads the recorder files read-only, so nothing in this document changes: the main screen still runs the LMSR
 house described below. How the two compare on price is not measured yet. Details in
 [services/city/README.md](../services/city/README.md#parallel-exchange-venue-8062).
 

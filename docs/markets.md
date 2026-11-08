@@ -40,7 +40,7 @@ Partly. Each bet is a **series**, and three places together define it:
 
 | Series | Question | Settles on | Notes |
 |---|---|---|---|
-| `local_station` | Will it get busier or quieter near {station} by HH:MM? | That station's TfL Crowding reading after close | Within 400 m of any of the 20 TfL Crowding stations |
+| `local_station` | Will it get busier or quieter near {station} by HH:MM? | That station's TfL Crowding reading after close | Within 400 m of any of the 20 TfL Crowding stations; a click farther away opens the nearest one's market, shown as "Detected area" |
 | `local_cam` | People on the {camera} camera at HH:MM: over or under N? | Median YOLO count from the first TfL image after close | Any of about 13 JamCams with fresh counts. 45 s delay, 10% cap |
 
 ### Disabled
