@@ -326,6 +326,12 @@ python3 -m unittest discover -s services/city -p test_venue.py
 python3 services/city/venue_demo.py      # walkthrough + pass/fail health report (generated data; --replay-from for recorded)
 ```
 
+**The page:** `/multiverse/exchange` in the web app (proxied through `/api/venue/*` to `VENUE_URL`, default
+`http://127.0.0.1:8062`). It shows every contract with its bid, ask and forecast, the order-book ladder, the trade
+tape, a fast-market flag, a ticket to buy YES or NO with a limit, your position with a sell button, and who is trading
+by group. **To put it on the public site:** on the laptop running the city server, start `venue_server.py`, run
+`cloudflared tunnel --url http://localhost:8062`, and set Vercel's `VENUE_URL` to that tunnel URL.
+
 Env: `CITY_VENUE_PORT` (8062), `CITY_VENUE_HOST` (127.0.0.1), plus `CITY_RAW` and `MULTIVERSE_URL` as above.
 Flags: `--retail`, `--market-makers`, `--seed`. Endpoints: `GET /health /contracts /book?contract= /stats
 /leaderboard /positions?account=` (X-Player-Token), `POST /account/new {name}`, `POST /order {account, contract, side,
