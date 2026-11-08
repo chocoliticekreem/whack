@@ -22,7 +22,7 @@ in [docs/build.md](docs/build.md) §0.
 - **You can exit before settlement.** On the main screen a bet is held until its market settles on the real reading.
   On the Exchange, as on Kalshi, you can sell a position back into the order book at any moment before then: take a
   profit when the price has moved your way, or cut a loss when the live data turns against you. The 12 market makers
-  quote both sides, so there is a price to sell into, and the gateway nets your sell against what you hold, so
+  quote both sides, so there is nearly always a price to sell into, and the gateway nets your sell against what you hold, so
   selling never counts against your position limit. Waiting for settlement is a choice, not a lock-in.
 
 ## Quick start
