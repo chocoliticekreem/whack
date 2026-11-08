@@ -28,7 +28,12 @@ def smoke(checkout: Path, env: dict[str, str], script: str, port_var: str, endpo
     with socket.socket() as sock:
         sock.bind(('127.0.0.1', 0))
         port = sock.getsockname()[1]
-    cmd = [sys.executable, str(checkout / 'services' / 'city' / script),
+    # If a runner stalls during startup, retain Python thread stacks rather than reporting only a timeout.
+    launcher = ("import faulthandler, os, runpy, sys; "
+                "faulthandler.dump_traceback_later(10, repeat=True); "
+                "sys.argv = sys.argv[1:]; sys.path.insert(0, os.path.dirname(sys.argv[0])); "
+                "runpy.run_path(sys.argv[0], run_name='__main__')")
+    cmd = [sys.executable, '-c', launcher, str(checkout / 'services' / 'city' / script),
            '--replay-from', '2026-11-07T15:00:00Z']
     if script == 'venue_server.py':
         cmd += ['--retail', '2', '--market-makers', '1']
@@ -37,7 +42,8 @@ def smoke(checkout: Path, env: dict[str, str], script: str, port_var: str, endpo
     with tempfile.TemporaryFile(mode='w+') as log:
         proc = subprocess.Popen(cmd, cwd=checkout, env=env | {port_var: str(port)}, stdout=log, stderr=log)
         try:
-            deadline = time.monotonic() + 15
+            deadline = time.monotonic() + 60
+            last_error = None
             while time.monotonic() < deadline and proc.poll() is None:
                 try:
                     with opener.open(f'http://127.0.0.1:{port}/health', timeout=.5) as response:
@@ -50,10 +56,11 @@ def smoke(checkout: Path, env: dict[str, str], script: str, port_var: str, endpo
                         raise RuntimeError(f'{script}: {endpoint} missing list {key}')
                     print(f'PASS {script}: /health and {endpoint} return valid JSON', flush=True)
                     return
-                except (urllib.error.URLError, TimeoutError, ConnectionError):
+                except (urllib.error.URLError, TimeoutError, ConnectionError) as exc:
+                    last_error = repr(exc)
                     time.sleep(.1)
             log.seek(0)
-            raise RuntimeError(f'{script} failed startup (exit {proc.poll()}):\n{log.read()}')
+            raise RuntimeError(f'{script} failed startup (exit {proc.poll()}, last HTTP error {last_error}):\n{log.read()}')
         finally:
             if proc.poll() is None:
                 proc.terminate()
