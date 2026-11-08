@@ -569,11 +569,12 @@ class LocalMarkets:
         rnd = self.ex.rounds.get(at, {"markets": []})
         return [self.ex.markets[i] for i in rnd["markets"] if self.ex.markets[i].sub.startswith("local_")]
 
-    def allow(self, player: str) -> bool:
+    def wait_s(self, player: str) -> int:
+        """Seconds until `player` may open another local market; 0 when they may now."""
         q, t = self.hits.setdefault(player, deque()), self.clock()
         while q and q[0] <= t - CREATE_WINDOW_S:
             q.popleft()
-        return len(q) < CREATE_N
+        return 0 if len(q) < CREATE_N else max(1, math.ceil(q[0] + CREATE_WINDOW_S - t))
 
     def view(self, m: Market, now: int, lat: float | None = None, lon: float | None = None) -> dict:
         s = m.spec["sensor"]
@@ -604,8 +605,9 @@ class LocalMarkets:
         if len(self.in_round(at)) >= MAX_PER_ROUND:
             raise LocalLimit(f"{MAX_PER_ROUND} local markets are already open this round; trade one of their pins",
                              "local_cap")
-        if not self.allow(player):
-            raise LocalLimit(f"At most {CREATE_N} new local markets a minute; trade one you opened", "rate_limited")
+        if wait := self.wait_s(player):
+            raise LocalLimit(f"At most {CREATE_N} new local markets a minute; you can open another in {wait} s",
+                             "rate_limited")
         reasons = []
         for s in near:
             if (m := self.ex.markets.get(market_id(s, at))) is not None:
