@@ -70,9 +70,11 @@ export function CityStrip({ signals }: { signals: CitySignals | null }) {
         <span className="tl-tick" title={worst?.reason || undefined}>
           <span className="tl-tick-name">Tube</span>
           <span className="tl-data">
-            {lines.good}/{lines.of}
+            {lines.good} of {lines.of}
           </span>
-          <span className="tl-tick-note">{worst ? `${worst.name} ${worst.desc.toLowerCase()}` : "all normal"}</span>
+          <span className="tl-tick-note">
+            lines normal{worst ? ` · ${worst.name} ${worst.desc.toLowerCase()}` : ""}
+          </span>
         </span>
       )}
       {football && (

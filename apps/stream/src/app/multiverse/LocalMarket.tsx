@@ -6,7 +6,7 @@ import { MapPin, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { getCityMap, onMapPick } from "./CityMapGL";
 import { isLandscapePhone } from "./Live";
-import { londonClock } from "./city-store";
+import { countdown, londonClock } from "./city-store";
 import type { Market } from "./city-types";
 
 /** The sensor a local market settles on (services/city/local.py). */
@@ -34,7 +34,7 @@ type View =
   | { kind: "loading" }
   | { kind: "market"; id: string; sensor: LocalSensor; distanceM?: number }
   | { kind: "forecast"; data: ForecastOnly }
-  | { kind: "error"; text: string };
+  | { kind: "error"; text: string; reopen?: { at: number; lat: number; lon: number } };
 
 const LIST_MS = 5000;
 const CARD_W = 340;
@@ -128,7 +128,7 @@ export function LocalMarket({
             body: JSON.stringify({ player, lat: la, lon: lo }),
             cache: "no-store",
           });
-          return { status: res.status, data: (await res.json()) as { market?: LocalMarketJson; forecastOnly?: ForecastOnly; error?: string } };
+          return { status: res.status, data: (await res.json()) as { market?: LocalMarketJson; forecastOnly?: ForecastOnly; error?: string; code?: string } };
         };
         let { status, data } = await ask(lat, lon);
         let snapped: number | undefined;
@@ -142,7 +142,11 @@ export function LocalMarket({
           onMarket(data.market);
           setView({ kind: "market", id: data.market.id, sensor: data.market.local.sensor, distanceM: snapped ?? data.market.local.distanceM });
         } else if (data.forecastOnly) setView({ kind: "forecast", data: data.forecastOnly });
-        else setView({ kind: "error", text: data.error ?? `The exchange said no (HTTP ${status})` });
+        else if (data.code === "round_closing") {
+          // Why: the next round opens the moment this one closes; count down and open this spot then, untapped.
+          const s = Number(/closes in (\d+) s/.exec(data.error ?? "")?.[1] ?? 0);
+          setView({ kind: "error", text: data.error ?? "", reopen: { at: Date.now() + (s + 1) * 1000, lat, lon } });
+        } else setView({ kind: "error", text: data.error ?? `The exchange said no (HTTP ${status})` });
       } catch {
         if (mine === seq.current) setView({ kind: "error", text: "Could not reach the exchange" });
       }
@@ -267,8 +271,39 @@ export function LocalMarket({
       {view.kind === "market" && error && <p className="lm-body lm-error">{error}</p>}
       {view.kind === "market" && (m ? card(m) : <div className="tl-market tl-empty">Opening the market…</div>)}
       {view.kind === "forecast" && <Forecast f={view.data} onTrade={(lat, lon) => void pick(lat, lon)} />}
-      {view.kind === "error" && <p className="lm-body">{view.text}</p>}
+      {view.kind === "error" &&
+        (view.reopen ? (
+          <Reopening at={view.reopen.at} onOpen={() => view.reopen && void pick(view.reopen.lat, view.reopen.lon)} />
+        ) : (
+          <p className="lm-body">{view.text}</p>
+        ))}
     </div>
+  );
+}
+
+/** Ticks down to the next round, then opens the market on the pin the player already dropped. */
+function Reopening({ at, onOpen }: { at: number; onOpen: () => void }) {
+  const [now, setNow] = useState(() => Date.now());
+  const fire = useRef(onOpen);
+  useEffect(() => {
+    fire.current = onOpen;
+  }, [onOpen]);
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      const t = Date.now();
+      setNow(t);
+      if (t >= at) {
+        window.clearInterval(id);
+        fire.current();
+      }
+    }, 250);
+    return () => window.clearInterval(id);
+  }, [at]);
+  return (
+    <p className="lm-body">
+      This round has closed to new local markets. The next round opens in{" "}
+      <b className="tl-data">{countdown(at - now)}</b>; the market on your pin opens then, no need to tap again.
+    </p>
   );
 }
 
