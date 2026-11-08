@@ -4,6 +4,8 @@ import type { Market } from "./city-types";
 /** Plain words for each recurring question; the backend question, rule and line stay in the details sheet. */
 interface Copy {
   title: (at: string, m: Market) => string;
+  /** A race asked as one yes question about one area, e.g. "Will Waterloo see the biggest rise ... by 07:50?". */
+  yes?: (area: string, at: string) => string;
   labels?: Record<string, string>;
   /** Why the winner won, in a few words, e.g. "TfL said 20.1". */
   why?: (value: number | null, m: Market, r: Settled) => string | null;
@@ -37,7 +39,8 @@ function place(id: string | undefined): string {
 
 const COPY: Record<string, Copy> = {
   hub_surge: {
-    title: (at) => `Which area will see the biggest rise in busyness relative to usual by ${at}?`,
+    title: (at) => `Which area will see the biggest rise in busyness by ${at}?`,
+    yes: (area, at) => `Will ${area} see the biggest rise in busyness by ${at}?`,
     why: () => "its crowd grew the most",
   },
   city_pulse: {
@@ -71,6 +74,7 @@ const COPY: Record<string, Copy> = {
   },
   hub_hour: {
     title: (at) => `Which area has the busiest evening by ${at}?`,
+    yes: (area, at) => `Will ${area} have the busiest evening by ${at}?`,
     why: () => "it had the busiest evening",
   },
   clean_sheet: {
@@ -104,6 +108,23 @@ function copyOf(m: Market): Copy | null {
 export function plainTitle(m: Market): string {
   const c = copyOf(m);
   return c ? c.title(londonClock(m.settlesAt), m) : m.question;
+}
+
+/** True for a race (one winner among three or more areas): the card asks it as a yes question about one area. */
+export function isRace(m: Market): boolean {
+  return m.kind === "versus" && m.options.length >= 3;
+}
+
+/** The headline area for a race: the one whose chance is closest to 50%, so both "it will" and "it won't" are live
+ * and the question is worth answering (a 10% long shot would make "yes" a lottery ticket). Ties go to the likelier. */
+export function headlineOf(m: Market): string {
+  return [...m.options].sort((a, b) => Math.abs(a.prob - 0.5) - Math.abs(b.prob - 0.5) || b.prob - a.prob)[0].id;
+}
+
+export function plainYes(m: Market, optionId: string): string {
+  const c = copyOf(m);
+  const area = plainLabel(m, optionId);
+  return c?.yes ? c.yes(area, londonClock(m.settlesAt)) : `${plainTitle(m)} ${area}?`;
 }
 
 export function plainLabel(m: Market, optionId: string): string {

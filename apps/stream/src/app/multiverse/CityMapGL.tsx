@@ -50,6 +50,16 @@ export function onMapPick(fn: MapPick | null) {
   picker = fn;
 }
 
+const hubPickers = new Set<(hub: string) => void>();
+
+/** Race cards listen here: a click on a hub asks that area's yes question. Returns the unsubscribe. */
+export function onHubPick(fn: (hub: string) => void): () => void {
+  hubPickers.add(fn);
+  return () => {
+    hubPickers.delete(fn);
+  };
+}
+
 
 /** Room for the UI over the map, measured from the real panels: sidebar + traders on desktop, strip + sheet on a phone. */
 function padding() {
@@ -144,6 +154,7 @@ function makePin(lib: typeof import("maplibre-gl"), map: MapLibreMap, hub: Hotsp
     e.stopPropagation();
     map.easeTo({ center: [hub.lon, hub.lat], zoom: Math.max(map.getZoom(), 15.4), duration: 900 });
     picker?.({ lat: hub.lat, lon: hub.lon, hub: hub.id });
+    hubPickers.forEach((fn) => fn(hub.id));
   });
   const marker = new lib.Marker({ element: el, anchor: "center" }).setLngLat([hub.lon, hub.lat]).addTo(map);
   return { marker, el, pop, vs: el.querySelector(".cm-hub-vs") as HTMLSpanElement };
