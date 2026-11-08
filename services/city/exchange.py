@@ -66,6 +66,7 @@ class Exchange:
         self.calibration: dict[str, list[tuple[float, bool]]] = {"price": [], "model": []}
         self.series_calibration: dict[str, list[tuple[float, bool]]] = {s: [] for s in mk.SERIES}
         self.sat_out: dict[str, tuple[int, str]] = {}
+        self.sim_views: dict[str, tuple[int, dict | None]] = {}
         self.integrity = integrity.Integrity()
         self.local = local.LocalMarkets(self)
         self.ledger.ai_exposure = self.ai_exposure
@@ -80,6 +81,12 @@ class Exchange:
 
     def tick(self, now: int | None = None) -> None:
         now = self.clock.now() if now is None else now
+        self.advance(now)
+        self.open_round(now)
+        self.trade(now)
+
+    def advance(self, now: int) -> None:
+        """Read new data, then move every listed market on: observe, lock, close, settle."""
         self.store.refresh(now - mk.HISTORY_MS, now)
         self.integrity.scan(self.store, self.active(), now)
         for m in self.active():
@@ -92,11 +99,14 @@ class Exchange:
             except Exception as exc:  # noqa: BLE001 - the market stays unsettled and the next tick retries it
                 print(f"settle {m.id} failed, will retry: {type(exc).__name__}: {exc}", file=sys.stderr)
         self.settle_restored(now)
-        self.open_round(now)
+
+    def trade(self, now: int) -> None:
+        """Fill the pending bets that are due, then let the AI traders bet on the open markets."""
         self.integrity.fill_due(self, now)
         for m in self.active():
             if self.status(m, now) == "open":
                 self.ai_bets(m, now)
+        self.sim_views.clear()  # each view was for one instant; a later tick asks the simulation afresh
 
     def lock_if_decided(self, m: mk.Market, now: int) -> None:
         """Ask the series' settle function about the data so far. A final answer while bets are still open closes
@@ -170,17 +180,38 @@ class Exchange:
     def open_round(self, now: int) -> None:
         """Build every registered series once for the current round, all settling at the same 5-min mark. A bracket
         series whose favourite would still exceed 85% after its edges were placed is left out of the round."""
+        if round_for(now) not in self.rounds:
+            self.list_round(self.build_round(now))
+
+    def build_round(self, now: int) -> dict:
+        """The current round's markets, built but not listed, with the Simulation trader's view of each (its 4000
+        draws were most of a round open). It reads only the store, and the markets are visible to no one yet, so the
+        server runs it outside the request lock (the store is only written by the thread that calls this)."""
         at = round_for(now)
-        if at in self.rounds:
-            return
-        rnd = {"markets": [], "skipped": {}}
-        self.rounds[at] = rnd
+        built = []
         for sid, series in mk.SERIES.items():
             if series.due and not series.due(at):
                 continue
             m = series.build(f"{sid}-{local_time(at, '%H%M')}", self.store, self.spots, now, at)
             if m is None:
-                rnd["skipped"][sid] = (series.why_none and series.why_none(self.store, now)) or "no fresh reading"
+                built.append((sid, series, None, (series.why_none and series.why_none(self.store, now))
+                              or "no fresh reading", None))
+            else:
+                view = mk.sim_view(m, self.store, now) if m.sub in traders.PLAYS["sim"] else None
+                built.append((sid, series, m, None, view))
+        return {"at": at, "now": now, "built": built}
+
+    def list_round(self, plan: dict) -> None:
+        """Lists the markets build_round made. If the round was listed meanwhile (an on-demand market opened it
+        first), this one is dropped."""
+        at = plan["at"]
+        if at in self.rounds:
+            return
+        rnd = {"markets": [], "skipped": {}}
+        self.rounds[at] = rnd
+        for sid, series, m, why, view in plan["built"]:
+            if m is None:
+                rnd["skipped"][sid] = why
                 continue
             same = self.markets.get(m.id)
             if same is not None and same.settles_at == m.settles_at:  # relisted after a restart: keep its bets
@@ -198,6 +229,7 @@ class Exchange:
             self.markets[m.id] = m
             self.order.append(m.id)
             rnd["markets"].append(m.id)
+            self.sim_views[m.id] = (plan["now"], view)
 
     def add_market(self, m: mk.Market, now: int) -> None:
         """Lists an on-demand market (local.py) in the current round, as if open_round had built it."""
@@ -307,6 +339,9 @@ class Exchange:
 
     def ai_bets(self, m: mk.Market, now: int) -> None:
         ctx = {"spots": self.by_id}
+        seen = self.sim_views.pop(m.id, None)
+        if seen is not None and seen[0] == now:  # build_round's view for this same instant, made off the lock
+            ctx["sim_view"] = seen[1]
         for t in traders.TRADERS:
             tid = t["id"]
             if tid in m.decided:

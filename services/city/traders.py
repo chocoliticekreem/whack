@@ -253,7 +253,7 @@ SIM_EDGE = 0.05
 
 def sim_trade(m: Market, store: Store, now: int, ctx: dict):
     """The option whose probability under the simulation's forecast beats its price by the most, if by 5+ points."""
-    view = sim_view(m, store, now)
+    view = ctx["sim_view"] if "sim_view" in ctx else sim_view(m, store, now)
     if not view:
         return None
     prices = m.prices()

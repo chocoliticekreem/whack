@@ -6,12 +6,14 @@ Every query takes `now` and never returns a record stamped after it, so replay c
 from __future__ import annotations
 
 import bisect
+import functools
 import gzip
 import json
 import os
 import sys
 import urllib.error
 import urllib.request
+import zlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -34,6 +36,9 @@ SIM_POLL_S = 30
 SIM_MAX_AGE_MS = 3 * 60_000
 SIM_HORIZONS = (5, 15, 60)
 WEEKDAYS = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
+BAND_MS = 15 * 60_000
+# A recorder file read while it is still being appended to: a cut gzip member, or a cut last line.
+PARTIAL_READ = (OSError, EOFError, zlib.error)
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
 
 
@@ -169,7 +174,14 @@ def parse_profile(payload: Any) -> tuple[str, dict[str, dict[str, float]]] | Non
 
 def band_of(ms: int) -> tuple[str, str]:
     """(weekday code, "HH:MM" start of the 15-min TfL band) for a timestamp, Europe/London."""
-    d = datetime.fromtimestamp(ms / 1000, LONDON)
+    return _band(ms // BAND_MS)
+
+
+@functools.lru_cache(maxsize=4096)
+def _band(slot: int) -> tuple[str, str]:
+    # Why cached: the sim trader prices thousands of draws per market, each reading the typical day, and this ran
+    # under the exchange lock. London's UTC offset is whole hours, so a UTC 15-min slot is exactly one local band.
+    d = datetime.fromtimestamp(slot * BAND_MS / 1000, LONDON)
     return WEEKDAYS[d.weekday()], f"{d.hour:02d}:{d.minute - d.minute % 15:02d}"
 
 
@@ -223,6 +235,27 @@ def fetch_sim(url: str = SIM_URL, timeout: float = 3.0) -> dict | None:
         return None
 
 
+def read_profile(path: Path) -> tuple[dict[str, dict[str, dict[str, float]]], bool]:
+    """({naptan: {weekday: {band: typical}}}, read to the end) for one crowding_profile file. A later line for the same
+    station replaces an earlier one. A cut gzip member or a half-written last line ends the read early (False)."""
+    out: dict[str, dict[str, dict[str, float]]] = {}
+    opener = gzip.open if path.suffix == ".gz" else open
+    try:
+        with opener(path, "rt") as f:
+            for line in f:
+                if not line.endswith("\n"):
+                    return out, False
+                try:
+                    got = parse_profile(json.loads(line).get("payload"))
+                except (ValueError, AttributeError):
+                    continue
+                if got:
+                    out[got[0]] = got[1]
+    except PARTIAL_READ:
+        return out, False
+    return out, True
+
+
 class SimFeed:
     """The last good simulation forecast: `now(ms)` returns it while it is at most 3 min old, else None."""
 
@@ -259,7 +292,7 @@ class Store:
         self.snap: dict[str, list[dict]] = {s: [] for s in SOURCES}
         self.files: dict[Path, tuple[float, int]] = {}
         self.profile: dict[str, dict[str, dict[str, float]]] = {}
-        self.profile_file: Path | None = None
+        self.profile_files: dict[Path, tuple[tuple[float, int] | None, dict[str, dict[str, dict[str, float]]]]] = {}
         self.sim_feed: SimFeed | None = None
         self.stamps: dict[int, dict[str, int]] = {}
 
@@ -290,25 +323,30 @@ class Store:
         self.load_profile()
 
     def load_profile(self) -> None:
-        """The newest recorded crowding_profile file (TfL's typical day per station; the recorder takes it once)."""
-        files = sorted(self.root.glob("crowding_profile/*/*.ndjson*"))
-        if not files or files[-1] == self.profile_file:
-            return
-        out = {}
-        opener = gzip.open if files[-1].suffix == ".gz" else open
-        try:
-            with opener(files[-1], "rt") as f:
-                for line in f:
-                    try:
-                        got = parse_profile(json.loads(line).get("payload"))
-                    except (ValueError, AttributeError):
-                        continue
-                    if got:
-                        out[got[0]] = got[1]
-        except (OSError, EOFError):
-            return
-        if out:
-            self.profile, self.profile_file = out, files[-1]
+        """TfL's typical day per station, from every recorded crowding_profile file (the recorder writes one a day,
+        one station per append). A file is re-read whenever its mtime or size changes, so one caught mid-write is
+        completed on a later poll. Per station and weekday the newest file that has it wins, so a station the new
+        day's file does not have yet keeps the previous day's profile."""
+        changed = False
+        for path in sorted(self.root.glob("crowding_profile/*/*.ndjson*")):
+            try:
+                st = path.stat()
+            except OSError:
+                continue
+            stamp = (st.st_mtime, st.st_size)
+            seen = self.profile_files.get(path)
+            if seen is not None and seen[0] == stamp:
+                continue
+            got, complete = read_profile(path)
+            # A cut read is kept (its whole lines are good) but not stamped, so the next poll reads the file again.
+            self.profile_files[path] = (stamp if complete else None, got)
+            changed = True
+        if changed:
+            merged: dict[str, dict[str, dict[str, float]]] = {}
+            for path in sorted(self.profile_files):
+                for nap, days in self.profile_files[path][1].items():
+                    merged.setdefault(nap, {}).update(days)
+            self.profile = merged
 
     def typical(self, naptan: str, ms: int) -> float | None:
         """TfL's typical fraction of baseline for this station, weekday and 15-min band (None if unknown or 0)."""
@@ -370,7 +408,7 @@ class Store:
                     if n <= done:
                         continue
                     self.ingest(source, line)
-        except (OSError, EOFError):
+        except PARTIAL_READ:
             pass  # the recorder is mid-write on the open hour; the rest is read next refresh
         self.files[path] = (mtime, n)
 

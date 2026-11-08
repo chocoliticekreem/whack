@@ -48,7 +48,15 @@ player's other pending bets, so firing several large bets at once needs a confir
 restart, bets on recorded markets settle from data; only unresolvable ones are refunded. A market that outlives the
 current round (an hourly headline) is listed again, rebuilt from its ledger record, with its bets on it; the position
 cap reads a player's booked stakes from the ledger, so bets placed before a restart still count. On a live start the
-server fetches the VIX once (5 s timeout) before the first round, so london_vix lists in it. `/leaderboard` ranks players by ledger equity. The server binds 127.0.0.1 (`CITY_HOST`) and refuses bodies
+server fetches the VIX once (5 s timeout) before the first round, after the first read of the recorder files (30-80 s
+on a full day; a frame fetched before it was stale by the time the round was built), so london_vix lists in it. `/leaderboard` ranks players by ledger equity.
+
+Every request and tick shares one lock, so a tick never holds it for the slow part of a round open: it settles under
+the lock, builds the next round's markets (and the Simulation trader's 4000-draw view of each) outside it, then lists
+them under it. The VIX poller hands its fetch to the ticker, which keeps every store write on one thread. Any holder
+that keeps the lock past 500 ms logs `lock held N ms by <tick part | METHOD /path>` to stderr. **A `/bet` that times
+out on the client may still have filled.** Retry with the same `idempotency_key`: the server returns the original bet
+(`"replayed": true`, same `betId`, filled, pending or cancelled) and moves no more points. A new key is a new bet. The server binds 127.0.0.1 (`CITY_HOST`) and refuses bodies
 over 16 KB. `Ledger.audit()` re-checks every invariant from the raw entries. A `/bet` is accepted as pending and fills
 after the series' delay (see Integrity below); `GET /bet?player=&id=` shows it pending, filled or cancelled, and
 `/positions` lists the pending ones under `pending`.
@@ -64,7 +72,10 @@ The series registry is in `markets.py`. Adding one is self-contained: a `build` 
 enabled=True))`, and a `PLAYS` entry in `traders.py` for each trader whose feed informs it. `due(round)` limits a series
 to some rounds (the hourly headlines), `settles_early` lets it resolve before settlesAt, `enabled=False` keeps it
 registered but out of the lineup. The lineup is the data-backed one from `docs/questions.md`; *vs usual* = live TfL %
-÷ TfL's typical % for that weekday and 15-min band (`crowding_profile`).
+÷ TfL's typical % for that weekday and 15-min band (`crowding_profile`). The recorder writes a new profile file each
+day, one station per append (about 00:03 UTC). The store re-reads a profile file whenever its mtime or size changes,
+reads a cut gzip member up to the cut and tries again on the next tick, and per station and weekday uses the newest
+file that has it, so a station the new day's file does not have yet keeps yesterday's profile.
 
 | series | when | kind | question | settles on |
 |---|---|---|---|---|
