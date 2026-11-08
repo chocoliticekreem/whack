@@ -1008,6 +1008,10 @@ def try_settle(m: Market, store: Store, now: int):
 
 def observe(m: Market, store: Store, now: int) -> None:
     """Feed new readings of the market's feed (up to settlesAt) to its futures and its jump detector."""
+    if m.spec.get("urban"):
+        if now < m.closes_at:
+            m.futures.sim.refresh(now)
+        return
     for ts, snap in store.between(m.feed, m.last_obs_ts + 1, min(now, m.settles_at)):
         if nothing_new(m, snap):
             m.last_obs_ts = ts
@@ -1049,3 +1053,7 @@ def jump_of(m: Market, ts: int, snap: dict, store: Store | None = None) -> str |
             if abs(z) > JUMP_SIGMA:
                 return f"jump: {m.spec['names'][oid]} {z:+.1f}σ"
     return None
+
+
+# Register the additional London questions after the shared helpers are defined.
+import urban  # noqa: E402,F401

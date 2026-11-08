@@ -9,6 +9,7 @@ import bisect
 import functools
 import gzip
 import json
+import math
 import os
 import sys
 import urllib.error
@@ -24,11 +25,13 @@ sys.path.append(str(HERE.parent / "multiverse"))
 import feeds  # noqa: E402  (read-only reuse: parse_ts, alt_root)
 
 LONDON = ZoneInfo("Europe/London")
-SOURCES = ("crowding", "line_status", "jamcams", "rain_now", "bus", "aircraft", "scrape_fixtures", "vix")
+SOURCES = ("crowding", "line_status", "jamcams", "rain_now", "bus", "aircraft", "scrape_fixtures", "vix",
+           "bikepoint", "bus_detail", "camera_detail")
+RAW_SOURCES = {"bus_detail": "bus", "camera_detail": "jamcams"}
 # TfL Crowding and Open-Meteo publish every 5 min, so one missed poll (not every poll gap) halts them. Fixtures are
 # scraped every 30 min. `vix` is not a recorder source: the server polls the multiverse engine for it (live only).
 STALE_S = {"crowding": 360, "rain_now": 360, "line_status": 180, "jamcams": 180, "bus": 180, "aircraft": 180,
-           "scrape_fixtures": 3600, "vix": 180}
+           "scrape_fixtures": 3600, "vix": 180, "bikepoint": 240, "bus_detail": 180, "camera_detail": 180}
 BUS_DUE_S = 300
 MULTIVERSE_URL = os.environ.get("MULTIVERSE_URL", "http://127.0.0.1:8349").rstrip("/")
 SIM_URL = os.environ.get("SIM_URL", "http://127.0.0.1:8449").rstrip("/")
@@ -157,9 +160,55 @@ def reduce_fixtures(payload: Any, ctx: dict) -> dict | None:
     return {"fixtures": rows}
 
 
+def nonnegative(v) -> float | None:
+    """BikePoint counts arrive as strings; reject missing, negative and nonfinite counts."""
+    try:
+        x = float(v) if not isinstance(v, bool) else -1
+        return x if math.isfinite(x) and x >= 0 else None
+    except (TypeError, ValueError):
+        return None
+
+
+def reduce_bikes(payload, ctx):
+    out = {}
+    for row in payload if isinstance(payload, list) else []:
+        bikes, spaces = nonnegative(row.get("NbBikes")), nonnegative(row.get("NbEmptyDocks"))
+        lat, lon = num(row.get("lat")), num(row.get("lon"))
+        if row.get("id") and bikes is not None and spaces is not None and lat is not None and lon is not None:
+            out[row["id"]] = {"bikes": bikes, "spaces": spaces, "lat": lat, "lon": lon}
+    return out or None
+
+
+def reduce_bus_detail(payload, ctx):
+    out = {}
+    for row in payload if isinstance(payload, list) else []:
+        stop, vehicle, route = row.get("naptanId"), row.get("vehicleId"), row.get("lineName")
+        wait = nonnegative(row.get("timeToStation"))
+        if stop in ctx["stop_to_spot"] and vehicle and route and wait is not None:
+            # A physical stop identifies the direction; a vehicle repeated in a poll counts once.
+            out[f"{stop}|{route}|{vehicle}"] = {"stop": stop, "route": route, "wait": wait}
+    return out or None
+
+
+def reduce_camera_detail(payload, ctx):
+    from email.utils import parsedate_to_datetime
+    out = {}
+    for row in payload if isinstance(payload, list) else []:
+        yolo = row.get("yolo") or {}
+        people, vehicles, counted = (nonnegative(yolo.get(k)) for k in ("people", "vehicles", "at"))
+        try:
+            image = int(parsedate_to_datetime(row["lastModified"]).timestamp() * 1000)
+        except (KeyError, TypeError, ValueError, OverflowError):
+            continue
+        if row.get("id") and people is not None and counted is not None and image <= counted:
+            out[row["id"]] = {"people": people, "vehicles": vehicles, "at": image}
+    return out or None
+
+
 REDUCERS: dict[str, Callable[[Any, dict], dict | None]] = {
     "crowding": reduce_crowding, "line_status": reduce_lines, "jamcams": reduce_jamcams,
     "rain_now": reduce_rain, "bus": reduce_bus, "aircraft": reduce_aircraft, "scrape_fixtures": reduce_fixtures,
+    "bikepoint": reduce_bikes, "bus_detail": reduce_bus_detail, "camera_detail": reduce_camera_detail,
 }
 
 
@@ -300,7 +349,7 @@ class Store:
         self.ctx: dict = {"stop_to_spot": {s: h["id"] for h in hotspots for s in h["busStops"]}}
         self.ts: dict[str, list[int]] = {s: [] for s in SOURCES}
         self.snap: dict[str, list[dict]] = {s: [] for s in SOURCES}
-        self.files: dict[Path, tuple[float, int]] = {}
+        self.files: dict[tuple[str, Path], tuple[float, int]] = {}
         self.profile: dict[str, dict[str, dict[str, float]]] = {}
         self.profile_files: dict[Path, tuple[tuple[float, int] | None, dict[str, dict[str, dict[str, float]]]]] = {}
         self.sim_feed: SimFeed | None = None
@@ -410,7 +459,7 @@ class Store:
         out = []
         while t <= end:
             for ext in (".ndjson.gz", ".ndjson"):
-                p = self.root / source / t.strftime("%Y-%m-%d") / f"{t.strftime('%H')}{ext}"
+                p = self.root / RAW_SOURCES.get(source, source) / t.strftime("%Y-%m-%d") / f"{t.strftime('%H')}{ext}"
                 if p.is_file():
                     out.append(p)
             t += timedelta(hours=1)
@@ -421,7 +470,8 @@ class Store:
             mtime = path.stat().st_mtime
         except OSError:
             return
-        seen_mtime, done = self.files.get(path, (None, 0))
+        key = (source, path)
+        seen_mtime, done = self.files.get(key, (None, 0))
         if seen_mtime == mtime:
             return
         n = 0
@@ -439,7 +489,7 @@ class Store:
                     self.ingest(source, line)
         except PARTIAL_READ:
             pass  # the recorder is mid-write on the open hour; the rest is read next refresh
-        self.files[path] = (mtime, n)
+        self.files[key] = (mtime, n)
 
     def ingest(self, source: str, line: str) -> None:
         try:

@@ -200,7 +200,10 @@ export function pausedText(reason: string | undefined, now: number): string {
 
 // TfL publishes station crowding 10-15 min late and we settle on the first reading it stamped after betting closed,
 // so these questions resolve well after their deadline. Everything else settles within a minute or two.
-const SLOW_SERIES = new Set(["hub_surge", "city_pulse", "hub_hour", "local_station"]);
+const SLOW_SERIES = new Set([
+  "hub_surge", "city_pulse", "hub_hour", "local_station",
+  "piccadilly_divergence", "london_breadth", "bank_waterloo_swing", "west_end_counts",
+]);
 const SLOW_RESULT_MS = 15 * 60_000;
 
 export function resultEta(m: Market): { at: number; slow: boolean } {

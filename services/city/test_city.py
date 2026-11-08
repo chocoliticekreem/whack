@@ -564,7 +564,7 @@ class RoundTest(CityCase):
 
     def test_the_lineup_and_oxford_busy_retired_but_registered(self):
         self.assertEqual(list(mk.SERIES), ["hub_surge", "city_pulse", "london_vix", "heathrow_stack", "hub_hour",
-                                           "clean_sheet"])
+                                         "clean_sheet", *mk.urban.QUESTIONS])
         self.assertIn("oxford-busy", mk.REGISTRY)
         self.assertFalse(mk.REGISTRY["oxford-busy"].enabled)
         ex = self.exchange()

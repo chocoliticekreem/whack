@@ -261,6 +261,10 @@ class Exchange:
         return "halted" if self.halt_reason(m, now) else "open"
 
     def halt_reason(self, m: mk.Market, now: int) -> str | None:
+        if m.spec.get("urban"):
+            reason = mk.urban.halt_reason(m, self.store, now)
+            if reason:
+                return reason
         if not self.store.fresh(m.feed, now):
             return "stale feed"
         return m.halt_reason or self.integrity.suspended(m, now)

@@ -362,3 +362,40 @@ seven traders (Tube Sigma → S1/S2/S5, Camadel → S3, Runway72 → S4, Line-en
 rain, Fadewater → all, Simulation → S1/S2/S5). `tops.py` is the TOPS loop (above). `eval_sim.py` scores the simulation (below). `signals.py` builds the per-market clues and `/signals`. `exchange.py` runs the rounds, betting, settlement and scores. `integrity.py` holds the bet delay, suspend-on-change and caps. `server.py` is the HTTP layer. `backup.py` copies the ledger every 5 minutes (above).
 `hotspots.json` lists the hotspots with their JamCams, bus stops and lines; the recorder adds these cams to its
 YOLO list.
+
+## Additional five-minute London questions
+
+`urban.py` registers eight more recurring series. The frontend displays their backend question text and opening
+clue without a separate copy mapping:
+
+| Series | Question | Yes means |
+|---|---|---|
+| `waterloo_bikes` | Will hire bikes become harder to find around Waterloo? | Fewer bikes in the fixed opening basket of docks within 800 m |
+| `west_end_docks` | Will a West End bike dock have no space? | At least one selected dock, with space at open, has zero spaces at settlement |
+| `kings_cross_bunching` | Will buses near King's Cross become more bunched together? | Mean predicted gap between the next two distinct vehicles shrinks, across fixed route/stop pairs |
+| `oxford_bus_wait` | Will the wait for a bus near Oxford Circus improve? | Mean predicted next-bus wait falls across the selected stops |
+| `piccadilly_divergence` | Will street crowds and Tube activity around Piccadilly move in opposite directions? | Camera people counts and station busyness move in strictly opposite directions |
+| `west_end_counts` | Will vehicle counts rise more than pedestrian counts in the West End? | The change in total vehicle counts exceeds the change in total people counts |
+| `london_breadth` | Will crowd growth spread across most of central London's monitored stations? | A strict majority of the fixed station basket gets busier |
+| `bank_waterloo_swing` | Will activity around Bank change more sharply than around Waterloo? | Bank's absolute change in live/typical busyness exceeds Waterloo's |
+
+Every question includes the round's target time. Ties/no change are No. These are endpoint contracts, not promises of
+continuous movement: a dock becoming full and emptying again before the settling reading does not count as full.
+Bikes and bus predictions use the first source fetch after close; cameras use each camera's first post-close image,
+and crowding each station's first post-close TfL stamp. Every frozen member must report, with source measurement
+times within 150 seconds. Otherwise settlement waits, then voids/refunds 20 minutes after close. Bus predictions are
+not confirmed arrivals; camera counts are not vehicle journeys. There are no synthetic settlement values.
+
+The store now also reads `bikepoint`, `bus_detail` (from the existing `bus` raw files), and `camera_detail` (from
+`jamcams`). Original bus/camera reducers remain available. At least three docks, two stops or route/stop pairs,
+one Piccadilly camera/two West End cameras, or 18 stations are required as appropriate. Physical bus stops define
+direction. No row, missing second bus, missing image timestamp or missing count is interpreted as zero.
+
+Opening prices bootstrap joint changes from at least eight distinct approximate five-minute historical pairs
+available in the preceding three hours; sparse or unaligned history skips the market with a reason in `/round`.
+Prices refresh from complete, fresh observations before close. This empirical model has not established live
+calibration or forecasting skill. The series use a 45-second order delay, wait for a new primary-feed poll before
+filling, and cap each player's position at 10% of balance. The existing Contrarian can trade them; specialist
+traders do not receive invented strategies. Restart settlement uses the persisted frozen basket and opening values.
+
+Run `python3 -m unittest discover -s services/city -p test_urban.py` for the additional contract tests.

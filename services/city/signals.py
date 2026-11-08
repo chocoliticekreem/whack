@@ -270,6 +270,9 @@ def lines_signal(store: Store, now: int) -> dict | None:
 
 def market(m, store: Store, now: int) -> list[dict]:
     """The 1–2 clues shown next to market `m` (see the module docstring for the shapes)."""
+    if m.spec.get("urban"):
+        import urban
+        return urban.clue(m)
     spots = [h for h in SPOTS if h["id"] in m.spec.get("stations", {})]
     out: list[dict | None] = []
     if m.sub in ("hub_surge", "hub_hour", "oxford-busy"):

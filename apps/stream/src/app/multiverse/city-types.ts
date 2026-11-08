@@ -129,6 +129,7 @@ export interface LineBoard {
 }
 
 export type Signal =
+  | { id: "urban"; text: string; data: Record<string, never> }
   | { id: "vs_usual"; text: string; data: HubsVsUsual }
   | {
       id: "usual_curve";

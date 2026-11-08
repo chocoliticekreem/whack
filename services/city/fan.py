@@ -109,6 +109,11 @@ def clean_reader(m):
 def series_view(m, store) -> tuple[str, str, list[float], object]:
     """(label, unit, lines, read(ts, snap) -> value | None) for the market's series."""
     sub, spec = m.sub, m.spec
+    if spec.get("urban"):
+        def read(ts, snap):
+            got = mk.urban.features(store, spec, ts)
+            return mk.urban.score(spec, spec["base"], got[0]) if got else None
+        return "Change score (positive = Yes)", "", [0.0], read
     if sub.startswith("local_"):
         import local
         return local.series_view(m, store)

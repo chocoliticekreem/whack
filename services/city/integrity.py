@@ -47,7 +47,9 @@ class Rule:
 
 
 # (what players call the check, seconds between our polls); keep in step with the recorder (recorder/record.py).
-CHECKS = {"crowding": ("TfL crowding check", 30), "aircraft": ("Heathrow radar check", 60)}
+CHECKS = {"crowding": ("TfL crowding check", 30), "aircraft": ("Heathrow radar check", 60),
+          "bikepoint": ("bike dock check", 120), "bus_detail": ("bus prediction check", 60),
+          "camera_detail": ("camera check", 90)}
 
 
 def hub_moved(m, prev: dict, snap: dict) -> str | None:
@@ -99,6 +101,9 @@ TABLE: dict[str, Rule] = {
     "heathrow_stack": replace(MODEL, suspends_on=(STACK,), waits_for="aircraft"),
 }
 BY_FEED = {"line_status": LOCAL, "crowding": CROWD}
+for _sid, (_feed, _, _) in mk.urban.QUESTIONS.items():
+    # These questions use a local observation or a small fixed basket: use the conservative local cap and delay.
+    TABLE[_sid] = Rule(45, (), 20, 0.10, waits_for=_feed)
 
 
 def rule_for(series: str) -> Rule:
