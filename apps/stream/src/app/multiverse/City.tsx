@@ -6,6 +6,7 @@ import { CityMapGL, flyToHotspots, type Pop } from "./CityMapGL";
 import { Coin, CoinText } from "./Coin";
 import {
   START_POINTS,
+  countdown,
   defaultName,
   fmtPts,
   freshWallet,
@@ -20,7 +21,7 @@ import {
 import type { BetResponse, CitySignals, Hotspot, LeaderRow, Market, MarketsResponse, SettleResponse, Trader } from "./city-types";
 import { CityStrip } from "./Clues";
 import { HowItWorks } from "./HowItWorks";
-import { Confetti, isLandscapePhone, useDismiss } from "./Live";
+import { Confetti, isLandscapePhone, reducedMotion, useDismiss } from "./Live";
 import { LocalMarket } from "./LocalMarket";
 import { Badge, MarketCard, phaseOf, type TipTarget } from "./MarketCard";
 import { EarningsMenu, TradersMenu } from "./Menus";
@@ -34,7 +35,6 @@ const POLL_MS = 3000;
 const SETTLE_POLL_MS = 2500;
 // Only used when the exchange is unreachable; while it answers, its own void rule decides.
 const GIVE_UP_MS = 600_000;
-const SHOW_SETTLED_MS = 25_000;
 const HISTORY_CAP = 200;
 
 const FEED_NAMES: Record<string, string> = {
@@ -329,24 +329,44 @@ export function City() {
     }
   }, [due, mock, applyResult]);
 
+  // Why: the feed is for fresh bets only. A closed market you hold a bet on lives in Orders until it settles.
   const shown = useMemo(() => {
     const live = new Set(feed?.markets.map((m) => m.id) ?? []);
     return Object.values(book.markets)
       .filter((m) => {
-        const r = results[m.id];
-        if (r) return now - r.at < SHOW_SETTLED_MS;
+        const phase = phaseOf(m, now, results[m.id]);
+        if (phase !== "open" && phase !== "halted") return false;
         // Why: local markets open on the map card; the list shows one only once you hold a bet on it.
         return (live.has(m.id) && !m.id.startsWith("local_")) || (wallet.bets[m.id] && !wallet.bets[m.id].done);
       })
       .sort((a, b) => rank(a) - rank(b) || a.closesAt - b.closesAt);
 
-    // Why: your own result is the payoff, so it leads; then what you can still bet on, then markets already locked.
     function rank(m: Market) {
-      if (results[m.id]) return wallet.bets[m.id] ? 0 : 3;
-      if (wallet.bets[m.id] || now < m.closesAt) return 1;
-      return 2;
+      return wallet.bets[m.id] ? 0 : 1;
     }
   }, [book, feed, results, now, wallet.bets]);
+  const listed = useMemo(() => new Set(shown.map((m) => m.id)), [shown]);
+  const openMarket = useCallback((id: string) => {
+    setSelected(id);
+    document.querySelector(`[data-market="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: reducedMotion() ? "auto" : "smooth", block: "center" });
+  }, []);
+
+  const [nextOpen, setNextOpen] = useState<number | null>(null);
+  const feedEmpty = shown.length === 0;
+  useEffect(() => {
+    if (!feedEmpty || mock) return;
+    let alive = true;
+    const load = () =>
+      void call<{ current: { closesAt: number } }>(false, "round")
+        .then((r) => alive && setNextOpen(r.ok ? r.data.current.closesAt : null))
+        .catch(() => alive && setNextOpen(null));
+    load();
+    const id = window.setInterval(load, 10_000);
+    return () => {
+      alive = false;
+      window.clearInterval(id);
+    };
+  }, [feedEmpty, mock]);
 
   const selectedMarket = shown.find((m) => m.id === selected) ?? null;
   const marketOf = useCallback((id: string) => book.markets[id], [book]);
@@ -571,6 +591,8 @@ export function City() {
             token={wallet.token}
             live={!mock && !!wallet.token}
             pulse={win?.key ?? 0}
+            listed={listed}
+            onOpenMarket={openMarket}
           />
           {broke && mock && (
             <button type="button" className="tl-refill" onClick={() => setWallet((w) => ({ ...w, points: START_POINTS, streak: 0 }))}>
@@ -695,7 +717,17 @@ export function City() {
             {betNote}
           </div>
         )}
-        {shown.length === 0 && <div className="tl-market tl-empty">Opening markets…</div>}
+        {shown.length === 0 && (
+          <div className="tl-market tl-empty">
+            {nextOpen != null && nextOpen > now ? (
+              <>
+                Next markets open in <span className="tl-data">{countdown(nextOpen - now)}</span>
+              </>
+            ) : (
+              "Opening markets…"
+            )}
+          </div>
+        )}
         {shown.map((m) => (
           <MarketCard
             key={m.id}

@@ -6,7 +6,8 @@ import { countdown, fmtW, type MyBet, type Settled } from "./city-store";
 import type { Market, Trader } from "./city-types";
 import { MiniSpark, Tick, signedW, toneOf, useCountUp, useDismiss } from "./Live";
 import { Badge, type TipTarget } from "./MarketCard";
-import { plainLabel, plainTitle, plainWatches, recordText } from "./plain";
+import { CoinText } from "./Coin";
+import { plainLabel, plainTitle, plainWatches, recordText, resultEta } from "./plain";
 
 const PANEL_POLL_MS = 2500;
 const SESSION_START = typeof window === "undefined" ? 0 : Date.now();
@@ -109,19 +110,63 @@ interface Position {
   betId: string;
   market: string;
   question: string;
+  option: string;
   label: string;
   stake: number;
   toWin: number;
+  placedAt: number;
   settlesAt: number;
 }
 
 interface HistoryRow {
   betId: string;
+  market: string;
   question: string;
+  option: string;
   label: string;
+  stake: number;
   pnl: number;
   result: "won" | "lost" | "void";
+  placedAt: number;
   settledAt: number;
+}
+
+/** A bet the exchange is still holding back (bet delay), from GET /positions' `pending`. */
+interface PendingOrder {
+  betId: string;
+  market: string;
+  option: string;
+  label: string;
+  stake: number;
+  placedAt: number;
+  fillsAt: number;
+}
+
+type OrderState =
+  | { kind: "pending"; fillsAt: number }
+  | { kind: "open"; settlesAt: number }
+  | { kind: "won" | "lost" | "void"; pnl: number }
+  | { kind: "cancelled" };
+
+interface Order {
+  key: string;
+  market: string;
+  question: string;
+  pick: string;
+  stake: number;
+  payout: number | null;
+  at: number;
+  state: OrderState;
+}
+
+/** A pending bet this tab saw vanish without filling: the exchange cancelled it. */
+interface Cancelled {
+  betId: string;
+  market: string;
+  option: string;
+  label: string;
+  stake: number;
+  at: number;
 }
 
 interface Row {
@@ -155,6 +200,8 @@ export function EarningsMenu({
   token,
   live,
   pulse,
+  listed,
+  onOpenMarket,
 }: {
   pnl: number;
   bets: Record<string, MyBet>;
@@ -165,8 +212,22 @@ export function EarningsMenu({
   token: string | null;
   live: boolean;
   pulse: number;
+  listed: Set<string>;
+  onOpenMarket: (market: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState<"session" | "orders">("session");
+  const [prevBets, setPrevBets] = useState(bets);
+  const [cancelled, setCancelled] = useState<Cancelled[]>([]);
+  if (prevBets !== bets) {
+    setPrevBets(bets);
+    const gone: Cancelled[] = [];
+    for (const b of Object.values(prevBets)) {
+      const was = b.pending?.betId;
+      if (was && !bets[b.market]) gone.push({ betId: was, market: b.market, option: b.option, label: b.label, stake: b.stake, at: now });
+    }
+    if (gone.length) setCancelled([...gone, ...cancelled].slice(0, 40));
+  }
   const btn = useRef<HTMLButtonElement>(null);
   const panel = useRef<HTMLDivElement>(null);
   useDismiss(open, () => setOpen(false), [btn, panel]);
@@ -176,17 +237,21 @@ export function EarningsMenu({
 
   const [positions, setPositions] = useState<Position[]>([]);
   const [history, setHistory] = useState<HistoryRow[]>([]);
+  const [serverPending, setServerPending] = useState<PendingOrder[]>([]);
   useEffect(() => {
     if (!open || !live || !token) return;
     let alive = true;
     const q = `player=${encodeURIComponent(player)}`;
     const load = async () => {
       const [p, h] = await Promise.all([
-        getJson<{ positions: Position[] }>(`positions?${q}`, token),
-        getJson<{ history: HistoryRow[] }>(`history?${q}&limit=6`, token),
+        getJson<{ positions: Position[]; pending?: PendingOrder[] }>(`positions?${q}`, token),
+        getJson<{ history: HistoryRow[] }>(`history?${q}&limit=200`, token),
       ]);
       if (!alive) return;
-      if (p) setPositions(p.positions);
+      if (p) {
+        setPositions(p.positions);
+        setServerPending(p.pending ?? []);
+      }
       if (h) setHistory(h.history);
     };
     void load();
@@ -257,6 +322,91 @@ export function EarningsMenu({
       });
   }, [live, history, bets, markets]);
 
+  const orders = useMemo(() => {
+    const out: Order[] = [];
+    const ids = new Set<string>();
+    const onServer = new Set<string>();
+    const named = (market: string, option: string, label: string, question: string) => {
+      const m = markets[market];
+      return { question: m ? plainTitle(m) : question, pick: m ? plainLabel(m, option) : label };
+    };
+    if (live) {
+      for (const h of history) {
+        ids.add(h.betId);
+        onServer.add(h.market);
+        out.push({
+          key: h.betId,
+          market: h.market,
+          ...named(h.market, h.option, h.label, h.question),
+          stake: h.stake,
+          payout: h.result === "won" ? h.stake + h.pnl : null,
+          at: h.placedAt,
+          state: { kind: h.result, pnl: h.pnl },
+        });
+      }
+      for (const p of positions) {
+        if (ids.has(p.betId)) continue;
+        ids.add(p.betId);
+        onServer.add(p.market);
+        out.push({
+          key: p.betId,
+          market: p.market,
+          ...named(p.market, p.option, p.label, p.question),
+          stake: p.stake,
+          payout: p.toWin,
+          at: p.placedAt,
+          state: { kind: "open", settlesAt: p.settlesAt },
+        });
+      }
+      for (const p of serverPending) {
+        if (ids.has(p.betId)) continue;
+        ids.add(p.betId);
+        out.push({
+          key: p.betId,
+          market: p.market,
+          ...named(p.market, p.option, p.label, ""),
+          stake: p.stake,
+          payout: null,
+          at: p.placedAt,
+          state: { kind: "pending", fillsAt: p.fillsAt },
+        });
+      }
+    }
+    // Why: a bet placed seconds ago is not on the server's lists yet; the local wallet shows it at once, on top.
+    const local = Object.values(bets);
+    local.forEach((b, i) => {
+      if (b.pending ? ids.has(b.pending.betId) : onServer.has(b.market)) return;
+      const m = markets[b.market];
+      const state: OrderState = b.pending
+        ? { kind: "pending", fillsAt: b.pending.fillsAt }
+        : b.done
+          ? { kind: b.done, pnl: b.done === "won" ? b.payout - b.stake : b.done === "lost" ? -b.stake : 0 }
+          : { kind: "open", settlesAt: m?.settlesAt ?? 0 };
+      out.push({
+        key: b.pending?.betId ?? `local-${b.market}`,
+        market: b.market,
+        ...named(b.market, b.option, b.label, ""),
+        stake: b.stake,
+        payout: b.pending ? null : b.payout,
+        at: Number.MAX_SAFE_INTEGER - local.length + i,
+        state,
+      });
+    });
+    for (const c of cancelled) {
+      if (ids.has(c.betId)) continue;
+      out.push({
+        key: `x-${c.betId}`,
+        market: c.market,
+        ...named(c.market, c.option, c.label, ""),
+        stake: c.stake,
+        payout: null,
+        at: c.at,
+        state: { kind: "cancelled" },
+      });
+    }
+    return out.sort((a, b) => b.at - a.at);
+  }, [live, history, positions, serverPending, bets, markets, cancelled]);
+
   const atRisk = rows.reduce((s, r) => s + r.stake, 0);
   const potential = rows.reduce((s, r) => s + (r.pendingS == null ? r.payout : 0), 0);
 
@@ -280,6 +430,27 @@ export function EarningsMenu({
         <>
           <div className="ow-sheet-scrim" aria-hidden />
           <div ref={panel} className="ow-drop ow-earn" role="dialog" aria-label="Your session">
+            <div className="ow-tabs" role="tablist">
+              <button type="button" role="tab" aria-selected={tab === "session"} onClick={() => setTab("session")}>
+                Session
+              </button>
+              <button type="button" role="tab" aria-selected={tab === "orders"} onClick={() => setTab("orders")}>
+                Orders <span className="tl-data">{orders.length}</span>
+              </button>
+            </div>
+            {tab === "orders" ? (
+              <OrderLog
+                orders={orders}
+                markets={markets}
+                now={now}
+                listed={listed}
+                onOpen={(id) => {
+                  setOpen(false);
+                  onOpenMarket(id);
+                }}
+              />
+            ) : (
+              <>
             <header className="ow-earn-head">
               <div>
                 <span className="ow-cap">This session</span>
@@ -367,9 +538,76 @@ export function EarningsMenu({
                 ))
               )}
             </section>
+              </>
+            )}
           </div>
         </>
       )}
     </>
+  );
+}
+
+const shortWait = (ms: number) => {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return s < 60 ? `${s}s` : countdown(ms);
+};
+
+function orderStatus(o: Order, m: Market | undefined, now: number): { text: string; tone?: "up" | "down"; wait?: boolean; muted?: boolean } {
+  const st = o.state;
+  if (st.kind === "pending") return { text: st.fillsAt > now ? `Filling in ${shortWait(st.fillsAt - now)}` : "Filling…", wait: true };
+  if (st.kind === "cancelled") return { text: "Cancelled", muted: true };
+  if (st.kind === "void") return { text: "Refunded", muted: true };
+  if (st.kind === "won") return { text: `Won ${signedW(st.pnl)}`, tone: "up" };
+  if (st.kind === "lost") return { text: `Lost ${signedW(st.pnl)}`, tone: "down" };
+  const eta = m ? resultEta(m) : null;
+  const at = eta?.slow ? eta.at : (m?.settlesAt ?? (st.kind === "open" ? st.settlesAt : 0));
+  if (at > now) return { text: `Result in ${shortWait(at - now)}` };
+  return { text: eta?.slow ? "Waiting for TfL…" : "Settling…" };
+}
+
+/** Every order this player made, newest first, each with a status that ticks with `now`. */
+function OrderLog({
+  orders,
+  markets,
+  now,
+  listed,
+  onOpen,
+}: {
+  orders: Order[];
+  markets: Record<string, Market>;
+  now: number;
+  listed: Set<string>;
+  onOpen: (market: string) => void;
+}) {
+  if (orders.length === 0) return <p className="ow-empty ow-orders-empty">No orders yet.</p>;
+  return (
+    <ol className="ow-orders">
+      {orders.map((o) => {
+        const s = orderStatus(o, markets[o.market], now);
+        const body = (
+          <>
+            <span className="ow-order-q">{o.question || o.pick}</span>
+            <span className="ow-order-st tl-data" data-tone={s.tone} data-wait={s.wait || undefined} data-muted={s.muted || undefined}>
+              <CoinText text={s.text} size={12} />
+            </span>
+            <span className="ow-order-pick">{o.pick}</span>
+            <span className="ow-order-amt tl-data">
+              <CoinText text={`${fmtW(o.stake)} → ${o.payout == null ? "…" : fmtW(o.payout)}`} size={12} />
+            </span>
+          </>
+        );
+        return (
+          <li key={o.key}>
+            {listed.has(o.market) ? (
+              <button type="button" className="ow-order" onClick={() => onOpen(o.market)}>
+                {body}
+              </button>
+            ) : (
+              <div className="ow-order">{body}</div>
+            )}
+          </li>
+        );
+      })}
+    </ol>
   );
 }
