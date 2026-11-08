@@ -9,6 +9,8 @@ ran through the public stack. Every call is logged in `scratch/*.jsonl`. Line nu
 close to a free lunch on hub_surge (9 of 11 wins, +143%). City Pulse opens at 97/3 and prices worse than a coin.
 The house lost to every kind of player.
 
+**Re-run:** [RERUN.md](RERUN.md) (Sat 22:36–Sun 00:31, on code with the #72 and #77 pricing fixes).
+
 ## How to run
 
 ```bash
