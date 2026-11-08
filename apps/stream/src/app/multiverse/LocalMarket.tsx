@@ -26,6 +26,7 @@ interface ForecastOnly {
   label: string;
   reason: string;
   note: string | null;
+  nearest?: { name: string; kind: string; lat: number; lon: number; distanceM: number };
   forecast: { at: number; horizonMin: number; people: number; segments: { id: string; people: number; distanceM: number }[] } | null;
 }
 
@@ -260,13 +261,13 @@ export function LocalMarket({
       </div>
       {view.kind === "market" && error && <p className="lm-body lm-error">{error}</p>}
       {view.kind === "market" && (m ? card(m) : <div className="tl-market tl-empty">Opening the market…</div>)}
-      {view.kind === "forecast" && <Forecast f={view.data} />}
+      {view.kind === "forecast" && <Forecast f={view.data} onTrade={(lat, lon) => void pick(lat, lon)} />}
       {view.kind === "error" && <p className="lm-body">{view.text}</p>}
     </div>
   );
 }
 
-function Forecast({ f }: { f: ForecastOnly }) {
+function Forecast({ f, onTrade }: { f: ForecastOnly; onTrade: (lat: number, lon: number) => void }) {
   const fc = f.forecast;
   return (
     <div className="lm-body lm-forecast">
@@ -284,7 +285,13 @@ function Forecast({ f }: { f: ForecastOnly }) {
       ) : (
         <span className="tl-muted">{f.note ?? "No forecast for this spot."}</span>
       )}
-      <span className="lm-why">{f.reason}. Nothing here can settle a bet, so there is nothing to trade.</span>
+      {f.nearest ? (
+        <button type="button" className="lm-nearest" onClick={() => onTrade(f.nearest!.lat, f.nearest!.lon)}>
+          Trade {f.nearest.name} instead · {f.nearest.distanceM.toLocaleString("en-GB")} m
+        </button>
+      ) : (
+        <span className="lm-why">Nothing here can settle a bet, so there is nothing to trade.</span>
+      )}
       <footer className="tl-src">
         <span className="tl-src-line">OverWatch central simulation, forecast only, not tradeable</span>
       </footer>

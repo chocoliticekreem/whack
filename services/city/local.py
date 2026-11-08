@@ -593,7 +593,10 @@ class LocalMarkets:
             far = nearest(self.ex.store, lat, lon, now, math.inf)
             why = (f"No TfL Crowding station or counted JamCam within {RADIUS_M} m" +
                    (f"; the nearest is {far[0]['name']}, {far[0]['distanceM']:,} m away" if far else ""))
-            return {"forecastOnly": self.forecast_only(lat, lon, now, why)}
+            out = self.forecast_only(lat, lon, now, why)
+            if far:
+                out["nearest"] = {k: far[0][k] for k in ("name", "kind", "lat", "lon", "distanceM")}
+            return {"forecastOnly": out}
         left = at - mk.CLOSE_MS - now
         if left < MIN_OPEN_MS:
             raise LocalLimit(f"This round closes in {max(0, left) // 1000} s; local markets open again with the next "

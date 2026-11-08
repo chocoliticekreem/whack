@@ -146,6 +146,13 @@ class ForecastOnlyTest(SyntheticCase):
         self.assertIsNone(fo["forecast"])
         self.assertEqual(len(self.ex.markets), before)
 
+    def test_forecast_only_names_the_nearest_sensor_and_clicking_it_opens_its_market(self):
+        near = self.click(*FAR)["forecastOnly"]["nearest"]
+        self.assertGreater(near["distanceM"], local.RADIUS_M)
+        out = self.click(near["lat"], near["lon"])
+        self.assertIn("market", out)
+        self.assertEqual(out["market"]["local"]["sensor"]["name"], near["name"])
+
     def test_the_forecast_reads_the_nearest_street_segments_from_the_simulation(self):
         origin = {"lat": FAR[0], "lon": FAR[1]}
         geo = {"origin": origin, "segments": [{"id": "s0", "line": [[-30, 0], [30, 0]]},
