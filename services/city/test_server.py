@@ -147,6 +147,7 @@ class PendingBets(HttpCase):
                              out["betId"])
             self.assertEqual(self.call(f"/bet?player={pid}&id={out['betId']}", token="wrong")[0], 401)
             self.assertEqual(self.call(f"/bet?player={pid}&id=nope", token=token)[0], 404)
+            self.raw.repoll(m.feed, out["fillsAt"])
             with server.LOCK:
                 self.ex.tick(out["fillsAt"])
             got = self.call(f"/bet?player={pid}&id={out['betId']}", token=token)[1]

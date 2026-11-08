@@ -297,7 +297,7 @@ function Details({
           <section className="tl-d-sec">
             <h3>Fair play</h3>
             <p className="tl-muted">
-              Bets fill {ig.delayS} s after you place them, at the price then; if the market pauses or closes first the bet is
+              Bets fill {ig.fillsAfter ? `after ${ig.fillsAfter} and at least ${ig.delayS} s after you place them` : `${ig.delayS} s after you place them`}, at the price then; if the market pauses or closes first the bet is
               cancelled and your stake is untouched.
               {ig.suspendsOn.length > 0 && ` The market pauses for ${ig.coolOffS} s whenever ${ig.suspendsOn.join(" or ")}.`} Max{" "}
               {ig.capPct}% of your balance in this market.
@@ -465,7 +465,7 @@ export function MarketCard({
           </button>
           {m.integrity && m.integrity.delayS > 0 && (
             <span className="tl-muted tl-stake-note">
-              Fills {m.integrity.delayS} s after you confirm, at the price then
+              Fills {m.integrity.fillsAfter ? `after ${m.integrity.fillsAfter}` : `${m.integrity.delayS} s after you confirm`}, at the price then
             </span>
           )}
         </div>

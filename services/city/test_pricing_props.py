@@ -9,12 +9,13 @@ import unittest
 import zlib
 from unittest import mock
 
+import integrity
 import markets as mk
 import pricing
 from exchange import Clock, Exchange
 from pricing import FEE, LMSR_B, Book, locked_odds
 from data import Store
-from test_city import MIN, SPOTS, T0, CityCase, city, crowding
+from test_city import CITY, MIN, SPOTS, T0, CityCase, city, crowding, iso
 
 CASES = 2000
 
@@ -341,19 +342,129 @@ class AdversaryTest(CityCase):
         self.assertEqual(self.order(out)["status"], "cancelled")
         self.assertEqual((self.ex.ledger.cash("bot"), self.ex.ledger.audit()), (1000, []))
 
-    def test_known_limit_a_reading_ingested_after_the_fill_leaves_the_old_price(self):
-        """The delay only covers readings the exchange ingests within it. TfL stamps a reading 4-7 min before the
-        recorder polls it (analysis/judge/crowd_latency.py), so a bot reading TfL directly fills here at the stale
-        price: the edge is the ingest lag, not the book (docs/pricing-engine.md, Known limits)."""
+    def test_a_bet_on_a_reading_tfl_published_before_our_poll_fills_at_the_new_price(self):
+        """The ingest-lag attack: TfL has published a +4% reading that we poll 60 s after the bet. The 5 s delay
+        passes with no poll, so the bet waits; it fills only after the poll, at the price that poll made. Before the
+        fill hold it filled at t + 5 s at the stale quote (docs/pricing-engine.md, section 3)."""
         t = T0 + 60_000
         stale_price, stale = self.m.prices()[self.hub], self.ex.quote(self.m, self.hub, 100)[1]
         out = self.bet(t)
         self.ex.tick(t + 5000)
+        self.assertEqual(self.order(out)["status"], "pending", "no poll since the bet: the delay alone is not enough")
         self.reading(t + 60_000, 0.04)
         with mock.patch.object(mk, "JUMP_SIGMA", 1e9):
             self.ex.tick(t + 60_000)
-        self.assertEqual(self.order(out)["odds"], stale)
+        got = self.order(out)
         self.assertGreater(self.m.prices()[self.hub], stale_price + 0.2, "the bot knew a big move before the book")
+        self.assertEqual(got["status"], "filled")
+        self.assertLess(got["odds"], stale, "filled at the price after the reading, never the stale quote")
+        self.assertEqual(got["odds"], self.ex.markets[self.m.id].bets[-1]["odds"])
+
+    def test_a_big_move_at_the_poll_after_the_bet_cancels_it(self):
+        t = T0 + 60_000
+        out = self.bet(t)
+        self.ex.tick(t + 5000)
+        self.reading(t + 30_000, 0.15)
+        self.ex.tick(t + 30_000)
+        self.assertEqual(self.order(out)["status"], "cancelled")
+        self.assertIn("market paused", self.order(out)["reason"])
+        self.assertEqual((self.ex.ledger.cash("bot"), self.ex.ledger.audit()), (1000, []))
+
+    def test_a_poll_from_before_the_bet_does_not_release_it(self):
+        t = T0 + 60_000
+        self.raw.repoll("crowding", t - 1000)
+        out = self.bet(t)
+        self.ex.tick(t + 5000)
+        self.assertEqual(self.order(out)["status"], "pending")
+
+    def test_a_normal_bet_fills_at_the_next_poll_within_the_stated_wait(self):
+        """No new reading: the next 30 s poll repeats the last one, and the bet fills on it."""
+        t = T0 + 60_000
+        out = self.bet(t)
+        poll = t + integrity.CHECKS["crowding"][1] * 1000
+        self.raw.repoll("crowding", poll)
+        self.ex.tick(poll)
+        got = self.order(out)
+        self.assertEqual(got["status"], "filled")
+        self.assertLessEqual(got["filledAt"] - got["placedAt"], integrity.CHECKS["crowding"][1] * 1000)
+
+    def test_heathrow_bets_wait_for_the_next_radar_poll(self):
+        m = next(m for m in self.ex.active() if m.sub == "heathrow_stack")
+        t = T0 + 60_000
+        out = self.ex.bet({"player": "bot", "market": m.id, "option": "over", "stake": 10, "idempotency_key": "h"}, t)
+        self.ex.tick(t + 2000)
+        self.assertEqual(self.order(out)["status"], "pending")
+        self.raw.repoll("aircraft", t + 30_000)
+        self.ex.tick(t + 30_000)
+        self.assertEqual(self.order(out)["status"], "filled")
+
+
+class ThirtySecondPollTest(CityCase):
+    """Crowding is polled every 30 s while TfL publishes each station every 5 min, station by station. A repeated
+    poll is a heartbeat (it releases held bets), not a new reading for the futures, the jump check or the fits."""
+
+    @staticmethod
+    def stamped(vals: dict[str, float], stamp: int) -> list[dict]:
+        rows = crowding(vals)
+        for r in rows:
+            r["timeUtc"] = iso(stamp)
+        return rows
+
+    def test_a_poll_that_repeats_the_last_reading_counts_as_a_poll_only(self):
+        self.raw.put("crowding", T0, self.stamped(CITY, T0 - 4 * MIN))
+        self.raw.put("crowding", T0 + 30_000, self.stamped(CITY, T0 - 4 * MIN))
+        store = self.raw.store(T0 + MIN)
+        self.assertEqual(store.ts["crowding"], [T0])
+        self.assertEqual(store.age_s("crowding", T0 + MIN), 30)
+        self.assertTrue(store.polled_since("crowding", T0 + 1, T0 + MIN))
+        self.assertFalse(store.polled_since("crowding", T0 + 30_001, T0 + MIN))
+        self.assertFalse(store.polled_since("crowding", T0 + 1, T0 + 29_000), "never a poll after now")
+
+    def test_a_poll_with_one_station_new_is_a_reading(self):
+        self.raw.put("crowding", T0, self.stamped(CITY, T0 - 4 * MIN))
+        rows = self.stamped(CITY | {"bank": 0.06}, T0 - 4 * MIN)
+        rows[list(CITY).index("bank")]["timeUtc"] = iso(T0 + MIN)
+        self.raw.put("crowding", T0 + 30_000, rows)
+        self.assertEqual(self.raw.store(T0 + MIN).ts["crowding"], [T0, T0 + 30_000])
+
+    def test_a_market_skips_a_poll_that_changed_none_of_its_stations(self):
+        city(self.raw, T0)
+        ex = Exchange(Store(self.raw.root, SPOTS), Clock(T0), SPOTS)
+        self.addCleanup(ex.ledger.close)
+        ex.tick(T0)
+        m = next(m for m in ex.active() if m.sub == "hub_surge")
+        snap = ex.store.latest("crowding", T0)[1]
+        m.prev_obs = {"ts": T0, "snap": snap}
+        others = {n: v * 1.2 for n, v in snap.items() if n not in m.spec["stations"].values()}
+        self.assertTrue(mk.nothing_new(m, snap | others))
+        self.assertFalse(mk.nothing_new(m, snap | {CITY_NAPTAN["bank"]: snap[CITY_NAPTAN["bank"]] * 1.01}))
+
+    def test_the_jump_check_measures_a_stations_gap_in_tfl_time(self):
+        """Two polls 30 s apart, one station 5 min apart in TfL's stamps: a 5-minute move, not a 1-minute one."""
+        self.raw.put("crowding", T0, self.stamped(CITY, T0 - 4 * MIN))
+        rows = self.stamped(CITY | {"bank": CITY["bank"] * 1.12}, T0 - 4 * MIN)
+        rows[list(CITY).index("bank")]["timeUtc"] = iso(T0 + MIN)
+        self.raw.put("crowding", T0 + 30_000, rows)
+        store = self.raw.store(T0 + MIN)
+        m = mk.Market.__new__(mk.Market)
+        m.feed, m.prev_obs = "crowding", None
+        m.spec = {"stations": {"bank": CITY_NAPTAN["bank"]}, "names": {"bank": "Bank"},
+                  "sigmas": {CITY_NAPTAN["bank"]: 0.03}}
+        (t0, s0), (t1, s1) = store.between("crowding", T0, T0 + MIN)
+        mk.jump_of(m, t0, s0, store)
+        self.assertIsNone(mk.jump_of(m, t1, s1, store), "ln 1.12 / (0.03 √5) = 1.7σ")
+        m.prev_obs = None
+        mk.jump_of(m, t0, s0)
+        self.assertIn("jump", mk.jump_of(m, t1, s1), "without stamps the 30 s gap is floored at 1 min: 3.8σ")
+
+    def test_a_station_fit_ignores_polls_that_repeat_its_value(self):
+        for k in range(4):
+            self.raw.put("crowding", T0 + k * 30_000, crowding(CITY | {"waterloo": 0.38 + 0.01 * k}))
+        series = mk.crowd_series(self.raw.store(T0 + 2 * MIN), CITY_NAPTAN["bank"], T0, T0 + 2 * MIN)
+        self.assertEqual(len(series), 1)
+
+
+CITY_NAPTAN = {h["id"]: h["naptan"] for h in SPOTS}
 
 
 if __name__ == "__main__":

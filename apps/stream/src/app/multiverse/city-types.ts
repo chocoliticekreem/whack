@@ -204,6 +204,8 @@ export interface BetResponse {
 /** Courtsiding defences for one market (services/city/integrity.py). */
 export interface Integrity {
   delayS: number;
+  /** Set when a bet also waits for our next poll of the feed, e.g. "our next TfL crowding check (every 30 s)". */
+  fillsAfter?: string | null;
   suspendsOn: string[];
   coolOffS: number;
   capPct: number;

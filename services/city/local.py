@@ -468,7 +468,7 @@ CAM_JUMP = integrity.Trigger("jamcams", f"the camera's people count jumps by mor
 # One camera or one station is something a person standing there can see before the feed publishes it, so both
 # get the locally observable delay and cap (clean_sheet's), and pause on a big move of their own sensor.
 integrity.TABLE["local_cam"] = integrity.replace(integrity.LOCAL, suspends_on=(CAM_JUMP,))
-integrity.TABLE["local_station"] = integrity.replace(integrity.LOCAL, suspends_on=(integrity.HUBS,))
+integrity.TABLE["local_station"] = integrity.replace(integrity.LOCAL, suspends_on=(integrity.HUBS,), waits_for="crowding")
 
 
 traders.PLAYS["cams"]["local_cam"] = cams_local
