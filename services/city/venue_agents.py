@@ -7,7 +7,9 @@ checks, speed bump, fees and limits as a player. Each carries a typical human ne
 - Market makers quote both sides around the public forecast, earn the spread, skew their quotes against their
   inventory (Avellaneda & Stoikov), move their fair value after being filled (Glosten & Milgrom), widen when the
   forecast jumps and before close, and stop quoting a side at their inventory limit. A new quote goes in before the
-  old one comes off, so the speed bump doesn't leave a side empty; a quote that has gone stale is pulled at once.
+  old one comes off; a quote that has gone stale is pulled at once. Designated market makers have signed up to the
+  quoting obligations, so however much they widen, their spread never goes past MAX_SPREAD; the others may widen
+  freely and simply earn no rebate.
 - Hedge funds turn a strategy into a probability: the rule from traders.py picks an outcome, the fund blends that
   rule's measured hit rate (docs/questions.md, docs/judge-prep.md) with the public forecast, adds its own noise, and
   takes liquidity only when the edge beats the price plus the taker fee and a margin. Size is fractional Kelly on
@@ -23,6 +25,7 @@ import random
 import zlib
 
 import traders
+from venue import MAX_SPREAD
 from venue_book import PAYOUT
 from venue_gateway import AI_LATENCY_MS, MAX_QTY, Account
 from venue_ledger import FEE_DIV, fee_units
@@ -73,9 +76,10 @@ class MarketMaker(Agent):
     kind = "mm"
 
     def __init__(self, aid: str, rng: random.Random, half: float = 2.0, size: int = 20, inventory: int = 200,
-                 skew: float = 0.02, coverage: float = 1.0):
+                 skew: float = 0.02, coverage: float = 1.0, designated: bool = False):
         super().__init__(aid, rng, name=aid)
         self.half, self.size, self.inventory, self.skew, self.coverage = half, size, inventory, skew, coverage
+        self.designated = designated
         self.quotes: dict[str, dict] = {}
         self.flow: dict[str, float] = {}
         self.last_f: dict[str, float] = {}
@@ -97,6 +101,8 @@ class MarketMaker(Agent):
         moved = abs(f - self.last_f.get(cid, f))
         self.last_f[cid] = f
         half = self.half + min(3.0, moved) + (2 if c["closesAt"] - now < WIDEN_BEFORE_CLOSE_MS else 0)
+        if self.designated:  # floor/ceil can add a point, so (MAX_SPREAD - 1) / 2 keeps the spread <= MAX_SPREAD
+            half = min(half, (MAX_SPREAD - 1) / 2)
         fair = f + self.flow.get(cid, 0.0) - self.skew * inv
         bid = max(1, min(98, math.floor(fair - half)))
         ask = max(bid + 1, min(99, math.ceil(fair + half)))
@@ -338,7 +344,8 @@ def populate(v, *, market_makers: int = 12, designated: int = 4, funds: dict[str
     rng = random.Random(seed)
     for i in range(market_makers):
         mm = MarketMaker(f"mm{i + 1}", random.Random(rng.random()), half=rng.choice((1.5, 2.0, 2.5)),
-                         size=rng.choice((20, 25, 30)), coverage=1.0 if i < designated else 0.6)
+                         size=rng.choice((20, 25, 30)), coverage=1.0 if i < designated else 0.6,
+                         designated=i < designated)
         v.add_agent(mm, mm_capital, now)
     counts = funds if funds is not None else {t: spec[0] for t, spec in TIERS.items()}
     for tier, n in counts.items():

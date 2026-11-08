@@ -207,6 +207,7 @@ class MoneyTest(unittest.TestCase):
         cl = v.clearing
         self.assertEqual(cl.audit(v.gateway.live_orders()), [])
         self.assertEqual(sum(cl.cash(p) for p in people) + cl.ledger.get("fees"), 10_000 * len(people))
+        self.assertEqual(sum(cl.pnl(p) for p in people), -cl.ledger.get("fees"), "zero-sum apart from fees")
         self.assertTrue(all(v == 0 for k, v in cl.ledger.bal.items() if k.startswith(("pool:", "held:"))))
 
 
@@ -230,6 +231,32 @@ class GatewayTest(unittest.TestCase):
         self.assertEqual((h.status, ai.status), ("open", "pending"))
         v.tick(T0 + DELAY + AI_LATENCY_MS)
         self.assertEqual(ai.status, "open")
+
+    def test_post_only_quotes_skip_the_speed_bump_but_orders_that_can_take_still_wait(self):
+        v = self.v
+        quote = v.gateway.submit("bot", "pulse", "yes", 40, 5, T0, post_only=True)
+        taker = v.gateway.submit("a", "pulse", "no", 60, 4, T0, tif="ioc")
+        v.tick(T0 + AI_LATENCY_MS)
+        self.assertEqual((quote.status, taker.status), ("open", "pending"), "the quote rests at once, latency only")
+        v.tick(T0 + DELAY)
+        self.assertEqual((taker.status, taker.filled), ("filled", 4))
+
+    def test_a_holder_can_always_sell_even_at_the_position_limit(self):
+        v = self.v
+        v.open_account(Account("maker", "human"), 100_000)
+        v.gateway.submit("maker", "pulse", "no", 50, 50, T0)               # YES offered at 50
+        v.gateway.submit("maker", "pulse", "yes", 48, 50, T0)              # and bid at 48
+        v.tick(T0 + DELAY)
+        buy = v.gateway.submit("a", "pulse", "yes", 50, 4, T0 + DELAY, tif="ioc")   # 200 of a's 250 limit
+        v.tick(T0 + 2 * DELAY)
+        self.assertEqual((buy.status, v.clearing.holding("a", "pulse")), ("filled", (4, 0)))
+        more = v.gateway.submit("a", "pulse", "yes", 50, 2, T0 + 2 * DELAY, tif="ioc")
+        self.assertIn("position limit", more.reason, "adding risk past the limit is refused")
+        sell = v.gateway.submit("a", "pulse", "no", 52, 4, T0 + 2 * DELAY, tif="ioc")  # sell all 4 at 48
+        self.assertEqual(sell.status, "pending", sell.reason)
+        v.tick(T0 + 3 * DELAY)
+        self.assertEqual(v.clearing.holding("a", "pulse"), (0, 0))
+        self.assertEqual(v.clearing.audit(v.gateway.live_orders()), [])
 
     def test_cancels_are_immediate_but_a_resting_order_must_rest_a_second(self):
         v = self.v
@@ -309,6 +336,21 @@ class AgentTest(unittest.TestCase):
         v.clearing.pos("mm1", "pulse").yes = 0
         self.assertLess(bid, 58)
         self.assertLess(100 - ask, 62)
+
+    def test_a_designated_market_maker_never_quotes_wider_than_its_obligation(self):
+        m = FakeMarket("pulse", probs={"over": 0.5, "under": 0.5}, closes=T0 + 60_000)
+        v = venue_with(m, people=())
+        free = venue_agents.MarketMaker("free", random.Random(1), half=2.5)
+        bound = venue_agents.MarketMaker("bound", random.Random(1), half=2.5, designated=True)
+        for mm in (free, bound):
+            v.add_agent(mm, 200_000)
+        c = v.snapshot(T0 + 1_000)["contracts"]["pulse"]
+        for mm in (free, bound):
+            mm.last_f["pulse"] = 44.0  # the forecast just jumped 6 points, and the market closes within 90 s
+        spread = {mm.id: (100 - q["no"]) - q["yes"] for mm in (free, bound)
+                  for q in [mm.quote_for(v, c, T0 + 1_000)]}
+        self.assertGreater(spread["free"], venue.MAX_SPREAD)
+        self.assertLessEqual(spread["bound"], venue.MAX_SPREAD)
 
     def test_a_market_maker_that_meets_its_obligations_earns_a_share_of_the_taker_fees(self):
         m = FakeMarket("pulse", probs={"over": 0.5, "under": 0.5})
