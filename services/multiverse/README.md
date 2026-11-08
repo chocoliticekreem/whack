@@ -54,10 +54,19 @@ python3 -m unittest discover -s services/multiverse
 python3 services/multiverse/fixture.py           # regenerate the synthetic fixture
 ```
 
-UI: `apps/stream` → `/multiverse` (proxied through `/api/multiverse/*`).
+UI: no web page calls the Oxford Circus engine; the city service (`services/city`) polls its `GET /vix` for the
+London VIX. The central model (`MULTIVERSE_SEED=seeds/central-london.json`, :8449) backs `/multiverse`'s "What if…"
+through `apps/stream`'s `/api/sim/*` (`GET /state`, `GET /forecast`, `POST /scenario` only).
 
-Env (names only): `MULTIVERSE_PORT` (8049), `MULTIVERSE_CORS_ORIGIN`, `TWIN_URL` (live mode, default
-`http://localhost:3047`), `MULTIVERSE_SEED` (a seed JSON, absolute or relative to this folder; overrides the default seed),
+**Seed rebuilds need no web app.** The twin routes `real_seed.py` (online) and the live fallback below call
+(`/api/twin/field`, `/api/around/{weather,buses,disruptions,counts}`) were removed from `apps/stream` with the three.js
+twin. Rebuild from the committed caches instead: `real_seed.py --offline` reads `seeds/oxford-circus-field.json`, and
+`central_seed.py --offline` reads `seeds/central-osm.json.gz`. A fresh street field or new OSM tiles need a
+Mirrorverse `apps/stream` checkout running at `TWIN_URL`.
+
+Env (names only): `MULTIVERSE_PORT` (8049), `MULTIVERSE_CORS_ORIGIN`, `TWIN_URL` (a Mirrorverse twin, for online
+`real_seed.py` and live mode on a non-real seed; default `http://localhost:3047`), `MULTIVERSE_SEED` (a seed JSON,
+absolute or relative to this folder; overrides the default seed),
 `MULTIVERSE_RAW` (recorder root; default `data/raw`, else the main checkout's `data/raw`), `MULTIVERSE_CAM_SOURCES`,
 `MULTIVERSE_BUS_SOURCES` (comma lists of recorder source names), `MULTIVERSE_ALT_RAW` (recorder root for the
 brokers' live feeds), `ANTHROPIC_API_KEY` (broker ideas
@@ -72,7 +81,7 @@ first of `MULTIVERSE_RAW`, the repo's `data/raw`, the main checkout's `data/raw`
 startup (`REAL data: …` or `SYNTHETIC fixture …`). `MULTIVERSE_SEED` still picks another seed.
 
 ```bash
-python3 services/multiverse/real_seed.py              # rebuild seeds/oxford-circus.json (needs a twin, TWIN_URL, default :3060)
+python3 services/multiverse/real_seed.py              # rebuild seeds/oxford-circus.json (needs a Mirrorverse twin at TWIN_URL, default :3060)
 python3 services/multiverse/real_seed.py --offline    # rebuild from the cached seeds/oxford-circus-field.json
 # real replay (the demo's safe mode): recorded frames, default = the 45 min with the most YOLO counts
 MULTIVERSE_PORT=8549 python3 services/multiverse/server.py
@@ -240,9 +249,11 @@ Tube line status (`line_disruption`) guards against false closures:
   synthetic 80 m grid with real Oxford Circus anchors, and ten one-minute frames from a hidden true world
   (`fixture.TRUE_ASSUMPTIONS`: rain from +3 min, tourists x1.5, buses 4 min late) plus Poisson noise,
   rolled into a second five-minute epoch exactly as the engine rolls, plus the synthetic alternative feeds.
-- **live**: seed from the twin (`/api/twin/field`, Oxford Circus), then each `POST /observe {}` polls
-  `/api/around/counts` (YOLO on JamCams, needs `services/yolo` running) and reads the latest recorded
-  alternative-data record per source for the brokers.
+- **live**: on the real Oxford Circus seed (the default) or the central seed, reseeds at the newest recorder
+  snapshot and reads the newest one every 60 s; no web app involved. Only on the synthetic fixture (no recorded
+  `jamcams`) or another non-real seed does it seed from a twin (`/api/twin/field`) and poll `/api/around/counts`.
+  Those routes are no longer in this repo, so that path needs a Mirrorverse twin at `TWIN_URL`; without one,
+  `POST /spawn {"mode":"live"}` fails. Use replay, or run the recorder.
 
 ## API
 

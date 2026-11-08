@@ -21,7 +21,7 @@ in [docs/build.md](docs/build.md) §0.
 scripts/run-data.sh &                                   # recorder + YOLO (:8047) + health (:8052)
 MULTIVERSE_PORT=8349 python3 services/multiverse/server.py &   # Oxford Circus engine, source of the London VIX
 python3 services/city/server.py &                       # city markets + wallet (:8051); polls the VIX on :8349
-cd apps/stream && MULTIVERSE_URL=http://127.0.0.1:8349 npx next dev -H 0.0.0.0 -p 3349   # open /multiverse
+cd apps/stream && npx next dev -H 0.0.0.0 -p 3349               # open /multiverse
 ```
 `run-data.sh` expects the YOLO server at `$YOLO_DIR`. It is Mirrorverse's `services/yolo`, which is not in this repo:
 point `YOLO_DIR` at a [mirrorverse](https://github.com/chocoliticekreem/mirrorverse) checkout's `services/yolo` with
@@ -35,13 +35,15 @@ runs from it:
 - **The street-graph agent simulation** in `services/predict` (seed, personas, simulate, LLM wrapper). The Oxford
   Circus engine in `services/multiverse`, which produces the London VIX, runs 50 forked copies of it.
 - **The YOLO camera counter** runs from the original Mirrorverse service, outside this repo (see `$YOLO_DIR` above).
-- **The three.js London twin** (`apps/stream/src/twin`) and its API routes (`/api/around/*`, `/api/twin/*`,
-  `/api/predict`, `/api/live/stream`). Only the superseded `/multiverse/oxford` game uses them, and
-  `services/multiverse/real_seed.py` calls them when it rebuilds the Oxford Circus seed (the committed seeds are the
-  fallback). The OverWatch pages, `/multiverse` and `/multiverse/portfolio`, import none of it.
+- **The seeds** in `services/multiverse/seeds/` were built once from Mirrorverse's three.js twin: the Oxford Circus
+  street field (`oxford-circus-field.json`) from its `/api/twin/field` route, and the central-London streets
+  (`central-osm.json.gz`) from its cached OpenFreeMap tiles. They are committed, and both seed builders rebuild from
+  them with `--offline`.
 
-The Next.js app itself started as Mirrorverse's. Its streaming product (persona chat, phone streaming, the "around
-me" map, the `/twin` page) is removed.
+The Next.js app itself started as Mirrorverse's. All of its Mirrorverse code is removed: the streaming product
+(persona chat, phone streaming, the "around me" map, the `/twin` page), the three.js twin and its API routes, and the
+superseded `/multiverse/oxford` and `/multiverse/board` pages. `apps/stream` is now only the OverWatch pages,
+`/multiverse` and `/multiverse/portfolio`.
 
 ## Docs, in reading order
 | Doc | Read it for |

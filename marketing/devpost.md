@@ -107,12 +107,11 @@ The "new world" in the brief is the one nobody can see yet: the London of five m
   glowing hub columns, arcs between hubs) at 60 fps. Phones work in portrait and landscape (market column left, map
   right). The backend runs on our laptop behind Cloudflare tunnels.
 - **Reuse (disclosed, approved by the organisers):** from our earlier project Mirrorverse (built 17 Oct 2026), the
-  street-graph agent simulation in `services/multiverse` builds on Mirrorverse's predict engine, and the YOLO camera
-  counter runs from the original Mirrorverse service. Mirrorverse's three.js London twin and its live-feed routes
-  remain only behind the superseded `/multiverse/oxford` game and the seed builder; the OverWatch pages don't use
-  them. New at WHACK: the recorder,
-  both agent simulations and the London VIX, the city and local markets, pricing, the computer traders, the integrity
-  rules, the wallet and portfolio, scenario mode and the OverWatch UI.
+  street-graph agent simulation in `services/multiverse` builds on Mirrorverse's predict engine (`services/predict`,
+  which it imports), and the YOLO camera counter runs from the original Mirrorverse service. The committed Oxford
+  Circus and central-London street seeds were built once from Mirrorverse's three.js London twin; the twin itself is
+  no longer in the repo. New at WHACK: the recorder, both agent simulations and the London VIX, the city and local markets, pricing, the computer traders,
+  the integrity rules, the wallet and portfolio, scenario mode and the OverWatch UI.
 
 ## Challenges we ran into
 We built with a small team and many parallel AI coding agents. The agents wrote code fast; the hard part was

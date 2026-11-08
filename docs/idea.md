@@ -133,14 +133,14 @@ answers live whether a model of the city beats raw data. Tonight's answer: no (8
 
 ## Superseded ideas (history)
 Kept for the reasoning; none of these ship on the main page.
-- **Exchange of Worlds board** (#24, still at `/multiverse/board`): every simulated world of Oxford Circus listed as
-  a stock, priced by its probability, with 10 data-source brokers (Claude Haiku 4.5 when a key is set, rules
+- **Exchange of Worlds board** (#24, was `/multiverse/board`, now removed): every simulated world of Oxford Circus
+  listed as a stock, priced by its probability, with 10 data-source brokers (Claude Haiku 4.5 when a key is set, rules
   otherwise) scored TOPS-style. Dropped as the front page because a first-time viewer couldn't read it in seconds.
   Its engine survives as the London VIX, and the broker idea became the six city traders.
 - **3D ghost worlds** (#25): parallel worlds drawn as translucent crowds over a three.js twin, shimmering where they
-  disagree and shattering when a camera frame lands. The "Which London is real?" game is still at
-  `/multiverse/oxford`. The city view moved to MapLibre (#44) because the three.js twin was too heavy for a
-  city-wide view.
+  disagree and shattering when a camera frame lands. The "Which London is real?" game lived at `/multiverse/oxford`;
+  the page and the three.js twin are now removed. The city view moved to MapLibre (#44) because the three.js twin was
+  too heavy for a city-wide view.
 - **Trade London** (#32): the first city-wide version, renamed OverWatch and restyled (#38).
 - **Judge-betting page:** a separate phone page for judges to buy worlds. Replaced by betting on the main page with a
   server-side wallet (#45).

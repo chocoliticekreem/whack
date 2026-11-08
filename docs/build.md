@@ -70,7 +70,7 @@ not merged.
 scripts/run-data.sh &                                          # recorder + YOLO (:8047) + health (:8052); set YOLO_DIR
 MULTIVERSE_PORT=8349 python3 services/multiverse/server.py &   # Oxford Circus engine + London VIX
 python3 services/city/server.py &                              # city markets + wallet (:8051)
-cd apps/stream && MULTIVERSE_URL=http://127.0.0.1:8349 npx next dev -H 0.0.0.0 -p 3349   # open /multiverse
+cd apps/stream && npx next dev -H 0.0.0.0 -p 3349                         # open /multiverse
 cloudflared tunnel --url http://localhost:8051                 # public backend; put the URL in Vercel CITY_URL
 ```
 Replay instead of live: `python3 services/city/server.py --replay-from 2026-11-07T14:00:00Z`. Tests:
@@ -85,12 +85,17 @@ Replay instead of live: `python3 services/city/server.py --replay-from 2026-11-0
     simulate and LLM modules (`worlds.py`, `brokers.py`), so the Oxford Circus engine and the London VIX build on it.
   - YOLO: the camera counter runs from the original Mirrorverse service outside this repo (`YOLO_DIR` in
     `scripts/run-data.sh`). The in-repo copy of `services/yolo` is removed.
-  - `apps/stream`: the three.js twin (`src/twin`) and its routes (`/api/around/*`, `/api/twin/*`, `/api/predict`,
-    `/api/live/stream`), used only by the superseded `/multiverse/oxford` game and by `real_seed.py` when it rebuilds
-    the seed. `/multiverse` and `/multiverse/portfolio` import none of it.
+  - Seeds: `services/multiverse/seeds/oxford-circus-field.json` (from the twin's `/api/twin/field`) and
+    `central-osm.json.gz` (from the twin's cached OpenFreeMap tiles) were built once from Mirrorverse's twin. They are
+    committed; `real_seed.py --offline` and `central_seed.py --offline` rebuild the seeds from them.
+  - `apps/stream` holds only the OverWatch pages (`/multiverse`, `/multiverse/portfolio`) and their two proxies
+    (`/api/city/*`, `/api/sim/*`). No Mirrorverse code remains in it.
   - Removed: the streaming app (persona chat, phone streaming, "around me", copilot, the `/twin` page) and its
     routes (`/api/agent/*`, `/api/chat/scene`, `/api/route`, `/api/live/state`, `/api/live/signal`, and
-    `/api/around/{air,crime,livecams,stations,tide}`).
+    `/api/around/{air,crime,livecams,stations,tide}`); then the superseded `/multiverse/oxford` and
+    `/multiverse/board` pages, `/api/multiverse/*`, the three.js twin (`src/twin`, `src/lib`, `src/platform`,
+    `src/components`) and its routes (`/api/around/*`, `/api/twin/*`, `/api/predict`, `/api/live/stream`), and the
+    `three`, `@react-three/*` and `postprocessing` dependencies.
 
 ## 2. What Mirrorverse already has
 | Need | Status | Where in `chocoliticekreem/mirrorverse` |

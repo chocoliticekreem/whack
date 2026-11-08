@@ -1,5 +1,9 @@
 > Reused from chocoliticekreem/mirrorverse (built 2026-10-17), approved by WHACK organisers.
 
+> In this repo, `services/multiverse` imports `seed`, `personas`, `simulate` and `llm`. The twin routes that
+> `seed.py`'s fetches and `server.py` call (`/api/twin/*`, `/api/around/*`) are not in this repo's `apps/stream`; they
+> need a Mirrorverse `apps/stream` at `TWIN_URL`.
+
 # Predict: a MiroFish-style forecast of Tower Hill, seeded from live reality
 
 `services/predict` answers "what happens around Tower Hill in the next 30 minutes?" the way
