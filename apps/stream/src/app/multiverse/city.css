@@ -3068,3 +3068,10 @@ button.ow-order:hover {
 .ow-uth-scenes:hover {
   background: var(--yes-soft);
 }
+
+.tl-exchange-btn {
+  display: inline-flex;
+  align-items: center;
+  color: var(--ink);
+  text-decoration: none;
+}
