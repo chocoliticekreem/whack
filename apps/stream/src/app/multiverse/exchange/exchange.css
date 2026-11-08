@@ -100,7 +100,7 @@
 
 .ex-row {
   display: grid;
-  grid-template-columns: 1fr 2.5em 2.5em auto auto;
+  grid-template-columns: minmax(0, 1fr) 2.5em 2.5em 3em 10px;
   align-items: center;
   gap: var(--s2);
   width: 100%;
@@ -127,23 +127,72 @@
   white-space: nowrap;
 }
 
-.ex-badge {
-  padding: 0 var(--s1);
-  font-size: 11px;
-  font-weight: 600;
-  text-transform: uppercase;
-  color: var(--on-ink);
-  background: var(--warn);
-  border-radius: var(--r-s);
+.ex-row > span:not(.ex-name) {
+  text-align: right;
 }
 
-.ex-badge[data-quiet] {
+.ex-row-head {
+  padding-block: 0;
+  font-size: 12px;
   color: var(--muted);
-  background: var(--surface-2);
+  cursor: default;
 }
 
-.ex-detail header p {
+.ex-row-head:hover {
+  background: none;
+}
+
+.ex-market[data-closed] .ex-row {
+  opacity: 0.5;
+}
+
+.ex-flag {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ex-fast {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  background: var(--warn);
+  border-radius: 50%;
+}
+
+.ex-sub {
   margin: 0 0 var(--s3);
+  color: var(--ink-2);
+}
+
+.ex-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--s2);
+  margin: 0 0 var(--s2);
+}
+
+.ex-facts div {
+  padding: var(--s2) var(--s3);
+  background: var(--surface-2);
+  border-radius: var(--r);
+}
+
+.ex-facts dt {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.ex-facts dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.ex-detail header h2 {
+  margin-bottom: var(--s1);
+}
+
+.ex-detail header .ex-note {
+  margin-bottom: var(--s4);
 }
 
 .ex-cols {
@@ -283,7 +332,7 @@
   cursor: pointer;
 }
 
-.ex-go {
+.ex .ex-go {
   color: var(--on-ink);
   background: var(--ink);
   border: 1px solid var(--ink);
@@ -352,5 +401,18 @@
   .ex-main,
   .ex-cols {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ex-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ex-title {
+    order: 3;
+    flex-basis: 100%;
+  }
+
+  .ex-wallet {
+    margin-left: auto;
   }
 }
