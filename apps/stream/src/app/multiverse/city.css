@@ -3189,3 +3189,67 @@ button.ow-order:hover {
   font-size: 18px;
   white-space: nowrap;
 }
+
+
+/* A race asked as one yes question: one Yes button, the other areas as quiet chips (MarketCard, plain.isRace). */
+.tl-race {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+}
+
+.tl-race-alts {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s2);
+  font-size: 12.5px;
+}
+
+.tl-race-alts > .tl-muted {
+  flex-basis: 100%;
+}
+
+.tl-race-chip {
+  padding: 2px var(--s2);
+  font: inherit;
+  font-size: 12.5px;
+  color: var(--ink-2);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  cursor: pointer;
+}
+
+.tl-race-chip:hover {
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+
+.tl-race-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--s2);
+}
+
+.tl-race-skip {
+  padding: 0 var(--s3);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r);
+  cursor: pointer;
+}
+
+.tl-race-skip:hover:not(:disabled) {
+  color: var(--ink);
+  background: var(--surface-2);
+}
+
+.tl-race-skip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
