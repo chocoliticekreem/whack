@@ -34,7 +34,10 @@ type View =
   | { kind: "loading" }
   | { kind: "market"; id: string; sensor: LocalSensor; distanceM?: number }
   | { kind: "forecast"; data: ForecastOnly }
-  | { kind: "error"; text: string; reopen?: { at: number; lat: number; lon: number } };
+  | { kind: "error"; text: string; reopen?: { at: number; lat: number; lon: number; why: Wait } };
+
+/** Why a local-market card is waiting: the round's last minute, or the player's 4-a-minute allowance. */
+type Wait = "round" | "rate";
 
 const LIST_MS = 5000;
 const CARD_W = 340;
@@ -142,10 +145,11 @@ export function LocalMarket({
           onMarket(data.market);
           setView({ kind: "market", id: data.market.id, sensor: data.market.local.sensor, distanceM: snapped ?? data.market.local.distanceM });
         } else if (data.forecastOnly) setView({ kind: "forecast", data: data.forecastOnly });
-        else if (data.code === "round_closing") {
-          // Why: the next round opens the moment this one closes; count down and open this spot then, untapped.
-          const s = Number(/closes in (\d+) s/.exec(data.error ?? "")?.[1] ?? 0);
-          setView({ kind: "error", text: data.error ?? "", reopen: { at: Date.now() + (s + 1) * 1000, lat, lon } });
+        else if ((data.code === "round_closing" || data.code === "rate_limited") && /in (\d+) s/.test(data.error ?? "")) {
+          // Why: both waits end on their own; count down and open this spot then, untapped.
+          const s = Number(/in (\d+) s/.exec(data.error ?? "")?.[1]);
+          const why = data.code === "round_closing" ? "round" : "rate";
+          setView({ kind: "error", text: data.error ?? "", reopen: { at: Date.now() + (s + 1) * 1000, lat, lon, why } });
         } else setView({ kind: "error", text: data.error ?? `The exchange said no (HTTP ${status})` });
       } catch {
         if (mine === seq.current) setView({ kind: "error", text: "Could not reach the exchange" });
@@ -273,7 +277,7 @@ export function LocalMarket({
       {view.kind === "forecast" && <Forecast f={view.data} onTrade={(lat, lon) => void pick(lat, lon)} />}
       {view.kind === "error" &&
         (view.reopen ? (
-          <Reopening at={view.reopen.at} onOpen={() => view.reopen && void pick(view.reopen.lat, view.reopen.lon)} />
+          <Reopening at={view.reopen.at} why={view.reopen.why} onOpen={() => view.reopen && void pick(view.reopen.lat, view.reopen.lon)} />
         ) : (
           <p className="lm-body">{view.text}</p>
         ))}
@@ -282,7 +286,7 @@ export function LocalMarket({
 }
 
 /** Ticks down to the next round, then opens the market on the pin the player already dropped. */
-function Reopening({ at, onOpen }: { at: number; onOpen: () => void }) {
+function Reopening({ at, why, onOpen }: { at: number; why: Wait; onOpen: () => void }) {
   const [now, setNow] = useState(() => Date.now());
   const fire = useRef(onOpen);
   useEffect(() => {
@@ -301,8 +305,11 @@ function Reopening({ at, onOpen }: { at: number; onOpen: () => void }) {
   }, [at]);
   return (
     <p className="lm-body">
-      This round has closed to new local markets. The next round opens in{" "}
+      {why === "round"
+        ? "This round has closed to new local markets. The next round opens in "
+        : "You can open 4 new local markets a minute. You can open another in "}
       <b className="tl-data">{countdown(at - now)}</b>; the market on your pin opens then, no need to tap again.
+      {why === "rate" && " Pins already on the map are free to trade now."}
     </p>
   );
 }

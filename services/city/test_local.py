@@ -113,6 +113,7 @@ class CreateTest(SyntheticCase):
         with self.assertRaises(local.LocalLimit) as err:
             self.click(*CAMS[cams[local.CREATE_N]])
         self.assertEqual(err.exception.code, "rate_limited")
+        self.assertIn(f"open another in {int(local.CREATE_WINDOW_S)} s", str(err.exception))
         other = self.ex.ledger.create_player("other")["player"]
         self.assertIn("market", self.click(*CAMS[cams[local.CREATE_N]], other))
         self.assertIn("market", self.click(*CAMS[cams[0]]))  # an existing market is not a new one
