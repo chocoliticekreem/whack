@@ -7,9 +7,10 @@ checks, speed bump, fees and limits as a player. Each carries a typical human ne
 - Market makers quote both sides around the public forecast, earn the spread, skew their quotes against their
   inventory (Avellaneda & Stoikov), move their fair value after being filled (Glosten & Milgrom), widen when the
   forecast jumps and before close, and stop quoting a side at their inventory limit. A new quote goes in before the
-  old one comes off; a quote that has gone stale is pulled at once. Designated market makers have signed up to the
-  quoting obligations, so however much they widen, their spread never goes past MAX_SPREAD; the others may widen
-  freely and simply earn no rebate.
+  old one comes off; a quote that has gone stale is pulled at once. They widen as the flow against them turns
+  one-sided, because one-sided flow is what informed traders look like (Glosten & Milgrom). Designated market makers
+  have signed up to the quoting obligations, so their spread never goes past MAX_SPREAD, or MAX_SPREAD_FAST while the
+  exchange has flagged the contract as a fast market; the others may widen freely.
 - Hedge funds turn a strategy into a probability: the rule from traders.py picks an outcome, the fund blends that
   rule's measured hit rate (docs/questions.md, docs/judge-prep.md) with the public forecast, adds its own noise, and
   takes liquidity only when the edge beats the price plus the taker fee and a margin. Size is fractional Kelly on
@@ -25,7 +26,7 @@ import random
 import zlib
 
 import traders
-from venue import MAX_SPREAD
+from venue import FAST_VOLUME, MAX_SPREAD, MAX_SPREAD_FAST
 from venue_book import PAYOUT
 from venue_gateway import AI_LATENCY_MS, MAX_QTY, Account
 from venue_ledger import FEE_DIV, fee_units
@@ -34,6 +35,8 @@ WIDEN_BEFORE_CLOSE_MS = 90_000
 FLOW_ALPHA, FLOW_DECAY, FLOW_CAP = 0.05, 0.9, 5.0
 REQUOTE_PENDING = 2        # points a pending quote must be off before it's replaced
 STALE = 3                  # points: a quote this far on the wrong side of fair value is pulled at once
+TOXICITY = 6.0             # points of extra half-spread at fully one-sided flow (Glosten & Milgrom: the spread
+TOXIC_FROM = 0.3           #   must grow with the share of informed flow); none below 30% imbalance
 PICK_TTL_MS = 30_000
 # Measured hit rate of each rule when it picks an outcome. None: no measured edge, so no view.
 HIT = {("tube", "hub_surge"): 0.36, ("tube", "hub_hour"): 0.56, ("tube", "city_pulse"): 0.55,
@@ -101,8 +104,11 @@ class MarketMaker(Agent):
         moved = abs(f - self.last_f.get(cid, f))
         self.last_f[cid] = f
         half = self.half + min(3.0, moved) + (2 if c["closesAt"] - now < WIDEN_BEFORE_CLOSE_MS else 0)
-        if self.designated:  # floor/ceil can add a point, so (MAX_SPREAD - 1) / 2 keeps the spread <= MAX_SPREAD
-            half = min(half, (MAX_SPREAD - 1) / 2)
+        if c["volume"] >= FAST_VOLUME // 2:
+            imbalance = abs(c["flow"]) / c["volume"]
+            half += TOXICITY * max(0.0, imbalance - TOXIC_FROM) / (1 - TOXIC_FROM)
+        if self.designated:  # floor/ceil can add a point, so (limit - 1) / 2 keeps the spread within the obligation
+            half = min(half, ((MAX_SPREAD_FAST if c.get("fast") else MAX_SPREAD) - 1) / 2)
         fair = f + self.flow.get(cid, 0.0) - self.skew * inv
         bid = max(1, min(98, math.floor(fair - half)))
         ask = max(bid + 1, min(99, math.ceil(fair + half)))

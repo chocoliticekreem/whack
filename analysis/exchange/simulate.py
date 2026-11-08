@@ -27,6 +27,7 @@ from pathlib import Path
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent.parent / "services" / "city"))
 
+import venue_ledger  # noqa: E402
 from venue import Venue  # noqa: E402
 from venue_agents import Fund, MarketMaker, Retail  # noqa: E402
 from venue_book import PAYOUT  # noqa: E402
@@ -260,7 +261,9 @@ def main() -> None:
     ap.add_argument("--quick", action="store_true")
     ap.add_argument("--seeds", type=int, default=3)
     ap.add_argument("--rounds", type=int, default=12)
+    ap.add_argument("--fees", choices=("off", "kalshi"), default="off")
     args = ap.parse_args()
+    venue_ledger.FEE_RATE_X100 = venue_ledger.KALSHI_FEE_X100 if args.fees == "kalshi" else 0
     seeds, rounds = (1, 6) if args.quick else (args.seeds, args.rounds)
     results, t0 = {}, time.time()
     for name, spec in SCENARIOS.items():

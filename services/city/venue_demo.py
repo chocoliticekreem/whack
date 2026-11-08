@@ -18,6 +18,7 @@ import time
 from collections import defaultdict
 
 import venue_agents
+import venue_ledger
 from data import Store, feeds, load_hotspots, raw_root
 from exchange import Clock
 from venue import UPTIME, CitySource, ShadowExchange, Venue
@@ -181,7 +182,9 @@ def report(v: Venue, got: dict) -> dict:
          f"median {statistics.median(spreads) if spreads else None}"),
         (f"Designated market makers meet the {UPTIME:.0%} quoting obligation", bool(uptime) and min(uptime) >= UPTIME,
          f"uptime {min(uptime):.2f}-{max(uptime):.2f}" if uptime else "none"),
-        ("Rebates paid to market makers that met it", rebates > 0, f"{rebates} points"),
+        ("Rebates paid to market makers that met it (fees on only)",
+         rebates > 0 if venue_ledger.FEE_RATE_X100 else rebates == 0,
+         f"{rebates} points" if venue_ledger.FEE_RATE_X100 else "fees off: nothing to rebate"),
         ("Points conserved: every point granted is in a wallet, a reservation, a contract pool or the fee account",
          minted == held_everywhere, f"{minted} granted, {held_everywhere} accounted for"),
     ]
@@ -196,7 +199,9 @@ def main() -> None:
     ap.add_argument("--minutes", type=int, default=25)
     ap.add_argument("--retail", type=int, default=2000)
     ap.add_argument("--json", help="also write the full result here")
+    ap.add_argument("--fees", choices=("off", "kalshi"), default="kalshi" if venue_ledger.FEE_RATE_X100 else "off")
     args = ap.parse_args()
+    venue_ledger.FEE_RATE_X100 = venue_ledger.KALSHI_FEE_X100 if args.fees == "kalshi" else 0
     cleanup = None
     if args.replay_from:
         t0 = feeds.parse_ts(args.replay_from)
