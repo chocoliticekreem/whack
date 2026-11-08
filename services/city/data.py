@@ -37,6 +37,10 @@ SIM_MAX_AGE_MS = 3 * 60_000
 SIM_HORIZONS = (5, 15, 60)
 WEEKDAYS = ("MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN")
 BAND_MS = 15 * 60_000
+# TfL's typical day runs past midnight: a weekday's 00:00-04:45 bands describe the night after it (live Saturday-night
+# readings after midnight track SAT 00:00-03:00, not SUN's). 05:00 is the trough before the morning rise in every day's
+# profile, so the switch to the next weekday is the smallest step there.
+DAY_START_HOUR = 5
 # A recorder file read while it is still being appended to: a cut gzip member, or a cut last line.
 PARTIAL_READ = (OSError, EOFError, zlib.error)
 DAY_NAMES = ("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")
@@ -182,11 +186,17 @@ def _band(slot: int) -> tuple[str, str]:
     # Why cached: the sim trader prices thousands of draws per market, each reading the typical day, and this ran
     # under the exchange lock. London's UTC offset is whole hours, so a UTC 15-min slot is exactly one local band.
     d = datetime.fromtimestamp(slot * BAND_MS / 1000, LONDON)
-    return WEEKDAYS[d.weekday()], f"{d.hour:02d}:{d.minute - d.minute % 15:02d}"
+    return WEEKDAYS[profile_weekday(d)], f"{d.hour:02d}:{d.minute - d.minute % 15:02d}"
+
+
+def profile_weekday(d: datetime) -> int:
+    """The weekday whose TfL typical day covers this London time: the previous one before DAY_START_HOUR."""
+    return (d.weekday() - (d.hour < DAY_START_HOUR)) % 7
 
 
 def day_name(ms: int) -> str:
-    return DAY_NAMES[datetime.fromtimestamp(ms / 1000, LONDON).weekday()]
+    """The weekday of the typical day used at ms, so "a usual Saturday" still reads Saturday at 01:00 on Sunday."""
+    return DAY_NAMES[profile_weekday(datetime.fromtimestamp(ms / 1000, LONDON))]
 
 
 def fetch_vix(url: str = MULTIVERSE_URL, timeout: float = 2.0) -> dict | None:
