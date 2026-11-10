@@ -19,8 +19,9 @@ USER user
 ENV HOME=/home/user PORT=7860 NEXT_TELEMETRY_DISABLED=1 PYTHONUNBUFFERED=1
 WORKDIR /home/user
 
-# The commit API response changes with every push to $REF, so a rebuild never reuses a stale clone.
-ADD https://api.github.com/repos/chocoliticekreem/whack/commits/$REF /tmp/commit.json
+# The commits feed changes with every push to $REF, so a rebuild never reuses a stale clone. (The feed, not
+# api.github.com: shared build machines can hit the API's anonymous rate limit.)
+ADD https://github.com/chocoliticekreem/whack/commits/$REF.atom /tmp/commits.atom
 RUN git clone --depth 1 --branch "$REF" "$REPO" app
 WORKDIR /home/user/app/apps/stream
 RUN npm ci && npm run build
