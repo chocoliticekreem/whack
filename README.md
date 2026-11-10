@@ -39,6 +39,24 @@ its `.venv` (the default is a path on Anson's laptop). For the public site, run
 `cloudflared tunnel --url http://localhost:8051` and set Vercel's `CITY_URL` to the tunnel URL. `/` redirects to
 `/multiverse`.
 
+## Free public site
+The whole stack (recorder, both simulations, the city exchange, the order-book Exchange and the website) runs in one
+free [Hugging Face Space](https://huggingface.co/docs/hub/spaces-sdks-docker), so the public site needs no laptop,
+server or Vercel. `scripts/run-all.sh` starts everything and restarts any service that exits;
+`deploy/huggingface/` holds the Space's two files.
+
+1. Get a free TfL key at [api-portal.tfl.gov.uk](https://api-portal.tfl.gov.uk) (sign up, subscribe to the free
+   product, copy the primary key). Without it TfL allows 40 calls a minute, too few for crowding.
+2. On huggingface.co: New Space → any name → SDK **Docker** → Blank → hardware **CPU basic (free)** → Public.
+3. Upload `deploy/huggingface/Dockerfile` and `deploy/huggingface/README.md` to the Space (Files → Add file).
+4. Settings → Variables and secrets → New secret `TFL_APP_KEY` = your key.
+5. Wait for the build (about 5 min). The site is at `https://<user>-<space>.hf.space/multiverse`.
+
+To pick up new commits on `main`, use Settings → Factory rebuild. Limits of the free tier: a Space with no visitors
+for 48 h goes to sleep and wakes on the next visit, and a restart starts from an empty disk, so balances, the
+leaderboard and the recorded history reset; prices are rough for the first hour while the recorder builds history.
+The camera counter (YOLO) is not included, so camera-based local markets and Camadel stay quiet.
+
 ## Docs, in reading order
 | Doc | Read it for |
 |---|---|
