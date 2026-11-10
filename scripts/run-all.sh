@@ -33,25 +33,45 @@ keep() {
   log "$name started"
 }
 
-# A simulation server waits for POST /spawn; ask until it answers, then leave it running live.
+# A simulation server waits for POST /spawn. Wait for its /health, then spawn once: building 50 worlds can take
+# minutes, and a retry on timeout would queue a second build.
 spawn() {
   local port="$1" tries=0
-  until curl -fsS -m 5 -X POST "http://127.0.0.1:$port/spawn" -d '{"n":50,"mode":"live"}' > /dev/null 2>&1; do
+  until curl -fsS -m 5 "http://127.0.0.1:$port/health" > /dev/null 2>&1; do
     tries=$((tries + 1))
-    [ "$tries" -ge 60 ] && { log "simulation on :$port never answered /spawn; the site runs without it"; return; }
+    [ "$tries" -ge 60 ] && { log "simulation on :$port never came up; the site runs without it"; return; }
     sleep 5
   done
-  log "simulation on :$port spawned (live)"
+  if curl -fsS -m 1800 -X POST "http://127.0.0.1:$port/spawn" -d '{"n":50,"mode":"live"}' > /dev/null 2>&1; then
+    log "simulation on :$port spawned (live)"
+  else
+    log "simulation on :$port failed to spawn; see data/logs"
+  fi
+}
+
+# The simulations pick real data or their synthetic fixture when they start, so they wait for the recorder's
+# first camera snapshot (a fresh container has none).
+wait_for_data() {
+  local tries=0
+  until [ -n "$(ls -A "$ROOT/data/raw/jamcams" 2>/dev/null)" ]; do
+    tries=$((tries + 1))
+    [ "$tries" -ge 60 ] && { log "no camera data after 5 min; starting the simulations anyway"; return; }
+    sleep 5
+  done
 }
 
 trap 'log "stopping"; kill 0' INT TERM
 
 keep recorder python3 recorder/record.py
-keep vix env MULTIVERSE_PORT=8349 python3 services/multiverse/server.py
-keep sim env MULTIVERSE_PORT=8449 MULTIVERSE_SEED=seeds/central-london.json python3 services/multiverse/server.py
 keep city python3 services/city/server.py
 keep exchange python3 services/city/venue_server.py
-(spawn 8349; spawn 8449) &
+(
+  wait_for_data
+  keep vix env MULTIVERSE_PORT=8349 python3 services/multiverse/server.py
+  keep sim env MULTIVERSE_PORT=8449 MULTIVERSE_SEED=seeds/central-london.json python3 services/multiverse/server.py
+  spawn 8349
+  spawn 8449
+) &
 
 log "website on :$PORT"
 cd apps/stream
